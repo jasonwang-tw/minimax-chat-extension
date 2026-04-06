@@ -2,6 +2,7 @@
 
 let currentImageData = null;  // 目前附加的圖片
 let currentImageMode = null;  // 'screenshot' | 'region' | 'upload' | 'ocr'
+let pendingRegionMode = null; // 區域截圖完成後要套用的 mode（null = 'region'）
 
 document.addEventListener('DOMContentLoaded', async () => {
   const messageInput = document.getElementById('messageInput');
@@ -14,11 +15,16 @@ document.addEventListener('DOMContentLoaded', async () => {
   const historyList = document.getElementById('historyList');
   const toggleHistoryBtn = document.getElementById('toggleHistory');
   const clearHistoryBtn = document.getElementById('clearHistory');
+  const batchSelectBtn = document.getElementById('batchSelectBtn');
+  const batchActionBar = document.getElementById('batchActionBar');
+  const selectAllCheckbox = document.getElementById('selectAllCheckbox');
+  const batchDeleteBtn = document.getElementById('batchDeleteBtn');
   const openSettingsBtn = document.getElementById('openSettings');
   const screenshotBtn = document.getElementById('screenshotBtn');
   const regionScreenshotBtn = document.getElementById('regionScreenshotBtn');
   const uploadBtn = document.getElementById('uploadBtn');
   const ocrBtn = document.getElementById('ocrBtn');
+  const ocrPicker = document.getElementById('ocrPicker');
   const translateBtn = document.getElementById('translateBtn');
   const translatePanel = document.getElementById('translatePanel');
   const sourceLangSelect = document.getElementById('sourceLang');
@@ -40,6 +46,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   let currentSession = null;
   let isLoading = false;
   let translateEnabled = false;
+  let batchSelectMode = false;
+  let selectedIds = new Set();
 
   // Region screenshot state
   let regionStartX = 0, regionStartY = 0;
@@ -124,20 +132,63 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   // ── OCR 文字辨識 ────────────────────────────────────────
-  ocrBtn.addEventListener('click', () => {
+  ocrBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
     if (!currentImageData) {
-      // 先觸發上傳
-      imageInput.click();
-      // 監聽一次上傳完成後自動標記 OCR 模式
-      imageInput.addEventListener('change', () => {
-        currentImageMode = 'ocr';
-        if (imageModeLabel) imageModeLabel.textContent = 'OCR';
-      }, { once: true });
+      // 無圖時顯示來源選擇器
+      ocrPicker.classList.toggle('hidden');
     } else {
+      // 已有圖片：直接切換為 OCR 模式
+      setImageData(currentImageData, 'ocr');
+      ocrPicker.classList.add('hidden');
+    }
+  });
+
+  // OCR picker：上傳圖片
+  document.getElementById('ocrUploadOpt').addEventListener('click', () => {
+    ocrPicker.classList.add('hidden');
+    imageInput.click();
+    imageInput.addEventListener('change', () => {
       currentImageMode = 'ocr';
       if (imageModeLabel) imageModeLabel.textContent = 'OCR';
-      updateSendButton();
+    }, { once: true });
+  });
+
+  // OCR picker：全頁截圖
+  document.getElementById('ocrScreenshotOpt').addEventListener('click', async () => {
+    ocrPicker.classList.add('hidden');
+    try {
+      statusText.textContent = '截圖中...';
+      statusText.classList.remove('error');
+      const dataUrl = await chrome.tabs.captureVisibleTab(null, { format: 'png' });
+      setImageData(dataUrl, 'ocr');
+      statusText.textContent = '';
+    } catch (error) {
+      statusText.textContent = '截圖失敗：' + error.message;
+      statusText.classList.add('error');
     }
+  });
+
+  // OCR picker：區域截圖
+  document.getElementById('ocrRegionOpt').addEventListener('click', async () => {
+    ocrPicker.classList.add('hidden');
+    try {
+      statusText.textContent = '擷取畫面中...';
+      statusText.classList.remove('error');
+      const dataUrl = await chrome.tabs.captureVisibleTab(null, { format: 'png' });
+      fullScreenshotData = dataUrl;
+      pendingRegionMode = 'ocr';
+      openRegionModal(dataUrl);
+      statusText.textContent = '';
+    } catch (error) {
+      statusText.textContent = '截圖失敗：' + error.message;
+      statusText.classList.add('error');
+    }
+  });
+
+  // 點擊其他地方關閉 OCR picker
+  document.addEventListener('click', () => {
+    ocrPicker.classList.add('hidden');
   });
 
   // ── 翻譯切換 ───────────────────────────────────────────
@@ -163,11 +214,62 @@ document.addEventListener('DOMContentLoaded', async () => {
       await chrome.runtime.sendMessage({ type: 'CLEAR_HISTORY' });
       sessions = [];
       currentSession = null;
+      exitBatchMode();
       renderHistory();
       chatMessages.innerHTML = '';
       emptyState.classList.remove('hidden');
     }
   });
+
+  // ── 批次選取 ───────────────────────────────────────────
+  batchSelectBtn.addEventListener('click', () => {
+    batchSelectMode = !batchSelectMode;
+    selectedIds.clear();
+    batchSelectBtn.textContent = batchSelectMode ? '取消' : '選取';
+    batchActionBar.classList.toggle('hidden', !batchSelectMode);
+    renderHistory();
+  });
+
+  selectAllCheckbox.addEventListener('change', () => {
+    if (selectAllCheckbox.checked) {
+      sessions.forEach(s => selectedIds.add(s.id));
+    } else {
+      selectedIds.clear();
+    }
+    updateBatchDeleteBtn();
+    renderHistory();
+  });
+
+  batchDeleteBtn.addEventListener('click', async () => {
+    if (selectedIds.size === 0) return;
+    if (confirm(`確定要刪除 ${selectedIds.size} 筆紀錄？`)) {
+      for (const id of selectedIds) {
+        await chrome.runtime.sendMessage({ type: 'DELETE_SESSION', data: { sessionId: id } });
+      }
+      if (currentSession && selectedIds.has(currentSession.id)) {
+        currentSession = null;
+        chatMessages.innerHTML = '';
+        emptyState.classList.remove('hidden');
+      }
+      sessions = sessions.filter(s => !selectedIds.has(s.id));
+      exitBatchMode();
+      renderHistory();
+    }
+  });
+
+  function exitBatchMode() {
+    batchSelectMode = false;
+    selectedIds.clear();
+    batchSelectBtn.textContent = '選取';
+    batchActionBar.classList.add('hidden');
+  }
+
+  function updateBatchDeleteBtn() {
+    batchDeleteBtn.textContent = `刪除所選 (${selectedIds.size})`;
+    batchDeleteBtn.disabled = selectedIds.size === 0;
+    selectAllCheckbox.indeterminate = selectedIds.size > 0 && selectedIds.size < sessions.length;
+    selectAllCheckbox.checked = sessions.length > 0 && selectedIds.size === sessions.length;
+  }
 
   historyPanel.addEventListener('click', (e) => {
     if (e.target === historyPanel) {
@@ -269,7 +371,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     const w = Math.abs(regionEndX - regionStartX) * scaleX;
     const h = Math.abs(regionEndY - regionStartY) * scaleY;
 
-    // Crop from full screenshot using ratio
     const img = new Image();
     img.onload = () => {
       const fullCanvas = document.createElement('canvas');
@@ -279,7 +380,9 @@ document.addEventListener('DOMContentLoaded', async () => {
       const ctx = fullCanvas.getContext('2d');
       ctx.drawImage(img, x * displayRatio, y * displayRatio, fullCanvas.width, fullCanvas.height, 0, 0, fullCanvas.width, fullCanvas.height);
       const croppedData = fullCanvas.toDataURL('image/png');
-      setImageData(croppedData, 'region');
+      const mode = pendingRegionMode || 'region';
+      pendingRegionMode = null;
+      setImageData(croppedData, mode);
     };
     img.src = fullScreenshotData;
   }
@@ -364,13 +467,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     historyList.innerHTML = '';
     if (sessions.length === 0) {
       historyList.innerHTML = '<p class="history-empty">尚無歷史紀錄</p>';
+      if (batchSelectMode) exitBatchMode();
       return;
     }
 
     sessions.slice().reverse().forEach((session, reversedIdx) => {
       const originalIdx = sessions.length - 1 - reversedIdx;
       const div = document.createElement('div');
-      div.className = 'history-item';
+      div.className = 'history-item' + (batchSelectMode && selectedIds.has(session.id) ? ' selected' : '');
 
       const firstUserMsg = session.messages.find(m => m.role === 'user');
       const hasImage = session.messages.some(m => m.image);
@@ -379,47 +483,71 @@ document.addEventListener('DOMContentLoaded', async () => {
         : '新對話';
       const displayName = session.name || (defaultPreview + (hasImage ? ' [圖]' : ''));
 
-      div.innerHTML = `
-        <div class="history-item-body">
-          <p class="history-preview" title="${escapeHtml(displayName)}">${escapeHtml(displayName)}</p>
-          <span class="history-time">${formatTime(session.timestamp)}</span>
-        </div>
-        <div class="history-item-actions">
-          <button class="btn-history-rename" title="重新命名" data-id="${session.id}">
-            <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-          </button>
-          <button class="btn-history-delete" title="刪除此紀錄" data-id="${session.id}">
-            <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>
-          </button>
-        </div>
-      `;
-
-      // 點擊主體載入 session
-      div.querySelector('.history-item-body').addEventListener('click', () => loadSession(originalIdx));
-
-      // 重新命名
-      div.querySelector('.btn-history-rename').addEventListener('click', (e) => {
-        e.stopPropagation();
-        startRenameSession(session, div);
-      });
-
-      // 刪除單一 session
-      div.querySelector('.btn-history-delete').addEventListener('click', async (e) => {
-        e.stopPropagation();
-        if (confirm('確定要刪除此筆紀錄？')) {
-          await chrome.runtime.sendMessage({ type: 'DELETE_SESSION', data: { sessionId: session.id } });
-          sessions = sessions.filter(s => s.id !== session.id);
-          if (currentSession && currentSession.id === session.id) {
-            currentSession = null;
-            chatMessages.innerHTML = '';
-            emptyState.classList.remove('hidden');
+      if (batchSelectMode) {
+        // 批次選取模式：顯示 checkbox
+        div.innerHTML = `
+          <label class="history-checkbox-label">
+            <input type="checkbox" class="history-checkbox" ${selectedIds.has(session.id) ? 'checked' : ''}>
+          </label>
+          <div class="history-item-body">
+            <p class="history-preview" title="${escapeHtml(displayName)}">${escapeHtml(displayName)}</p>
+            <span class="history-time">${formatTime(session.timestamp)}</span>
+          </div>
+        `;
+        div.querySelector('.history-checkbox').addEventListener('change', (e) => {
+          if (e.target.checked) {
+            selectedIds.add(session.id);
+          } else {
+            selectedIds.delete(session.id);
           }
-          renderHistory();
-        }
-      });
+          div.classList.toggle('selected', e.target.checked);
+          updateBatchDeleteBtn();
+        });
+        div.querySelector('.history-item-body').addEventListener('click', () => {
+          const cb = div.querySelector('.history-checkbox');
+          cb.checked = !cb.checked;
+          cb.dispatchEvent(new Event('change'));
+        });
+      } else {
+        // 一般模式
+        div.innerHTML = `
+          <div class="history-item-body">
+            <p class="history-preview" title="${escapeHtml(displayName)}">${escapeHtml(displayName)}</p>
+            <span class="history-time">${formatTime(session.timestamp)}</span>
+          </div>
+          <div class="history-item-actions">
+            <button class="btn-history-rename" title="重新命名" data-id="${session.id}">
+              <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+            </button>
+            <button class="btn-history-delete" title="刪除此紀錄" data-id="${session.id}">
+              <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+            </button>
+          </div>
+        `;
+        div.querySelector('.history-item-body').addEventListener('click', () => loadSession(originalIdx));
+        div.querySelector('.btn-history-rename').addEventListener('click', (e) => {
+          e.stopPropagation();
+          startRenameSession(session, div);
+        });
+        div.querySelector('.btn-history-delete').addEventListener('click', async (e) => {
+          e.stopPropagation();
+          if (confirm('確定要刪除此筆紀錄？')) {
+            await chrome.runtime.sendMessage({ type: 'DELETE_SESSION', data: { sessionId: session.id } });
+            sessions = sessions.filter(s => s.id !== session.id);
+            if (currentSession && currentSession.id === session.id) {
+              currentSession = null;
+              chatMessages.innerHTML = '';
+              emptyState.classList.remove('hidden');
+            }
+            renderHistory();
+          }
+        });
+      }
 
       historyList.appendChild(div);
     });
+
+    if (batchSelectMode) updateBatchDeleteBtn();
   }
 
   function startRenameSession(session, itemEl) {
