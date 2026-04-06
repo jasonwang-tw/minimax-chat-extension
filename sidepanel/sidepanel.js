@@ -729,7 +729,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       html += `<img src="${imageData}" class="message-image" alt="圖片">`;
     }
     html += `${escapeHtml(content).replace(/\n/g, '<br>')}</div>`;
-    html += `<button class="btn-tts" title="語音播放" data-text="${escapeAttr(content)}" data-lang="${role === 'user' ? (sourceLangSelect ? sourceLangSelect.value : 'zh-TW') : 'zh-TW'}">
+    html += `<button class="btn-tts" title="語音播放" data-text="${escapeAttr(content)}" data-lang="${role === 'user' ? (sourceLangSelect ? sourceLangSelect.value : 'zh-TW') : (targetLangSelect ? targetLangSelect.value : 'zh-TW')}">
       <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
     </button>`;
     div.innerHTML = html;
@@ -739,6 +739,51 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   // ── TTS ─────────────────────────────────────────────────
+  // 語言代碼對應完整 BCP-47（Web Speech API 需要完整代碼才能選到正確聲音）
+  const TTS_LANG_MAP = {
+    'zh-TW': 'zh-TW',
+    'zh-CN': 'zh-CN',
+    'en':    'en-US',
+    'ja':    'ja-JP',
+    'ko':    'ko-KR',
+    'fr':    'fr-FR',
+    'de':    'de-DE',
+    'es':    'es-ES',
+    'th':    'th-TH',
+    'vi':    'vi-VN'
+  };
+
+  function getBestVoice(fullLang) {
+    const voices = window.speechSynthesis.getVoices();
+    if (!voices.length) return null;
+    // 完全匹配
+    const exact = voices.find(v => v.lang === fullLang);
+    if (exact) return exact;
+    // 語系前綴匹配（如 en-US 找不到時，用 en-GB 等）
+    const prefix = fullLang.split('-')[0];
+    return voices.find(v => v.lang.startsWith(prefix)) || null;
+  }
+
+  function speakWithLang(text, lang) {
+    const fullLang = TTS_LANG_MAP[lang] || lang;
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = fullLang;
+    utterance.rate = 1.0;
+
+    const voice = getBestVoice(fullLang);
+    if (voice) utterance.voice = voice;
+
+    return utterance;
+  }
+
+  // 預載聲音清單（部分瀏覽器非同步載入）
+  if (typeof window.speechSynthesis !== 'undefined') {
+    window.speechSynthesis.getVoices();
+    window.speechSynthesis.addEventListener('voiceschanged', () => {
+      window.speechSynthesis.getVoices(); // 觸發快取
+    });
+  }
+
   function handleTTS(e) {
     const btn = e.currentTarget;
     const text = btn.dataset.text;
@@ -751,9 +796,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       return;
     }
 
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = lang;
-    utterance.rate = 1.0;
+    const utterance = speakWithLang(text, lang);
     btn.classList.add('speaking');
     utterance.onend = () => btn.classList.remove('speaking');
     utterance.onerror = () => btn.classList.remove('speaking');
