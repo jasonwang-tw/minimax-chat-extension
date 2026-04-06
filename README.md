@@ -4,7 +4,7 @@
 
 ## 版本
 
-**v1.2.0**
+**v1.3.0**
 
 ## 功能特色
 
@@ -23,11 +23,13 @@
 - **翻譯模式**：切換按鈕開啟雙向翻譯，支援 10 種語言（中文、英文、日文、韓文、法文、德文、西班牙文、葡萄牙文、俄文、阿拉伯文）
 
 ### 語音
-- **TTS 語音輸出**：每則 AI 回應旁有小喇叭按鈕，使用 Web Speech API 朗讀
+- **TTS 語音輸出**：每則訊息旁有小喇叭按鈕，使用 Google Translate TTS 高品質朗讀
+- **自動語言偵測**：TTS 依訊息內容自動切換語言（中文/英文/日文/韓文等）
 
 ### 歷史紀錄
 - 對話 Session 自動保存（最多 50 筆）
 - **個別刪除**：每筆紀錄旁有垃圾桶按鈕
+- **批次刪除**：選取模式可勾選多筆一次刪除，支援全選
 - **重新命名**：點擊編輯圖示可 inline 重新命名 Session
 
 ### 其他
@@ -69,10 +71,21 @@ npm run build:css
 - **Manifest V3**：最新 Chrome 擴充功能格式
 - **Service Worker**：背景處理 API 請求（MiniMax 文字 / Gemini 圖片分流）
 - **Side Panel**：側邊欄 UI
-- **Web Speech API**：TTS 語音輸出
+- **Google Translate TTS**：高品質多語言語音輸出，失敗時 fallback 至 Web Speech API
 - **TailwindCSS + SCSS**：樣式設計
 
 ## Changelog
+
+## [1.3.0] - 2026-04-06
+### Added
+- Session 批次刪除：選取模式、全選/取消全選、一次刪除多筆
+- OCR 支援全頁截圖與區域截圖（原本只限上傳圖片）
+### Changed
+- TTS 改用 Google Translate TTS endpoint，音質與瀏覽器版 Google 翻譯一致
+- TTS 語言自動偵測：依訊息內容（Unicode 字元範圍）切換語言，不再固定使用英文
+### Fixed
+- AI 回覆 TTS 語言錯誤：翻譯關閉時改用 sourceLang，不再固定為 targetLang
+- 歷史 Session 載入時 TTS 語言改用 detectLang() 自動偵測
 
 ## [1.2.0] - 2026-04-06
 ### Added
