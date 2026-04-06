@@ -669,8 +669,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     const fontSize = 12 + annStrokeSize * 2;
     ctx.font = `bold ${fontSize}px Arial,sans-serif`;
     const tw = ctx.measureText(text).width;
-    ctx.fillStyle = 'rgba(0,0,0,0.55)';
-    ctx.fillRect(annTextPos.x - 2, annTextPos.y - fontSize, tw + 8, fontSize + 6);
     ctx.fillStyle = annColor;
     ctx.fillText(text, annTextPos.x + 2, annTextPos.y);
   }
