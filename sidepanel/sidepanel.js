@@ -86,12 +86,19 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   });
 
+  // 截圖統一透過 background，支援跨視窗
+  async function captureTab() {
+    const res = await chrome.runtime.sendMessage({ type: 'CAPTURE_TAB' });
+    if (!res.success) throw new Error(res.error);
+    return res.dataUrl;
+  }
+
   // ── 全頁截圖 ──────────────────────────────────────────
   screenshotBtn.addEventListener('click', async () => {
     try {
       statusText.textContent = '截圖中...';
       statusText.classList.remove('error');
-      const dataUrl = await chrome.tabs.captureVisibleTab(null, { format: 'png' });
+      const dataUrl = await captureTab();
       setImageData(dataUrl, 'screenshot');
       statusText.textContent = '';
     } catch (error) {
@@ -106,7 +113,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     try {
       statusText.textContent = '擷取畫面中...';
       statusText.classList.remove('error');
-      const dataUrl = await chrome.tabs.captureVisibleTab(null, { format: 'png' });
+      const dataUrl = await captureTab();
       fullScreenshotData = dataUrl;
       openRegionModal(dataUrl);
       statusText.textContent = '';
@@ -162,7 +169,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     try {
       statusText.textContent = '截圖中...';
       statusText.classList.remove('error');
-      const dataUrl = await chrome.tabs.captureVisibleTab(null, { format: 'png' });
+      const dataUrl = await captureTab();
       setImageData(dataUrl, 'ocr');
       statusText.textContent = '';
     } catch (error) {
@@ -177,7 +184,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     try {
       statusText.textContent = '擷取畫面中...';
       statusText.classList.remove('error');
-      const dataUrl = await chrome.tabs.captureVisibleTab(null, { format: 'png' });
+      const dataUrl = await captureTab();
       fullScreenshotData = dataUrl;
       pendingRegionMode = 'ocr';
       openRegionModal(dataUrl);

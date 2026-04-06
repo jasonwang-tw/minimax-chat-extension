@@ -82,6 +82,23 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message.type === 'CAPTURE_TAB') {
+    // 取得使用者最後聚焦的一般視窗（排除 side panel 本身）
+    chrome.windows.getLastFocused({ windowTypes: ['normal'] }, async (win) => {
+      if (chrome.runtime.lastError || !win) {
+        sendResponse({ success: false, error: '找不到可截圖的視窗' });
+        return;
+      }
+      try {
+        const dataUrl = await chrome.tabs.captureVisibleTab(win.id, { format: 'png' });
+        sendResponse({ success: true, dataUrl });
+      } catch (err) {
+        sendResponse({ success: false, error: err.message });
+      }
+    });
+    return true;
+  }
+
   if (message.type === 'TTS_FETCH') {
     fetchGoogleTTS(message.data.text, message.data.lang)
       .then(base64 => sendResponse({ success: true, base64 }))
