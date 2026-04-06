@@ -612,17 +612,204 @@ textarea:disabled {
   display: none;
 }
 
-.region-modal-footer {
+/* 懸浮確認列（不佔版面空間） */
+.region-float-bar {
+  position: absolute;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
   display: flex;
   gap: 8px;
-  justify-content: center;
-  padding: 10px 14px;
+  background: rgba(17, 24, 39, 0.88);
+  padding: 8px 14px;
+  border-radius: 10px;
+  backdrop-filter: blur(6px);
+  border: 1px solid rgba(75, 85, 99, 0.5);
+  z-index: 10;
+  white-space: nowrap;
+}
+.region-float-bar.hidden {
+  display: none;
+}
+
+/* ── 標記階段 ─────────────────────────── */
+.annotation-phase {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-height: 0;
+}
+.annotation-phase.hidden {
+  display: none;
+}
+
+.ann-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 6px 8px;
   background: var(--bg-dark);
-  border-top: 1px solid var(--border-color);
+  border-bottom: 1px solid var(--border-color);
+  flex-wrap: wrap;
   flex-shrink: 0;
 }
-.region-modal-footer.hidden {
+
+.ann-divider {
+  width: 1px;
+  height: 20px;
+  background: var(--border-color);
+  margin: 0 3px;
+  flex-shrink: 0;
+  align-self: center;
+}
+
+.ann-tool-btn {
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s;
+  flex-shrink: 0;
+  padding: 0;
+}
+.ann-tool-btn:hover {
+  background: var(--bg-card);
+  color: var(--text-primary);
+}
+.ann-tool-btn.active {
+  background: var(--primary);
+  color: white;
+  border-color: var(--primary-dark);
+}
+
+.ann-color-btn {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: transform 0.15s, border-color 0.15s;
+}
+.ann-color-btn:hover {
+  transform: scale(1.2);
+}
+.ann-color-btn.active {
+  border-color: white;
+  transform: scale(1.15);
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.3);
+}
+
+.ann-size-btn {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s;
+  flex-shrink: 0;
+}
+.ann-size-btn:hover {
+  background: var(--bg-card);
+}
+.ann-size-btn.active {
+  background: var(--bg-card);
+  border-color: var(--primary);
+}
+.ann-size-dot {
+  display: block;
+  background: var(--text-secondary);
+  border-radius: 50%;
+}
+.ann-size-btn.active .ann-size-dot {
+  background: var(--text-primary);
+}
+
+.ann-action-btn {
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: 5px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s;
+  flex-shrink: 0;
+}
+.ann-action-btn:hover {
+  background: var(--bg-card);
+  color: var(--text-primary);
+}
+
+.ann-canvas-wrapper {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+  background: #0a0a0a;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+}
+
+#annBgCanvas,
+#annDrawCanvas {
+  position: absolute;
+  display: block;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+
+#annDrawCanvas {
+  cursor: crosshair;
+}
+
+.ann-text-input {
+  position: absolute;
+  background: rgba(0, 0, 0, 0.6);
+  border: 1px solid var(--primary);
+  border-radius: 3px;
+  font-size: 14px;
+  font-weight: bold;
+  padding: 2px 6px;
+  outline: none;
+  min-width: 80px;
+  max-width: 200px;
+  z-index: 20;
+}
+.ann-text-input.hidden {
   display: none;
+}
+
+.ann-action-bar {
+  position: absolute;
+  bottom: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 8px;
+  background: rgba(17, 24, 39, 0.88);
+  padding: 8px 14px;
+  border-radius: 10px;
+  backdrop-filter: blur(6px);
+  border: 1px solid rgba(75, 85, 99, 0.5);
+  z-index: 10;
+  white-space: nowrap;
 }
 
 .btn-primary-sm {

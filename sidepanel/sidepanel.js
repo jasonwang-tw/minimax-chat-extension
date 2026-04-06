@@ -35,12 +35,23 @@ document.addEventListener('DOMContentLoaded', async () => {
   const removeImageBtn = document.getElementById('removeImage');
   const imageModeLabel = document.getElementById('imageModeLabel');
   const regionModal = document.getElementById('regionModal');
+  const regionModalTitle = document.getElementById('regionModalTitle');
   const regionCanvas = document.getElementById('regionCanvas');
   const cancelRegionBtn = document.getElementById('cancelRegion');
   const confirmRegionBtn = document.getElementById('confirmRegion');
   const redoRegionBtn = document.getElementById('redoRegion');
   const selectionRect = document.getElementById('selectionRect');
   const regionConfirmBar = document.getElementById('regionConfirmBar');
+  const selectionPhaseEl = document.getElementById('selectionPhase');
+  const annotationPhaseEl = document.getElementById('annotationPhase');
+  const annCanvasWrapper = document.getElementById('annCanvasWrapper');
+  const annBgCanvas = document.getElementById('annBgCanvas');
+  const annDrawCanvas = document.getElementById('annDrawCanvas');
+  const annTextInput = document.getElementById('annTextInput');
+  const backToSelectBtn = document.getElementById('backToSelect');
+  const confirmAnnotationBtn = document.getElementById('confirmAnnotation');
+  const annUndoBtn = document.getElementById('annUndo');
+  const annClearBtn = document.getElementById('annClear');
 
   let sessions = [];
   let currentSession = null;
@@ -57,6 +68,17 @@ document.addEventListener('DOMContentLoaded', async () => {
   let isDragging = false;
   let fullScreenshotData = null;
   let regionConfirmed = false;
+
+  // Annotation state
+  let annTool = 'pen';
+  let annColor = '#ef4444';
+  let annStrokeSize = 2;
+  let annNumberCounter = 1;
+  let annHistory = [];
+  let annIsDrawing = false;
+  let annStartX = 0, annStartY = 0;
+  let annPreviewState = null;
+  let annTextPos = { x: 0, y: 0 };
 
   // 檢查 API Key
   await checkApiKey();
@@ -293,15 +315,13 @@ document.addEventListener('DOMContentLoaded', async () => {
   // ── Region Modal ────────────────────────────────────────
   function openRegionModal(dataUrl) {
     regionModal.classList.remove('hidden');
-    regionConfirmBar.classList.add('hidden');
-    selectionRect.classList.add('hidden');
+    resetRegionModal();
     regionConfirmed = false;
 
     const img = new Image();
     img.onload = () => {
-      const wrapper = regionCanvas.parentElement;
-      const maxW = wrapper.clientWidth || 400;
-      const maxH = wrapper.clientHeight || 400;
+      const maxW = selectionPhaseEl.clientWidth || 400;
+      const maxH = selectionPhaseEl.clientHeight || 400;
       const scale = Math.min(maxW / img.width, maxH / img.height, 1);
       regionCanvas.width = img.width * scale;
       regionCanvas.height = img.height * scale;
@@ -314,6 +334,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   cancelRegionBtn.addEventListener('click', () => {
     regionModal.classList.add('hidden');
     fullScreenshotData = null;
+    pendingRegionMode = null;
+    resetRegionModal();
+    annHideTextInput();
   });
 
   redoRegionBtn.addEventListener('click', () => {
@@ -322,10 +345,312 @@ document.addEventListener('DOMContentLoaded', async () => {
     regionConfirmed = false;
   });
 
+  // 確認選取 → 進入標記階段
   confirmRegionBtn.addEventListener('click', () => {
-    cropRegion();
-    regionModal.classList.add('hidden');
+    enterAnnotationPhase();
   });
+
+  // 標記階段：返回重新選取
+  backToSelectBtn.addEventListener('click', () => {
+    annotationPhaseEl.classList.add('hidden');
+    selectionPhaseEl.classList.remove('hidden');
+    regionModalTitle.textContent = '拖曳選取截圖範圍';
+    annHideTextInput();
+    annIsDrawing = false;
+  });
+
+  // 標記階段：確認截圖
+  confirmAnnotationBtn.addEventListener('click', () => {
+    annFinalizeText();
+    const merged = document.createElement('canvas');
+    merged.width = annBgCanvas.width;
+    merged.height = annBgCanvas.height;
+    const ctx = merged.getContext('2d');
+    ctx.drawImage(annBgCanvas, 0, 0);
+    ctx.drawImage(annDrawCanvas, 0, 0);
+    const finalData = merged.toDataURL('image/png');
+    const mode = pendingRegionMode || 'region';
+    pendingRegionMode = null;
+    regionModal.classList.add('hidden');
+    resetRegionModal();
+    setImageData(finalData, mode);
+  });
+
+  // 工具選擇
+  document.querySelectorAll('.ann-tool-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.ann-tool-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      annTool = btn.dataset.tool;
+      annDrawCanvas.style.cursor = annTool === 'text' ? 'text' : 'crosshair';
+      annHideTextInput();
+    });
+  });
+
+  // 顏色選擇
+  document.querySelectorAll('.ann-color-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.ann-color-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      annColor = btn.dataset.color;
+      annTextInput.style.color = annColor;
+    });
+  });
+
+  // 筆粗選擇
+  document.querySelectorAll('.ann-size-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.ann-size-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      annStrokeSize = parseInt(btn.dataset.size);
+    });
+  });
+
+  // 復原
+  annUndoBtn.addEventListener('click', annUndo);
+
+  // 清除
+  annClearBtn.addEventListener('click', () => {
+    annDrawCanvas.getContext('2d').clearRect(0, 0, annDrawCanvas.width, annDrawCanvas.height);
+    annHistory = [];
+    annNumberCounter = 1;
+  });
+
+  // Cmd/Ctrl+Z 復原
+  document.addEventListener('keydown', (e) => {
+    if ((e.metaKey || e.ctrlKey) && e.key === 'z' && !annotationPhaseEl.classList.contains('hidden')) {
+      e.preventDefault();
+      annUndo();
+    }
+  });
+
+  // ── Annotation canvas events ────────────────────────────
+  annDrawCanvas.addEventListener('mousedown', (e) => {
+    const pos = annGetPos(e);
+    if (annTool === 'text') {
+      annShowTextInput(pos.x, pos.y, e.clientX, e.clientY);
+      return;
+    }
+    if (annTool === 'number') {
+      annSaveState();
+      annDrawNumber(annDrawCanvas.getContext('2d'), pos.x, pos.y, annNumberCounter++);
+      return;
+    }
+    annIsDrawing = true;
+    annStartX = pos.x;
+    annStartY = pos.y;
+    const ctx = annDrawCanvas.getContext('2d');
+    if (annTool === 'pen') {
+      annSaveState();
+      ctx.beginPath();
+      ctx.moveTo(pos.x, pos.y);
+      annSetStyle(ctx);
+    } else {
+      annPreviewState = ctx.getImageData(0, 0, annDrawCanvas.width, annDrawCanvas.height);
+    }
+  });
+
+  annDrawCanvas.addEventListener('mousemove', (e) => {
+    if (!annIsDrawing) return;
+    const pos = annGetPos(e);
+    const ctx = annDrawCanvas.getContext('2d');
+    if (annTool === 'pen') {
+      annSetStyle(ctx);
+      ctx.lineTo(pos.x, pos.y);
+      ctx.stroke();
+      return;
+    }
+    if (annPreviewState) ctx.putImageData(annPreviewState, 0, 0);
+    annSetStyle(ctx);
+    if (annTool === 'circle') annDrawEllipse(ctx, annStartX, annStartY, pos.x, pos.y);
+    else if (annTool === 'rect') annDrawRect(ctx, annStartX, annStartY, pos.x, pos.y);
+    else if (annTool === 'arrow') annDrawArrow(ctx, annStartX, annStartY, pos.x, pos.y);
+  });
+
+  function annFinishDrag(e) {
+    if (!annIsDrawing) return;
+    annIsDrawing = false;
+    if (annTool !== 'pen' && annPreviewState) {
+      const pos = annGetPos(e);
+      if (Math.abs(pos.x - annStartX) > 3 || Math.abs(pos.y - annStartY) > 3) {
+        annHistory.push(annPreviewState);
+        if (annHistory.length > 30) annHistory.shift();
+      } else {
+        annDrawCanvas.getContext('2d').putImageData(annPreviewState, 0, 0);
+      }
+      annPreviewState = null;
+    }
+  }
+  annDrawCanvas.addEventListener('mouseup', annFinishDrag);
+  annDrawCanvas.addEventListener('mouseleave', annFinishDrag);
+
+  // Text input
+  annTextInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); annFinalizeText(); }
+    if (e.key === 'Escape') { annHideTextInput(); }
+    e.stopPropagation();
+  });
+  annTextInput.addEventListener('blur', () => {
+    setTimeout(() => annFinalizeText(), 50);
+  });
+
+  // ── Annotation helpers ───────────────────────────────────
+  function enterAnnotationPhase() {
+    const scaleX = regionCanvas.width / (regionCanvas.clientWidth || regionCanvas.width);
+    const scaleY = regionCanvas.height / (regionCanvas.clientHeight || regionCanvas.height);
+    const x = Math.min(regionStartX, regionEndX) * scaleX;
+    const y = Math.min(regionStartY, regionEndY) * scaleY;
+    const w = Math.abs(regionEndX - regionStartX) * scaleX;
+    const h = Math.abs(regionEndY - regionStartY) * scaleY;
+
+    const img = new Image();
+    img.onload = () => {
+      const dRatio = img.width / regionCanvas.width;
+      const cropX = x * dRatio, cropY = y * dRatio;
+      const cropW = w * dRatio, cropH = h * dRatio;
+
+      selectionPhaseEl.classList.add('hidden');
+      annotationPhaseEl.classList.remove('hidden');
+      regionModalTitle.textContent = '標記截圖內容';
+
+      requestAnimationFrame(() => {
+        const mw = annCanvasWrapper.clientWidth || 360;
+        const mh = annCanvasWrapper.clientHeight || 400;
+        const scale = Math.min(mw / cropW, mh / cropH, 1);
+        const cw = Math.round(cropW * scale);
+        const ch = Math.round(cropH * scale);
+
+        annBgCanvas.width = cw; annBgCanvas.height = ch;
+        annDrawCanvas.width = cw; annDrawCanvas.height = ch;
+        annBgCanvas.getContext('2d').drawImage(img, cropX, cropY, cropW, cropH, 0, 0, cw, ch);
+        annDrawCanvas.getContext('2d').clearRect(0, 0, cw, ch);
+
+        annHistory = [];
+        annNumberCounter = 1;
+        annHideTextInput();
+        annTextInput.style.color = annColor;
+      });
+    };
+    img.src = fullScreenshotData;
+  }
+
+  function resetRegionModal() {
+    selectionPhaseEl.classList.remove('hidden');
+    annotationPhaseEl.classList.add('hidden');
+    regionModalTitle.textContent = '拖曳選取截圖範圍';
+    regionConfirmBar.classList.add('hidden');
+    selectionRect.classList.add('hidden');
+  }
+
+  function annGetPos(e) {
+    const rect = annDrawCanvas.getBoundingClientRect();
+    return {
+      x: (e.clientX - rect.left) * (annDrawCanvas.width / rect.width),
+      y: (e.clientY - rect.top) * (annDrawCanvas.height / rect.height)
+    };
+  }
+
+  function annSetStyle(ctx) {
+    ctx.strokeStyle = annColor;
+    ctx.lineWidth = annStrokeSize;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+  }
+
+  function annSaveState() {
+    const s = annDrawCanvas.getContext('2d').getImageData(0, 0, annDrawCanvas.width, annDrawCanvas.height);
+    annHistory.push(s);
+    if (annHistory.length > 30) annHistory.shift();
+  }
+
+  function annUndo() {
+    if (annHistory.length === 0) return;
+    const prev = annHistory.pop();
+    annDrawCanvas.getContext('2d').putImageData(prev, 0, 0);
+  }
+
+  function annDrawEllipse(ctx, x1, y1, x2, y2) {
+    const rx = Math.abs(x2 - x1) / 2, ry = Math.abs(y2 - y1) / 2;
+    if (rx < 1 || ry < 1) return;
+    ctx.beginPath();
+    ctx.ellipse((x1 + x2) / 2, (y1 + y2) / 2, rx, ry, 0, 0, 2 * Math.PI);
+    ctx.stroke();
+  }
+
+  function annDrawRect(ctx, x1, y1, x2, y2) {
+    ctx.beginPath();
+    ctx.strokeRect(Math.min(x1, x2), Math.min(y1, y2), Math.abs(x2 - x1), Math.abs(y2 - y1));
+  }
+
+  function annDrawArrow(ctx, x1, y1, x2, y2) {
+    const dx = x2 - x1, dy = y2 - y1;
+    const len = Math.sqrt(dx * dx + dy * dy);
+    if (len < 5) return;
+    const angle = Math.atan2(dy, dx);
+    const head = Math.min(18, len * 0.35);
+    const spread = Math.PI / 6;
+    ctx.beginPath();
+    ctx.moveTo(x1, y1); ctx.lineTo(x2, y2);
+    ctx.moveTo(x2, y2);
+    ctx.lineTo(x2 - head * Math.cos(angle - spread), y2 - head * Math.sin(angle - spread));
+    ctx.moveTo(x2, y2);
+    ctx.lineTo(x2 - head * Math.cos(angle + spread), y2 - head * Math.sin(angle + spread));
+    ctx.stroke();
+  }
+
+  function annDrawNumber(ctx, x, y, num) {
+    const r = Math.max(11, annStrokeSize * 3 + 8);
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, 2 * Math.PI);
+    ctx.fillStyle = annColor;
+    ctx.fill();
+    const light = isLightHex(annColor);
+    ctx.fillStyle = light ? '#000' : '#fff';
+    ctx.font = `bold ${Math.round(r * 1.1)}px Arial,sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(String(num), x, y);
+  }
+
+  function isLightHex(hex) {
+    const r = parseInt(hex.slice(1, 3), 16);
+    const g = parseInt(hex.slice(3, 5), 16);
+    const b = parseInt(hex.slice(5, 7), 16);
+    return (r * 0.299 + g * 0.587 + b * 0.114) > 128;
+  }
+
+  function annShowTextInput(cx, cy, clientX, clientY) {
+    annTextPos = { x: cx, y: cy };
+    const wRect = annCanvasWrapper.getBoundingClientRect();
+    const cRect = annDrawCanvas.getBoundingClientRect();
+    annTextInput.style.left = (cRect.left - wRect.left + cx * (cRect.width / annDrawCanvas.width)) + 'px';
+    annTextInput.style.top = (cRect.top - wRect.top + cy * (cRect.height / annDrawCanvas.height)) + 'px';
+    annTextInput.style.color = annColor;
+    annTextInput.value = '';
+    annTextInput.classList.remove('hidden');
+    annTextInput.focus();
+  }
+
+  function annFinalizeText() {
+    if (annTextInput.classList.contains('hidden')) return;
+    const text = annTextInput.value.trim();
+    annHideTextInput();
+    if (!text) return;
+    const ctx = annDrawCanvas.getContext('2d');
+    annSaveState();
+    const fontSize = 12 + annStrokeSize * 2;
+    ctx.font = `bold ${fontSize}px Arial,sans-serif`;
+    const tw = ctx.measureText(text).width;
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    ctx.fillRect(annTextPos.x - 2, annTextPos.y - fontSize, tw + 8, fontSize + 6);
+    ctx.fillStyle = annColor;
+    ctx.fillText(text, annTextPos.x + 2, annTextPos.y);
+  }
+
+  function annHideTextInput() {
+    annTextInput.classList.add('hidden');
+    annTextInput.value = '';
+  }
 
   // Mouse events for region selection
   regionCanvas.addEventListener('mousedown', (e) => {
