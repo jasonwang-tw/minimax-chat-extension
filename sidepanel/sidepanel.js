@@ -587,10 +587,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     chatMessages.innerHTML = '';
 
     currentSession.messages.forEach(msg => {
+      // 歷史訊息不知道當時語言設定，用內容自動偵測
+      const ttsLang = detectLang(msg.content);
       if (msg.image) {
-        addMessageWithImage(msg.content, msg.role, msg.image);
+        addMessageWithImage(msg.content, msg.role, msg.image, ttsLang);
       } else {
-        addMessage(msg.content, msg.role);
+        addMessage(msg.content, msg.role, ttsLang);
       }
     });
 
@@ -670,7 +672,9 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (response.success) {
         const reply = response.data.reply;
         currentSession.messages.push({ role: 'assistant', content: reply });
-        addMessage(reply, 'assistant');
+        // 翻譯開：AI 回覆是 targetLang；翻譯關：AI 回覆與使用者同語言
+        const replyLang = translateEnabled ? targetLangSelect.value : sourceLangSelect.value;
+        addMessage(reply, 'assistant', replyLang);
         statusText.textContent = '';
         await saveCurrentSession();
         await loadHistory();
@@ -709,12 +713,21 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   // ── 訊息渲染 ────────────────────────────────────────────
-  function addMessage(content, role) {
+  // ttsLang：明確指定語言；未傳入時用 sourceLang（user）或 targetLang（assistant）
+  function resolveTTSLang(role, ttsLang) {
+    if (ttsLang) return ttsLang;
+    return role === 'user'
+      ? (sourceLangSelect?.value || 'zh-TW')
+      : (targetLangSelect?.value || 'zh-TW');
+  }
+
+  function addMessage(content, role, ttsLang) {
+    const lang = resolveTTSLang(role, ttsLang);
     const div = document.createElement('div');
     div.className = `message message-${role === 'user' ? 'user' : role === 'error' ? 'error' : 'assistant'}`;
     div.innerHTML = `
       <div class="message-content">${escapeHtml(content).replace(/\n/g, '<br>')}</div>
-      ${role !== 'error' ? `<button class="btn-tts" title="語音播放" data-text="${escapeAttr(content)}" data-lang="${role === 'user' ? (sourceLangSelect ? sourceLangSelect.value : 'zh-TW') : (targetLangSelect ? targetLangSelect.value : 'zh-TW')}">
+      ${role !== 'error' ? `<button class="btn-tts" title="語音播放" data-text="${escapeAttr(content)}" data-lang="${lang}">
         <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
       </button>` : ''}
     `;
@@ -723,7 +736,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     scrollToBottom();
   }
 
-  function addMessageWithImage(content, role, imageData) {
+  function addMessageWithImage(content, role, imageData, ttsLang) {
+    const lang = resolveTTSLang(role, ttsLang);
     const div = document.createElement('div');
     div.className = `message message-${role === 'user' ? 'user' : 'assistant'}`;
     let html = `<div class="message-content">`;
@@ -731,7 +745,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       html += `<img src="${imageData}" class="message-image" alt="圖片">`;
     }
     html += `${escapeHtml(content).replace(/\n/g, '<br>')}</div>`;
-    html += `<button class="btn-tts" title="語音播放" data-text="${escapeAttr(content)}" data-lang="${role === 'user' ? (sourceLangSelect ? sourceLangSelect.value : 'zh-TW') : (targetLangSelect ? targetLangSelect.value : 'zh-TW')}">
+    html += `<button class="btn-tts" title="語音播放" data-text="${escapeAttr(content)}" data-lang="${lang}">
       <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
     </button>`;
     div.innerHTML = html;
@@ -806,6 +820,29 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   // ── 工具函式 ────────────────────────────────────────────
+
+  // 依 Unicode 範圍自動偵測語言（用於歷史訊息 TTS）
+  function detectLang(text) {
+    if (!text) return 'zh-TW';
+    const hiragana  = /[\u3040-\u309F]/;   // 平假名
+    const katakana  = /[\u30A0-\u30FF]/;   // 片假名
+    const hangul    = /[\uAC00-\uD7A3]/;   // 韓文
+    const cjk       = /[\u4E00-\u9FFF]/;   // 中日文漢字
+    const latin     = /[a-zA-Z]/;
+    const arabic    = /[\u0600-\u06FF]/;
+    const thai      = /[\u0E00-\u0E7F]/;
+    const vietnamese = /[àáâãèéêìíòóôõùúýăđơưạảấầẩẫậắằẳẵặẹẻẽếềểễệỉịọỏốồổỗộớờởỡợụủứừửữựỳỵỷỹ]/i;
+
+    if (hiragana.test(text) || katakana.test(text)) return 'ja';
+    if (hangul.test(text)) return 'ko';
+    if (thai.test(text)) return 'th';
+    if (arabic.test(text)) return 'ar';
+    if (vietnamese.test(text)) return 'vi';
+    if (cjk.test(text)) return 'zh-TW';
+    if (latin.test(text)) return 'en';
+    return 'zh-TW';
+  }
+
   function scrollToBottom() {
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
