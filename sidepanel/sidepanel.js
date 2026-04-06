@@ -428,7 +428,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   annDrawCanvas.addEventListener('mousedown', (e) => {
     const pos = annGetPos(e);
     if (annTool === 'text') {
-      annShowTextInput(pos.x, pos.y, e.clientX, e.clientY);
+      // 文字工具在 mousedown 只記錄位置，mouseup 才顯示輸入框
+      // 避免 mousedown → focus → mouseup → blur 的焦點競爭
+      annStartX = pos.x; annStartY = pos.y;
       return;
     }
     if (annTool === 'number') {
@@ -468,6 +470,15 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   function annFinishDrag(e) {
+    // 文字工具：mouseup 才顯示輸入框（避免焦點競爭）
+    if (annTool === 'text') {
+      const pos = annGetPos(e);
+      // 確認是 click（位移 < 5px）
+      if (Math.abs(pos.x - annStartX) < 5 && Math.abs(pos.y - annStartY) < 5) {
+        annShowTextInput(pos.x, pos.y);
+      }
+      return;
+    }
     if (!annIsDrawing) return;
     annIsDrawing = false;
     if (annTool !== 'pen' && annPreviewState) {
@@ -482,16 +493,26 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   }
   annDrawCanvas.addEventListener('mouseup', annFinishDrag);
-  annDrawCanvas.addEventListener('mouseleave', annFinishDrag);
+  annDrawCanvas.addEventListener('mouseleave', (e) => {
+    if (annTool === 'text') return; // text 工具不在 mouseleave 處理
+    annFinishDrag(e);
+  });
 
-  // Text input
+  // Text input — 只用 Enter/Escape 控制，不使用 blur 自動關閉
   annTextInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') { e.preventDefault(); annFinalizeText(); }
     if (e.key === 'Escape') { annHideTextInput(); }
     e.stopPropagation();
   });
-  annTextInput.addEventListener('blur', () => {
-    setTimeout(() => annFinalizeText(), 50);
+  // 點到 canvas 之外才關閉（防止因焦點競爭意外消失）
+  annTextInput.addEventListener('blur', (e) => {
+    if (!annTextInput.classList.contains('hidden') && e.relatedTarget === null) {
+      // focus 移到視窗外（如切換應用），不要自動關閉，等使用者按 Enter
+    }
+    // 若 focus 移到標記工具列按鈕，則關閉
+    if (e.relatedTarget && annotationPhaseEl.contains(e.relatedTarget) && e.relatedTarget !== annTextInput) {
+      annFinalizeText();
+    }
   });
 
   // ── Annotation helpers ───────────────────────────────────
@@ -619,16 +640,23 @@ document.addEventListener('DOMContentLoaded', async () => {
     return (r * 0.299 + g * 0.587 + b * 0.114) > 128;
   }
 
-  function annShowTextInput(cx, cy, clientX, clientY) {
+  function annShowTextInput(cx, cy) {
     annTextPos = { x: cx, y: cy };
     const wRect = annCanvasWrapper.getBoundingClientRect();
     const cRect = annDrawCanvas.getBoundingClientRect();
-    annTextInput.style.left = (cRect.left - wRect.left + cx * (cRect.width / annDrawCanvas.width)) + 'px';
-    annTextInput.style.top = (cRect.top - wRect.top + cy * (cRect.height / annDrawCanvas.height)) + 'px';
+    const scaleX = cRect.width / annDrawCanvas.width;
+    const scaleY = cRect.height / annDrawCanvas.height;
+    annTextInput.style.left = (cRect.left - wRect.left + cx * scaleX) + 'px';
+    annTextInput.style.top = (cRect.top - wRect.top + cy * scaleY) + 'px';
     annTextInput.style.color = annColor;
     annTextInput.value = '';
     annTextInput.classList.remove('hidden');
-    annTextInput.focus();
+    // requestAnimationFrame 確保 DOM 更新後再 focus，避免焦點競爭
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        annTextInput.focus();
+      });
+    });
   }
 
   function annFinalizeText() {

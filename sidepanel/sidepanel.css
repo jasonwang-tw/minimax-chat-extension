@@ -612,6 +612,11 @@ textarea:disabled {
   display: none;
 }
 
+/* 選取階段隱藏 */
+.region-canvas-wrapper.hidden {
+  display: none;
+}
+
 /* 懸浮確認列（不佔版面空間） */
 .region-float-bar {
   position: absolute;
