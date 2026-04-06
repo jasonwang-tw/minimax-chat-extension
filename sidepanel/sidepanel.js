@@ -48,6 +48,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   let translateEnabled = false;
   let batchSelectMode = false;
   let selectedIds = new Set();
+  let currentAudio = null;    // 目前播放中的 Audio 物件
+  let currentTTSBtn = null;   // 目前播放中的按鈕
 
   // Region screenshot state
   let regionStartX = 0, regionStartY = 0;
@@ -739,68 +741,68 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   // ── TTS ─────────────────────────────────────────────────
-  // 語言代碼對應完整 BCP-47（Web Speech API 需要完整代碼才能選到正確聲音）
-  const TTS_LANG_MAP = {
-    'zh-TW': 'zh-TW',
-    'zh-CN': 'zh-CN',
-    'en':    'en-US',
-    'ja':    'ja-JP',
-    'ko':    'ko-KR',
-    'fr':    'fr-FR',
-    'de':    'de-DE',
-    'es':    'es-ES',
-    'th':    'th-TH',
-    'vi':    'vi-VN'
-  };
-
-  function getBestVoice(fullLang) {
-    const voices = window.speechSynthesis.getVoices();
-    if (!voices.length) return null;
-    // 完全匹配
-    const exact = voices.find(v => v.lang === fullLang);
-    if (exact) return exact;
-    // 語系前綴匹配（如 en-US 找不到時，用 en-GB 等）
-    const prefix = fullLang.split('-')[0];
-    return voices.find(v => v.lang.startsWith(prefix)) || null;
+  function stopCurrentAudio() {
+    if (currentAudio) {
+      currentAudio.pause();
+      currentAudio.src = '';
+      currentAudio = null;
+    }
+    if (currentTTSBtn) {
+      currentTTSBtn.classList.remove('speaking');
+      currentTTSBtn = null;
+    }
   }
 
-  function speakWithLang(text, lang) {
-    const fullLang = TTS_LANG_MAP[lang] || lang;
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = fullLang;
-    utterance.rate = 1.0;
-
-    const voice = getBestVoice(fullLang);
-    if (voice) utterance.voice = voice;
-
-    return utterance;
-  }
-
-  // 預載聲音清單（部分瀏覽器非同步載入）
-  if (typeof window.speechSynthesis !== 'undefined') {
-    window.speechSynthesis.getVoices();
-    window.speechSynthesis.addEventListener('voiceschanged', () => {
-      window.speechSynthesis.getVoices(); // 觸發快取
-    });
-  }
-
-  function handleTTS(e) {
+  async function handleTTS(e) {
     const btn = e.currentTarget;
     const text = btn.dataset.text;
     const lang = btn.dataset.lang || 'zh-TW';
     if (!text) return;
 
-    if (window.speechSynthesis.speaking) {
-      window.speechSynthesis.cancel();
-      document.querySelectorAll('.btn-tts.speaking').forEach(b => b.classList.remove('speaking'));
+    // 再次點擊同一個按鈕 → 停止播放
+    if (currentTTSBtn === btn) {
+      stopCurrentAudio();
       return;
     }
 
-    const utterance = speakWithLang(text, lang);
+    // 停止前一個播放
+    stopCurrentAudio();
+
     btn.classList.add('speaking');
-    utterance.onend = () => btn.classList.remove('speaking');
-    utterance.onerror = () => btn.classList.remove('speaking');
-    window.speechSynthesis.speak(utterance);
+    currentTTSBtn = btn;
+
+    try {
+      // 透過 background 呼叫 Google TTS
+      const response = await chrome.runtime.sendMessage({
+        type: 'TTS_FETCH',
+        data: { text, lang }
+      });
+
+      if (!response.success) throw new Error(response.error);
+
+      // 用 Audio API 播放 MP3
+      const audio = new Audio(`data:audio/mpeg;base64,${response.base64}`);
+      currentAudio = audio;
+
+      audio.onended = () => {
+        if (currentTTSBtn === btn) stopCurrentAudio();
+      };
+      audio.onerror = () => {
+        if (currentTTSBtn === btn) stopCurrentAudio();
+      };
+
+      await audio.play();
+    } catch (err) {
+      console.warn('Google TTS 失敗，改用系統語音:', err.message);
+      // Fallback：Web Speech API
+      if (currentTTSBtn !== btn) return; // 已被中斷
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.lang = lang;
+      utterance.rate = 1.0;
+      utterance.onend = () => { if (currentTTSBtn === btn) stopCurrentAudio(); };
+      utterance.onerror = () => { if (currentTTSBtn === btn) stopCurrentAudio(); };
+      window.speechSynthesis.speak(utterance);
+    }
   }
 
   // ── 工具函式 ────────────────────────────────────────────

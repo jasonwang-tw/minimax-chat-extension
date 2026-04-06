@@ -81,6 +81,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     });
     return true;
   }
+
+  if (message.type === 'TTS_FETCH') {
+    fetchGoogleTTS(message.data.text, message.data.lang)
+      .then(base64 => sendResponse({ success: true, base64 }))
+      .catch(error => sendResponse({ success: false, error: error.message }));
+    return true;
+  }
 });
 
 // 處理聊天訊息
@@ -330,4 +337,63 @@ async function renameSession(sessionId, name) {
     chatSessions[index].name = name;
     await chrome.storage.local.set({ chatSessions });
   }
+}
+
+// ── Google TTS ──────────────────────────────────────────────
+// 使用 Google Translate TTS endpoint，音質與網頁版一致
+async function fetchGoogleTTS(text, lang) {
+  const chunks = splitTextChunks(text.trim(), 180);
+  const buffers = [];
+
+  for (const chunk of chunks) {
+    if (!chunk.trim()) continue;
+    const url = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(chunk)}&tl=${encodeURIComponent(lang)}&client=gtx&ttsspeed=1`;
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        'Referer': 'https://translate.google.com/'
+      }
+    });
+    if (!response.ok) throw new Error(`Google TTS 請求失敗: ${response.status}`);
+    buffers.push(await response.arrayBuffer());
+  }
+
+  // 合併所有 chunk 的 MP3 資料
+  const total = buffers.reduce((sum, b) => sum + b.byteLength, 0);
+  const merged = new Uint8Array(total);
+  let offset = 0;
+  for (const buf of buffers) {
+    merged.set(new Uint8Array(buf), offset);
+    offset += buf.byteLength;
+  }
+
+  // 轉 base64（分批處理避免 call stack 溢出）
+  let binary = '';
+  const chunkSize = 8192;
+  for (let i = 0; i < merged.length; i += chunkSize) {
+    binary += String.fromCharCode(...merged.subarray(i, i + chunkSize));
+  }
+  return btoa(binary);
+}
+
+// 依長度切割文字（在句末或空格處斷開）
+function splitTextChunks(text, maxLen) {
+  if (text.length <= maxLen) return [text];
+  const chunks = [];
+  let start = 0;
+  while (start < text.length) {
+    let end = start + maxLen;
+    if (end >= text.length) { chunks.push(text.slice(start)); break; }
+    // 優先從標點或空格切
+    const candidates = [' ', '。', '，', '！', '？', '.', ',', '!', '?', '\n'];
+    let splitAt = -1;
+    for (const sep of candidates) {
+      const pos = text.lastIndexOf(sep, end);
+      if (pos > start) { splitAt = pos + 1; break; }
+    }
+    if (splitAt === -1) splitAt = end;
+    chunks.push(text.slice(start, splitAt));
+    start = splitAt;
+  }
+  return chunks;
 }
