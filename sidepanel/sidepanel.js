@@ -3,6 +3,10 @@
 let currentImageData = null;  // 目前附加的圖片
 let currentImageMode = null;  // 'screenshot' | 'region' | 'upload' | 'ocr'
 let pendingRegionMode = null; // 區域截圖完成後要套用的 mode（null = 'region'）
+let currentModel = 'MiniMax-M2.7';  // 目前選擇的模型
+let currentReplyModeId = 'standard'; // 目前回覆模式 ID
+let replyModes = [];          // 從 storage 載入的回覆模式
+let historySearchQuery = '';  // 歷史紀錄搜尋關鍵字
 
 document.addEventListener('DOMContentLoaded', async () => {
   const messageInput = document.getElementById('messageInput');
@@ -13,6 +17,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const statusText = document.getElementById('statusText');
   const historyPanel = document.getElementById('historyPanel');
   const historyList = document.getElementById('historyList');
+  const newSessionBtn = document.getElementById('newSessionBtn');
   const toggleHistoryBtn = document.getElementById('toggleHistory');
   const clearHistoryBtn = document.getElementById('clearHistory');
   const batchSelectBtn = document.getElementById('batchSelectBtn');
@@ -52,6 +57,16 @@ document.addEventListener('DOMContentLoaded', async () => {
   const confirmAnnotationBtn = document.getElementById('confirmAnnotation');
   const annUndoBtn = document.getElementById('annUndo');
   const annClearBtn = document.getElementById('annClear');
+  const modelSelect = document.getElementById('modelSelect');
+  const replyModeSelect = document.getElementById('replyModeSelect');
+  const historySearchInput = document.getElementById('historySearch');
+  const historyClearSearchBtn = document.getElementById('historyClearSearch');
+
+  // SVG 圖示常數（必須在所有函式之前宣告，避免 TDZ 錯誤）
+  const PIN_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="17" x2="12" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"/></svg>`;
+  const TTS_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>`;
+  const COPY_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`;
+  const COPY_OK_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>`;
 
   let sessions = [];
   let currentSession = null;
@@ -80,6 +95,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   let annPreviewState = null;
   let annTextPos = { x: 0, y: 0 };
 
+  // 載入回覆模式
+  await loadReplyModes();
+
   // 檢查 API Key
   await checkApiKey();
 
@@ -87,10 +105,37 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (changes.geminiApiKey || changes.apiKey) {
       checkApiKey();
     }
+    if (changes.replyModes) {
+      loadReplyModes();
+    }
   });
 
   // 載入歷史記錄
   await loadHistory();
+
+  // ── 模型選擇 ────────────────────────────────────────────
+  modelSelect.addEventListener('change', () => {
+    currentModel = modelSelect.value;
+  });
+
+  // ── 回覆模式選擇 ─────────────────────────────────────────
+  replyModeSelect.addEventListener('change', () => {
+    currentReplyModeId = replyModeSelect.value;
+  });
+
+  // ── 歷史搜尋 ────────────────────────────────────────────
+  historySearchInput.addEventListener('input', () => {
+    historySearchQuery = historySearchInput.value.trim();
+    historyClearSearchBtn.classList.toggle('hidden', !historySearchQuery);
+    renderHistory();
+  });
+
+  historyClearSearchBtn.addEventListener('click', () => {
+    historySearchInput.value = '';
+    historySearchQuery = '';
+    historyClearSearchBtn.classList.add('hidden');
+    renderHistory();
+  });
 
   // 自動調整輸入框高度
   messageInput.addEventListener('input', () => {
@@ -236,6 +281,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   // ── 歷史面板 ───────────────────────────────────────────
+  newSessionBtn.addEventListener('click', () => {
+    startNewSession();
+    historyPanel.classList.add('hidden');
+  });
+
   toggleHistoryBtn.addEventListener('click', () => {
     historyPanel.classList.toggle('hidden');
   });
@@ -814,6 +864,30 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   }
 
+  // ── 回覆模式 ────────────────────────────────────────────
+  async function loadReplyModes() {
+    const { replyModes: stored } = await chrome.storage.sync.get(['replyModes']);
+    replyModes = stored && stored.length > 0 ? stored : [
+      { id: 'standard', name: '標準', prompt: '' },
+      { id: 'discuss', name: '討論模式', prompt: '請針對問題進行多角度分析，引用可靠資訊，交互比對後給出結論，並附上推理過程。' }
+    ];
+    // 更新 select 選項
+    replyModeSelect.innerHTML = '';
+    replyModes.forEach(mode => {
+      const opt = document.createElement('option');
+      opt.value = mode.id;
+      opt.textContent = mode.name;
+      replyModeSelect.appendChild(opt);
+    });
+    // 保持目前選取
+    if (replyModes.find(m => m.id === currentReplyModeId)) {
+      replyModeSelect.value = currentReplyModeId;
+    } else {
+      currentReplyModeId = replyModes[0]?.id || 'standard';
+      replyModeSelect.value = currentReplyModeId;
+    }
+  }
+
   // ── Session 管理 ────────────────────────────────────────
   async function loadHistory() {
     const response = await chrome.runtime.sendMessage({ type: 'GET_HISTORY' });
@@ -831,81 +905,132 @@ document.addEventListener('DOMContentLoaded', async () => {
       return;
     }
 
-    sessions.slice().reverse().forEach((session, reversedIdx) => {
-      const originalIdx = sessions.length - 1 - reversedIdx;
-      const div = document.createElement('div');
-      div.className = 'history-item' + (batchSelectMode && selectedIds.has(session.id) ? ' selected' : '');
+    // 搜尋過濾
+    const query = historySearchQuery.toLowerCase();
+    let filtered = sessions;
+    if (query) {
+      filtered = sessions.filter(s => {
+        const nameMatch = (s.name || '').toLowerCase().includes(query);
+        const msgMatch = s.messages.some(m => (m.content || '').toLowerCase().includes(query));
+        return nameMatch || msgMatch;
+      });
+    }
 
-      const firstUserMsg = session.messages.find(m => m.role === 'user');
-      const hasImage = session.messages.some(m => m.image);
-      const defaultPreview = firstUserMsg
-        ? firstUserMsg.content.substring(0, 40) + (firstUserMsg.content.length > 40 ? '...' : '')
-        : '新對話';
-      const displayName = session.name || (defaultPreview + (hasImage ? ' [圖]' : ''));
+    if (filtered.length === 0) {
+      historyList.innerHTML = `<p class="history-empty">${query ? '找不到相關對話' : '尚無歷史紀錄'}</p>`;
+      return;
+    }
 
-      if (batchSelectMode) {
-        // 批次選取模式：顯示 checkbox
-        div.innerHTML = `
-          <label class="history-checkbox-label">
-            <input type="checkbox" class="history-checkbox" ${selectedIds.has(session.id) ? 'checked' : ''}>
-          </label>
-          <div class="history-item-body">
-            <p class="history-preview" title="${escapeHtml(displayName)}">${escapeHtml(displayName)}</p>
-            <span class="history-time">${formatTime(session.timestamp)}</span>
-          </div>
-        `;
-        div.querySelector('.history-checkbox').addEventListener('change', (e) => {
-          if (e.target.checked) {
-            selectedIds.add(session.id);
-          } else {
-            selectedIds.delete(session.id);
-          }
-          div.classList.toggle('selected', e.target.checked);
-          updateBatchDeleteBtn();
-        });
-        div.querySelector('.history-item-body').addEventListener('click', () => {
-          const cb = div.querySelector('.history-checkbox');
-          cb.checked = !cb.checked;
-          cb.dispatchEvent(new Event('change'));
-        });
-      } else {
-        // 一般模式
-        div.innerHTML = `
-          <div class="history-item-body">
-            <p class="history-preview" title="${escapeHtml(displayName)}">${escapeHtml(displayName)}</p>
-            <span class="history-time">${formatTime(session.timestamp)}</span>
-          </div>
-          <div class="history-item-actions">
-            <button class="btn-history-rename" title="重新命名" data-id="${session.id}">
-              <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-            </button>
-            <button class="btn-history-delete" title="刪除此紀錄" data-id="${session.id}">
-              <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>
-            </button>
-          </div>
-        `;
-        div.querySelector('.history-item-body').addEventListener('click', () => loadSession(originalIdx));
-        div.querySelector('.btn-history-rename').addEventListener('click', (e) => {
-          e.stopPropagation();
-          startRenameSession(session, div);
-        });
-        div.querySelector('.btn-history-delete').addEventListener('click', async (e) => {
-          e.stopPropagation();
-          if (confirm('確定要刪除此筆紀錄？')) {
-            await chrome.runtime.sendMessage({ type: 'DELETE_SESSION', data: { sessionId: session.id } });
-            sessions = sessions.filter(s => s.id !== session.id);
-            if (currentSession && currentSession.id === session.id) {
-              currentSession = null;
-              chatMessages.innerHTML = '';
-              emptyState.classList.remove('hidden');
-            }
-            renderHistory();
-          }
-        });
+    // 釘選排序：釘選在前，各自按時間降冪
+    const pinned = filtered.filter(s => s.pinned).sort((a, b) => b.id - a.id);
+    const normal = filtered.filter(s => !s.pinned).sort((a, b) => b.id - a.id);
+
+    const renderSection = (list, label) => {
+      if (list.length === 0) return;
+      if (label) {
+        const labelEl = document.createElement('div');
+        labelEl.className = 'history-section-label';
+        labelEl.textContent = label;
+        historyList.appendChild(labelEl);
       }
+      list.forEach(session => {
+        const originalIdx = sessions.findIndex(s => s.id === session.id);
+        const div = document.createElement('div');
+        div.className = 'history-item' +
+          (batchSelectMode && selectedIds.has(session.id) ? ' selected' : '') +
+          (session.pinned ? ' pinned' : '');
 
-      historyList.appendChild(div);
-    });
+        const firstUserMsg = session.messages.find(m => m.role === 'user');
+        const hasImage = session.messages.some(m => m.image);
+        const defaultPreview = firstUserMsg
+          ? firstUserMsg.content.substring(0, 40) + (firstUserMsg.content.length > 40 ? '...' : '')
+          : '新對話';
+        let displayName = session.name || (defaultPreview + (hasImage ? ' [圖]' : ''));
+
+        // 關鍵字高亮
+        if (query) {
+          const escaped = escapeHtml(displayName);
+          const re = new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
+          displayName = escaped.replace(re, '<mark>$1</mark>');
+        } else {
+          displayName = escapeHtml(displayName);
+        }
+
+        if (batchSelectMode) {
+          div.innerHTML = `
+            <label class="history-checkbox-label">
+              <input type="checkbox" class="history-checkbox" ${selectedIds.has(session.id) ? 'checked' : ''}>
+            </label>
+            <div class="history-item-body">
+              <p class="history-preview" title="${escapeHtml(session.name || defaultPreview)}">${displayName}</p>
+              <span class="history-time">${formatTime(session.timestamp)}</span>
+            </div>
+          `;
+          div.querySelector('.history-checkbox').addEventListener('change', (e) => {
+            if (e.target.checked) selectedIds.add(session.id);
+            else selectedIds.delete(session.id);
+            div.classList.toggle('selected', e.target.checked);
+            updateBatchDeleteBtn();
+          });
+          div.querySelector('.history-item-body').addEventListener('click', () => {
+            const cb = div.querySelector('.history-checkbox');
+            cb.checked = !cb.checked;
+            cb.dispatchEvent(new Event('change'));
+          });
+        } else {
+          div.innerHTML = `
+            <div class="history-item-body">
+              <p class="history-preview" title="${escapeHtml(session.name || defaultPreview)}">${displayName}</p>
+              <span class="history-time">${formatTime(session.timestamp)}</span>
+            </div>
+            <div class="history-item-actions">
+              <button class="btn-pin${session.pinned ? ' active' : ''}" title="${session.pinned ? '取消釘選' : '釘選'}" data-id="${session.id}">${PIN_SVG}</button>
+              <button class="btn-history-rename" title="重新命名" data-id="${session.id}">
+                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+              </button>
+              <button class="btn-history-delete" title="刪除此紀錄" data-id="${session.id}">
+                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+              </button>
+            </div>
+          `;
+          div.querySelector('.history-item-body').addEventListener('click', () => loadSession(originalIdx));
+          div.querySelector('.btn-pin').addEventListener('click', async (e) => {
+            e.stopPropagation();
+            const newPinned = !session.pinned;
+            session.pinned = newPinned;
+            await chrome.runtime.sendMessage({ type: 'PIN_SESSION', data: { sessionId: session.id, pinned: newPinned } });
+            renderHistory();
+          });
+          div.querySelector('.btn-history-rename').addEventListener('click', (e) => {
+            e.stopPropagation();
+            startRenameSession(session, div);
+          });
+          div.querySelector('.btn-history-delete').addEventListener('click', async (e) => {
+            e.stopPropagation();
+            if (confirm('確定要刪除此筆紀錄？')) {
+              await chrome.runtime.sendMessage({ type: 'DELETE_SESSION', data: { sessionId: session.id } });
+              sessions = sessions.filter(s => s.id !== session.id);
+              if (currentSession && currentSession.id === session.id) {
+                currentSession = null;
+                chatMessages.innerHTML = '';
+                emptyState.classList.remove('hidden');
+              }
+              renderHistory();
+            }
+          });
+        }
+
+        historyList.appendChild(div);
+      });
+    };
+
+    if (pinned.length > 0 && normal.length > 0) {
+      renderSection(pinned, '📌 釘選');
+      renderSection(normal, '最近');
+    } else {
+      renderSection(pinned, null);
+      renderSection(normal, null);
+    }
 
     if (batchSelectMode) updateBatchDeleteBtn();
   }
@@ -944,6 +1069,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     currentSession = sessions[index];
     chatMessages.innerHTML = '';
 
+    // 還原 session 當時的 model 和 replyMode
+    if (currentSession.model) {
+      currentModel = currentSession.model;
+      modelSelect.value = currentModel;
+    }
+    if (currentSession.replyModeId) {
+      currentReplyModeId = currentSession.replyModeId;
+      replyModeSelect.value = currentReplyModeId;
+    }
+
     currentSession.messages.forEach(msg => {
       // 歷史訊息不知道當時語言設定，用內容自動偵測
       const ttsLang = detectLang(msg.content);
@@ -963,7 +1098,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     currentSession = {
       id: Date.now(),
       timestamp: new Date().toISOString(),
-      messages: []
+      messages: [],
+      model: currentModel,
+      replyModeId: currentReplyModeId
     };
     chatMessages.innerHTML = '';
     emptyState.classList.remove('hidden');
@@ -1016,6 +1153,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         image: m.image || null
       }));
 
+      // 取得回覆模式的 systemPrompt
+      const activeMode = replyModes.find(m => m.id === currentReplyModeId);
+      const systemPrompt = activeMode?.prompt || '';
+
       const response = await chrome.runtime.sendMessage({
         type: 'SEND_MESSAGE',
         data: {
@@ -1023,7 +1164,9 @@ document.addEventListener('DOMContentLoaded', async () => {
           history: historyForApi,
           image: imageData,
           mode: imageMode,
-          translateConfig
+          translateConfig,
+          model: currentModel,
+          systemPrompt
         }
       });
 
@@ -1079,17 +1222,26 @@ document.addEventListener('DOMContentLoaded', async () => {
       : (targetLangSelect?.value || 'zh-TW');
   }
 
+
+  function buildMessageActions(content, lang, role) {
+    if (role === 'error') return '';
+    return `
+      <div class="message-actions">
+        <button class="btn-tts" title="語音播放" data-text="${escapeAttr(content)}" data-lang="${lang}">${TTS_SVG}</button>
+        <button class="btn-copy" title="複製訊息" data-text="${escapeAttr(content)}">${COPY_SVG}</button>
+      </div>`;
+  }
+
   function addMessage(content, role, ttsLang) {
     const lang = resolveTTSLang(role, ttsLang);
     const div = document.createElement('div');
     div.className = `message message-${role === 'user' ? 'user' : role === 'error' ? 'error' : 'assistant'}`;
     div.innerHTML = `
       <div class="message-content">${escapeHtml(content).replace(/\n/g, '<br>')}</div>
-      ${role !== 'error' ? `<button class="btn-tts" title="語音播放" data-text="${escapeAttr(content)}" data-lang="${lang}">
-        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
-      </button>` : ''}
+      ${buildMessageActions(content, lang, role)}
     `;
     div.querySelector('.btn-tts')?.addEventListener('click', handleTTS);
+    div.querySelector('.btn-copy')?.addEventListener('click', handleCopy);
     chatMessages.appendChild(div);
     scrollToBottom();
   }
@@ -1103,13 +1255,43 @@ document.addEventListener('DOMContentLoaded', async () => {
       html += `<img src="${imageData}" class="message-image" alt="圖片">`;
     }
     html += `${escapeHtml(content).replace(/\n/g, '<br>')}</div>`;
-    html += `<button class="btn-tts" title="語音播放" data-text="${escapeAttr(content)}" data-lang="${lang}">
-      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
-    </button>`;
+    html += buildMessageActions(content, lang, role);
     div.innerHTML = html;
     div.querySelector('.btn-tts')?.addEventListener('click', handleTTS);
+    div.querySelector('.btn-copy')?.addEventListener('click', handleCopy);
     chatMessages.appendChild(div);
     scrollToBottom();
+  }
+
+  // ── 複製訊息 ─────────────────────────────────────────────
+  function handleCopy(e) {
+    const btn = e.currentTarget;
+    const text = btn.dataset.text;
+    if (!text) return;
+    navigator.clipboard.writeText(text).then(() => {
+      btn.innerHTML = COPY_OK_SVG;
+      btn.classList.add('copied');
+      setTimeout(() => {
+        btn.innerHTML = COPY_SVG;
+        btn.classList.remove('copied');
+      }, 1500);
+    }).catch(() => {
+      // fallback：document.execCommand
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      btn.innerHTML = COPY_OK_SVG;
+      btn.classList.add('copied');
+      setTimeout(() => {
+        btn.innerHTML = COPY_SVG;
+        btn.classList.remove('copied');
+      }, 1500);
+    });
   }
 
   // ── TTS ─────────────────────────────────────────────────

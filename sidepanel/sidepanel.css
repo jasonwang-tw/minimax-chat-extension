@@ -974,4 +974,153 @@ textarea:disabled {
   background: var(--text-secondary);
 }
 
+/* ── 歷史搜尋 ──────────────────────────────────────────── */
+.history-search-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  padding: 6px 12px 8px;
+  border-bottom: 1px solid var(--border-color);
+}
+.history-search-icon {
+  position: absolute;
+  left: 20px;
+  color: var(--text-secondary);
+  pointer-events: none;
+}
+.history-search {
+  width: 100%;
+  background: var(--bg-darker);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-size: 12px;
+  padding: 5px 28px 5px 28px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+.history-search:focus {
+  border-color: var(--primary);
+}
+.history-search::placeholder {
+  color: var(--text-secondary);
+}
+.btn-clear-search {
+  position: absolute;
+  right: 18px;
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 2px;
+  display: flex;
+  align-items: center;
+  border-radius: 3px;
+}
+.btn-clear-search:hover {
+  color: var(--text-primary);
+}
+
+/* ── 歷史紀錄分區標籤 ──────────────────────────────────── */
+.history-section-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  padding: 6px 12px 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+mark {
+  background: rgba(139, 92, 246, 0.35);
+  color: var(--text-primary);
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
+/* ── 釘選按鈕 ──────────────────────────────────────────── */
+.history-item.pinned {
+  border-left: 2px solid var(--primary);
+}
+.btn-pin {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 3px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  opacity: 0;
+  transition: opacity 0.15s, color 0.15s;
+}
+.history-item:hover .btn-pin {
+  opacity: 1;
+}
+.btn-pin.active {
+  color: var(--primary);
+  opacity: 1;
+}
+.btn-pin:hover {
+  color: var(--primary);
+}
+
+/* ── 對話選項列（模型 + 回覆模式）──────────────────────── */
+.chat-options-bar {
+  display: flex;
+  gap: 6px;
+  padding: 4px 10px 4px;
+  border-top: 1px solid var(--border-color);
+  background: var(--bg-dark);
+}
+.chat-select {
+  flex: 1;
+  background: var(--bg-darker);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-size: 11px;
+  padding: 4px 6px;
+  cursor: pointer;
+  outline: none;
+  min-width: 0;
+  transition: border-color 0.15s;
+}
+.chat-select:focus {
+  border-color: var(--primary);
+}
+.chat-select option {
+  background: var(--bg-dark);
+}
+
+/* ── 訊息操作列（TTS + Copy）──────────────────────────── */
+.message-actions {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  margin-top: 4px;
+}
+.btn-copy {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 3px 5px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  transition: color 0.15s, background 0.15s;
+  font-size: 12px;
+}
+.btn-copy:hover {
+  color: var(--text-primary);
+  background: rgba(255,255,255,0.07);
+}
+.btn-copy.copied {
+  color: var(--success);
+}
+/* 在 message-actions 容器內，btn-tts 不需要額外 margin-top */
+.message-actions .btn-tts {
+  margin-top: 0;
+}
+
 /*# sourceMappingURL=sidepanel.css.map */

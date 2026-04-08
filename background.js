@@ -5,12 +5,25 @@ const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1/models/gemi
 const MODEL_NAME = 'MiniMax-M2.7';
 const MAX_HISTORY = 50;
 
+const DEFAULT_PROMPTS = {
+  chat: '',
+  imageAnalysis: '請詳細分析這張圖片的所有內容，包含視覺元素、文字、佈局與重要細節。',
+  ocr: '請仔細辨識並提取這張圖片中的所有文字內容，保持原始排版結構，不要遺漏任何文字。'
+};
+
+const DEFAULT_REPLY_MODES = [
+  { id: 'standard', name: '標準', icon: '💬', prompt: '' },
+  { id: 'discuss', name: '討論模式', icon: '🔍', prompt: '請針對問題進行多角度分析，引用可靠資訊，交互比對後給出結論，並附上推理過程。' }
+];
+
 // 監聽插件安裝
 chrome.runtime.onInstalled.addListener(({ reason }) => {
   if (reason === 'install') {
     chrome.storage.sync.set({
       apiKey: '',
-      settings: { model: MODEL_NAME, maxHistory: MAX_HISTORY }
+      settings: { model: MODEL_NAME, maxHistory: MAX_HISTORY },
+      defaultPrompts: DEFAULT_PROMPTS,
+      replyModes: DEFAULT_REPLY_MODES
     });
   }
 });
@@ -75,6 +88,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message.type === 'PIN_SESSION') {
+    pinSession(message.data.sessionId, message.data.pinned)
+      .then(() => sendResponse({ success: true }))
+      .catch(error => sendResponse({ success: false, error: error.message }));
+    return true;
+  }
+
   if (message.type === 'GET_API_KEY') {
     chrome.storage.sync.get(['apiKey'], result => {
       sendResponse({ success: true, data: result.apiKey || '' });
@@ -108,30 +128,31 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 });
 
 // 處理聊天訊息
-async function handleChatMessage({ message, history, image, mode, translateConfig }) {
+async function handleChatMessage({ message, history, image, mode, translateConfig, model, systemPrompt }) {
   if (image) {
     // 圖片流程：Gemini 分析 → MiniMax 整理輸出
-    return handleImagePipeline(message, history, image, mode);
+    return handleImagePipeline(message, history, image, mode, model);
   }
   // 一般文字對話（含翻譯模式）
-  return handleMiniMaxChat(message, history, translateConfig);
+  return handleMiniMaxChat(message, history, translateConfig, model, systemPrompt);
 }
 
 // 圖片處理管線：Gemini 分析 → MiniMax 整理
-async function handleImagePipeline(message, history, imageData, mode) {
-  const { geminiApiKey } = await chrome.storage.sync.get(['geminiApiKey']);
+async function handleImagePipeline(message, history, imageData, mode, model) {
+  const { geminiApiKey, defaultPrompts } = await chrome.storage.sync.get(['geminiApiKey', 'defaultPrompts']);
   if (!geminiApiKey) {
     throw new Error('請先在設定頁面輸入 Gemini API Key');
   }
 
-  // Step 1: Gemini 分析圖片
+  const prompts = { ...DEFAULT_PROMPTS, ...(defaultPrompts || {}) };
+
+  // Step 1: Gemini 分析圖片（使用自訂提示詞）
   let geminiPrompt;
   if (mode === 'ocr') {
-    geminiPrompt = '請仔細辨識並提取這張圖片中的所有文字內容，保持原始排版結構，不要遺漏任何文字。';
+    geminiPrompt = prompts.ocr || DEFAULT_PROMPTS.ocr;
   } else {
-    geminiPrompt = message
-      ? `請詳細分析這張圖片，並針對以下問題回答：${message}`
-      : '請詳細描述並分析這張圖片的所有內容。';
+    const basePrompt = prompts.imageAnalysis || DEFAULT_PROMPTS.imageAnalysis;
+    geminiPrompt = message ? `${basePrompt}\n\n使用者問題：${message}` : basePrompt;
   }
 
   const geminiResult = await callGemini(geminiApiKey, imageData, geminiPrompt);
@@ -150,7 +171,7 @@ async function handleImagePipeline(message, history, imageData, mode) {
     minimaxPrompt = `以下是圖片分析結果：\n\n${geminiResult}${userQuestion}\n\n請根據以上分析，提供清晰、有條理的回應。`;
   }
 
-  return handleMiniMaxChat(minimaxPrompt, history, null);
+  return handleMiniMaxChat(minimaxPrompt, history, null, model, null);
 }
 
 // 呼叫 Gemini API
@@ -202,16 +223,40 @@ async function callGemini(geminiApiKey, imageData, prompt) {
 }
 
 // MiniMax 文字對話
-async function handleMiniMaxChat(message, history, translateConfig) {
-  const { apiKey } = await chrome.storage.sync.get(['apiKey']);
+async function handleMiniMaxChat(message, history, translateConfig, model, systemPrompt) {
+  const { apiKey, defaultPrompts, globalPrompt: storedGlobal } = await chrome.storage.sync.get(['apiKey', 'defaultPrompts', 'globalPrompt']);
 
   if (!apiKey) {
     throw new Error('請先在設定頁面輸入 API Key');
   }
 
-  const messages = buildMessages(message, history, translateConfig);
+  const useModel = model || MODEL_NAME;
+  const globalPrompt = storedGlobal?.trim() || '';
 
-  console.log('發送請求到 MiniMax API:', { model: MODEL_NAME, messages });
+  // 組合 systemPrompt：一般問答提示詞 + 回覆模式提示詞
+  const chatDefaultPrompt = defaultPrompts?.chat?.trim() || '';
+  let modePrompt = '';
+  if (chatDefaultPrompt && systemPrompt) {
+    modePrompt = `${chatDefaultPrompt}\n\n${systemPrompt}`;
+  } else if (chatDefaultPrompt) {
+    modePrompt = chatDefaultPrompt;
+  } else if (systemPrompt) {
+    modePrompt = systemPrompt;
+  }
+
+  // 全局提示詞最優先
+  let finalSystemPrompt = '';
+  if (globalPrompt && modePrompt) {
+    finalSystemPrompt = `${globalPrompt}\n\n${modePrompt}`;
+  } else if (globalPrompt) {
+    finalSystemPrompt = globalPrompt;
+  } else {
+    finalSystemPrompt = modePrompt;
+  }
+
+  const messages = buildMessages(message, history, translateConfig, finalSystemPrompt, globalPrompt);
+
+  console.log('發送請求到 MiniMax API:', { model: useModel, messages });
 
   const response = await fetch(MINIMAX_API_URL, {
     method: 'POST',
@@ -220,7 +265,7 @@ async function handleMiniMaxChat(message, history, translateConfig) {
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({
-      model: MODEL_NAME,
+      model: useModel,
       messages
     })
   });
@@ -268,19 +313,23 @@ async function handleMiniMaxChat(message, history, translateConfig) {
   return { reply: assistantMessage.trim() };
 }
 
-// 建立訊息陣列（支援翻譯模式）
-function buildMessages(newMessage, history, translateConfig) {
+// 建立訊息陣列（支援翻譯模式、預設提示詞、回覆模式）
+function buildMessages(newMessage, history, translateConfig, systemPrompt, globalPrompt = '') {
   const messages = [];
 
-  // 翻譯模式：加入系統提示
+  // 翻譯模式：翻譯指令 + 全局提示詞
   if (translateConfig && translateConfig.enabled) {
     const { sourceLang, targetLang } = translateConfig;
     const srcName = LANG_NAMES[sourceLang] || sourceLang;
     const tgtName = LANG_NAMES[targetLang] || targetLang;
-    const systemPrompt = `你是一位專業翻譯員。使用者會輸入${srcName}或${tgtName}的文字。
+    const translatePrompt = `你是一位專業翻譯員。使用者會輸入${srcName}或${tgtName}的文字。
 - 如果輸入是${srcName}，請翻譯成${tgtName}
 - 如果輸入是${tgtName}，請翻譯成${srcName}
 只輸出翻譯結果，不需要解釋或額外說明。`;
+    const finalTranslatePrompt = globalPrompt ? `${globalPrompt}\n\n${translatePrompt}` : translatePrompt;
+    messages.push({ role: 'system', content: finalTranslatePrompt });
+  } else if (systemPrompt) {
+    // 全局提示詞已在呼叫前合入 systemPrompt
     messages.push({ role: 'system', content: systemPrompt });
   }
 
@@ -352,6 +401,16 @@ async function renameSession(sessionId, name) {
   const index = chatSessions.findIndex(s => s.id === sessionId);
   if (index >= 0) {
     chatSessions[index].name = name;
+    await chrome.storage.local.set({ chatSessions });
+  }
+}
+
+// 釘選/取消釘選 session
+async function pinSession(sessionId, pinned) {
+  const { chatSessions = [] } = await chrome.storage.local.get(['chatSessions']);
+  const index = chatSessions.findIndex(s => s.id === sessionId);
+  if (index >= 0) {
+    chatSessions[index].pinned = pinned;
     await chrome.storage.local.set({ chatSessions });
   }
 }

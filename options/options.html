@@ -78,13 +78,55 @@
             <option value="100">100 筆</option>
           </select>
         </div>
+        <div class="form-group">
+          <label for="defaultModel">預設模型</label>
+          <select id="defaultModel">
+            <option value="MiniMax-M2.7-highspeed">⚡ 快速 (MiniMax-M2.7-highspeed)</option>
+            <option value="MiniMax-M2.7" selected>🔵 一般 (MiniMax-M2.7)</option>
+            <option value="MiniMax-M2.5">💻 程式碼 (MiniMax-M2.5)</option>
+          </select>
+          <p class="hint">新對話的預設模型，可在對話視窗中即時切換</p>
+        </div>
+        <button id="saveConversationBtn" class="btn-primary">儲存對話設定</button>
+      </section>
+
+      <section class="section">
+        <h2>預設提示詞</h2>
+        <p class="section-desc">設定各模式的預設 System Prompt，留空則使用內建提示詞</p>
+        <div class="form-group">
+          <label for="globalPrompt">全局提示詞</label>
+          <textarea id="globalPrompt" class="prompt-textarea" rows="3" placeholder="例：請使用繁體中文回答，語氣保持專業簡潔。"></textarea>
+          <p class="hint">無論使用何種模式，此提示詞都會最優先套用</p>
+        </div>
+        <div class="divider"></div>
+        <div class="form-group">
+          <label for="promptChat">一般問答提示詞</label>
+          <textarea id="promptChat" class="prompt-textarea" rows="3" placeholder="例：你是一個專業助理，請給出清晰、準確的回答。"></textarea>
+        </div>
+        <div class="form-group">
+          <label for="promptImageAnalysis">圖像分析（Gemini 指令）</label>
+          <textarea id="promptImageAnalysis" class="prompt-textarea" rows="3" placeholder="例：請詳細分析這張圖片的所有內容，包含視覺元素、文字、佈局與重要細節。"></textarea>
+        </div>
+        <div class="form-group">
+          <label for="promptOcr">OCR 文字辨識（Gemini 指令）</label>
+          <textarea id="promptOcr" class="prompt-textarea" rows="3" placeholder="例：請仔細辨識並提取這張圖片中的所有文字內容，保持原始排版結構，不要遺漏任何文字。"></textarea>
+        </div>
+        <button id="savePromptsBtn" class="btn-primary">儲存提示詞</button>
+      </section>
+
+      <section class="section">
+        <h2>回覆模式</h2>
+        <p class="section-desc">自訂對話模式，每個模式可設定不同的回覆風格指令</p>
+        <div id="replyModesList" class="reply-modes-list"></div>
+        <button id="addModeBtn" class="btn-secondary btn-add-mode">＋ 新增模式</button>
+        <button id="saveModesBtn" class="btn-primary" style="margin-top:8px">儲存回覆模式</button>
       </section>
 
       <section class="section">
         <h2>關於</h2>
         <div class="about-info">
-          <p><strong>版本:</strong> 1.0.0</p>
-          <p><strong>對話模型:</strong> MiniMax-M2.7</p>
+          <p><strong>版本:</strong> 1.4.0</p>
+          <p><strong>對話模型:</strong> MiniMax-M2.7 / M2.7-highspeed / M2.5</p>
           <p><strong>圖片模型:</strong> Gemini 2.5 Flash-lite</p>
           <p>串接 MiniMax API 的 Chrome 擴充功能</p>
         </div>

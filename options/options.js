@@ -1,5 +1,10 @@
 // options.js - 設定頁面邏輯
 
+const DEFAULT_REPLY_MODES = [
+  { id: 'standard', name: '標準', prompt: '' },
+  { id: 'discuss', name: '討論模式', prompt: '請針對問題進行多角度分析，引用可靠資訊，交互比對後給出結論，並附上推理過程。' }
+];
+
 document.addEventListener("DOMContentLoaded", async () => {
   const apiKeyInput = document.getElementById("apiKey");
   const toggleKeyBtn = document.getElementById("toggleKey");
@@ -9,7 +14,19 @@ document.addEventListener("DOMContentLoaded", async () => {
   const testBtn = document.getElementById("testBtn");
   const testGeminiBtn = document.getElementById("testGeminiBtn");
   const maxHistorySelect = document.getElementById("maxHistory");
+  const defaultModelSelect = document.getElementById("defaultModel");
+  const saveConversationBtn = document.getElementById("saveConversationBtn");
+  const globalPromptInput = document.getElementById("globalPrompt");
+  const promptChatInput = document.getElementById("promptChat");
+  const promptImageAnalysisInput = document.getElementById("promptImageAnalysis");
+  const promptOcrInput = document.getElementById("promptOcr");
+  const savePromptsBtn = document.getElementById("savePromptsBtn");
+  const replyModesList = document.getElementById("replyModesList");
+  const addModeBtn = document.getElementById("addModeBtn");
+  const saveModesBtn = document.getElementById("saveModesBtn");
   const messageDiv = document.getElementById("message");
+
+  let replyModes = [];
 
   const MINIMAX_API_URL = "https://api.minimax.io/v1/chat/completions";
   const TEST_MODEL = "MiniMax-M2.7";
@@ -18,6 +35,8 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   // 載入現有設定
   await loadSettings();
+  await loadPrompts();
+  await loadReplyModes();
 
   // 切換 MiniMax 密碼可見性
   toggleKeyBtn.addEventListener("click", () => {
@@ -37,24 +56,59 @@ document.addEventListener("DOMContentLoaded", async () => {
       : '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>';
   });
 
-  // 儲存設定（兩個 key 都要儲存）
+  // 儲存 API 設定
   saveBtn.addEventListener("click", async () => {
     const apiKey = apiKeyInput.value.trim();
     const geminiApiKey = geminiApiKeyInput.value.trim();
-    const maxHistory = parseInt(maxHistorySelect.value, 10);
 
     if (!apiKey) {
       showMessage("請輸入 MiniMax API Key", "error");
       return;
     }
 
-    await chrome.storage.sync.set({
-      apiKey,
-      geminiApiKey,
-      settings: { maxHistory },
-    });
+    await chrome.storage.sync.set({ apiKey, geminiApiKey });
+    showMessage("API 設定已儲存", "success");
+  });
 
-    showMessage("設定已儲存", "success");
+  // 儲存對話設定
+  saveConversationBtn.addEventListener("click", async () => {
+    const maxHistory = parseInt(maxHistorySelect.value, 10);
+    const defaultModel = defaultModelSelect.value;
+    await chrome.storage.sync.set({ settings: { maxHistory, defaultModel } });
+    showMessage("對話設定已儲存", "success");
+  });
+
+  // 儲存提示詞
+  savePromptsBtn.addEventListener("click", async () => {
+    await chrome.storage.sync.set({
+      globalPrompt: globalPromptInput.value.trim(),
+      defaultPrompts: {
+        chat: promptChatInput.value.trim(),
+        imageAnalysis: promptImageAnalysisInput.value.trim(),
+        ocr: promptOcrInput.value.trim()
+      }
+    });
+    showMessage("提示詞已儲存", "success");
+  });
+
+  // 新增回覆模式
+  addModeBtn.addEventListener("click", () => {
+    replyModes.push({ id: `mode_${Date.now()}`, name: '新模式', prompt: '' });
+    renderReplyModes();
+  });
+
+  // 儲存回覆模式
+  saveModesBtn.addEventListener("click", async () => {
+    // 從 DOM 收集最新資料
+    const items = replyModesList.querySelectorAll('.reply-mode-item');
+    const updated = Array.from(items).map(item => ({
+      id: item.dataset.id,
+      name: item.querySelector('.mode-name').value.trim() || '未命名',
+      prompt: item.querySelector('.mode-prompt').value.trim()
+    }));
+    replyModes = updated;
+    await chrome.storage.sync.set({ replyModes });
+    showMessage("回覆模式已儲存", "success");
   });
 
   // 測試 MiniMax 連線（使用 chat/completions 端點 + Bearer）
@@ -140,13 +194,56 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   async function loadSettings() {
     const { apiKey, geminiApiKey, settings } = await chrome.storage.sync.get([
-      "apiKey",
-      "geminiApiKey",
-      "settings",
+      "apiKey", "geminiApiKey", "settings"
     ]);
     if (apiKey) apiKeyInput.value = apiKey;
     if (geminiApiKey) geminiApiKeyInput.value = geminiApiKey;
     if (settings?.maxHistory) maxHistorySelect.value = settings.maxHistory;
+    if (settings?.defaultModel) defaultModelSelect.value = settings.defaultModel;
+  }
+
+  async function loadPrompts() {
+    const { globalPrompt, defaultPrompts } = await chrome.storage.sync.get(['globalPrompt', 'defaultPrompts']);
+    globalPromptInput.value = globalPrompt || '';
+    if (defaultPrompts) {
+      promptChatInput.value = defaultPrompts.chat || '';
+      promptImageAnalysisInput.value = defaultPrompts.imageAnalysis || '';
+      promptOcrInput.value = defaultPrompts.ocr || '';
+    }
+  }
+
+  async function loadReplyModes() {
+    const { replyModes: stored } = await chrome.storage.sync.get(['replyModes']);
+    replyModes = (stored && stored.length > 0) ? stored : [...DEFAULT_REPLY_MODES];
+    renderReplyModes();
+  }
+
+  function renderReplyModes() {
+    replyModesList.innerHTML = '';
+    replyModes.forEach((mode, idx) => {
+      const div = document.createElement('div');
+      div.className = 'reply-mode-item';
+      div.dataset.id = mode.id;
+      div.innerHTML = `
+        <div class="reply-mode-header">
+          <input type="text" class="mode-name" value="${escapeVal(mode.name)}" placeholder="模式名稱">
+          <button class="btn-mode-delete" data-idx="${idx}" title="刪除此模式">
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
+          </button>
+        </div>
+        <textarea class="mode-prompt" rows="2" placeholder="回覆指令（留空則使用預設行為）">${escapeVal(mode.prompt)}</textarea>
+      `;
+      div.querySelector('.btn-mode-delete').addEventListener('click', (e) => {
+        const i = parseInt(e.currentTarget.dataset.idx);
+        replyModes.splice(i, 1);
+        renderReplyModes();
+      });
+      replyModesList.appendChild(div);
+    });
+  }
+
+  function escapeVal(str) {
+    return (str || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   }
 
   let msgTimer = null;
