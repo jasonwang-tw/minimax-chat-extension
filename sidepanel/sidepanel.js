@@ -1236,8 +1236,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     const lang = resolveTTSLang(role, ttsLang);
     const div = document.createElement('div');
     div.className = `message message-${role === 'user' ? 'user' : role === 'error' ? 'error' : 'assistant'}`;
+    const contentHtml = (role === 'assistant')
+      ? renderMarkdown(content)
+      : escapeHtml(content).replace(/\n/g, '<br>');
     div.innerHTML = `
-      <div class="message-content">${escapeHtml(content).replace(/\n/g, '<br>')}</div>
+      <div class="message-content">${contentHtml}</div>
       ${buildMessageActions(content, lang, role)}
     `;
     div.querySelector('.btn-tts')?.addEventListener('click', handleTTS);
@@ -1254,7 +1257,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (imageData) {
       html += `<img src="${imageData}" class="message-image" alt="圖片">`;
     }
-    html += `${escapeHtml(content).replace(/\n/g, '<br>')}</div>`;
+    const bodyHtml = (role === 'assistant')
+      ? renderMarkdown(content)
+      : escapeHtml(content).replace(/\n/g, '<br>');
+    html += `${bodyHtml}</div>`;
     html += buildMessageActions(content, lang, role);
     div.innerHTML = html;
     div.querySelector('.btn-tts')?.addEventListener('click', handleTTS);
@@ -1389,6 +1395,109 @@ document.addEventListener('DOMContentLoaded', async () => {
         chatMessages.scrollTop = chatMessages.scrollHeight;
       });
     });
+  }
+
+  // ── Markdown 渲染 ─────────────────────────────────────────
+  function renderMarkdown(raw) {
+    const blocks = [], inlines = [];
+
+    // 1. 抽出 fenced code block
+    let text = raw.replace(/```(\w*)\n?([\s\S]*?)```/g, (_, lang, code) => {
+      const i = blocks.length;
+      const cls = lang ? ` class="lang-${escapeHtml(lang)}"` : '';
+      blocks.push(`<pre><code${cls}>${escapeHtml(code.trimEnd())}</code></pre>`);
+      return `\x02B${i}\x03`;
+    });
+
+    // 2. 抽出 inline code
+    text = text.replace(/`([^`\n]+)`/g, (_, code) => {
+      const i = inlines.length;
+      inlines.push(`<code>${escapeHtml(code)}</code>`);
+      return `\x02I${i}\x03`;
+    });
+
+    // 3. 轉義剩餘 HTML
+    text = escapeHtml(text);
+
+    // 4. inline 樣式（bold / italic / del）
+    function applyInline(s) {
+      s = s.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>');
+      s = s.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+      s = s.replace(/\*([^\s].*?[^\s])\*/g, '<em>$1</em>');
+      s = s.replace(/~~(.+?)~~/g, '<del>$1</del>');
+      return s;
+    }
+
+    // 5. 逐行解析
+    const lines = text.split('\n');
+    const out = [];
+    let inUl = false, inOl = false;
+    let tRows = [], inTable = false;
+
+    function flushTable() {
+      if (!tRows.length) return;
+      const rows = tRows.filter(r => !/^\|[\s:\-|]+\|$/.test(r));
+      let h = '<table>';
+      rows.forEach((row, idx) => {
+        const cells = row.split('|').slice(1, -1);
+        const tag = idx === 0 ? 'th' : 'td';
+        h += '<tr>' + cells.map(c => `<${tag}>${applyInline(c.trim())}</${tag}>`).join('') + '</tr>';
+      });
+      out.push(h + '</table>');
+      tRows = []; inTable = false;
+    }
+
+    function flushLists() {
+      if (inUl) { out.push('</ul>'); inUl = false; }
+      if (inOl) { out.push('</ol>'); inOl = false; }
+    }
+
+    for (const line of lines) {
+      // table
+      if (/^\|.+\|$/.test(line)) {
+        flushLists(); inTable = true; tRows.push(line); continue;
+      }
+      if (inTable) flushTable();
+
+      // heading
+      const hm = line.match(/^(#{1,4}) (.+)/);
+      if (hm) { flushLists(); out.push(`<h${hm[1].length}>${applyInline(hm[2])}</h${hm[1].length}>`); continue; }
+
+      // hr
+      if (/^---+$/.test(line.trim())) { flushLists(); out.push('<hr>'); continue; }
+
+      // unordered list
+      const ulm = line.match(/^[\-\*\+] (.+)/);
+      if (ulm) {
+        if (inOl) { out.push('</ol>'); inOl = false; }
+        if (!inUl) { out.push('<ul>'); inUl = true; }
+        out.push(`<li>${applyInline(ulm[1])}</li>`); continue;
+      }
+
+      // ordered list
+      const olm = line.match(/^\d+\. (.+)/);
+      if (olm) {
+        if (inUl) { out.push('</ul>'); inUl = false; }
+        if (!inOl) { out.push('<ol>'); inOl = true; }
+        out.push(`<li>${applyInline(olm[1])}</li>`); continue;
+      }
+
+      flushLists();
+
+      // blank
+      if (!line.trim()) { out.push('<br>'); continue; }
+
+      // paragraph
+      out.push(`<p>${applyInline(line)}</p>`);
+    }
+
+    flushLists();
+    if (inTable) flushTable();
+
+    let html = out.join('');
+    html = html.replace(/\x02B(\d+)\x03/g, (_, i) => blocks[+i]);
+    html = html.replace(/\x02I(\d+)\x03/g, (_, i) => inlines[+i]);
+    return html;
   }
 
   function escapeHtml(text) {
