@@ -1,7 +1,6 @@
 // sidepanel.js - 側邊欄邏輯
 
-let currentImageData = null;  // 目前附加的圖片
-let currentImageMode = null;  // 'screenshot' | 'region' | 'upload' | 'ocr'
+let currentImages = [];  // [{ dataUrl, mode }]  目前附加的圖片（支援多張）
 let pendingRegionMode = null; // 區域截圖完成後要套用的 mode（null = 'region'）
 let currentModel = 'MiniMax-M2.7';  // 目前選擇的模型
 let currentReplyModeId = 'standard'; // 目前回覆模式 ID
@@ -36,9 +35,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   const targetLangSelect = document.getElementById('targetLang');
   const imageInput = document.getElementById('imageInput');
   const imagePreview = document.getElementById('imagePreview');
-  const previewImg = document.getElementById('previewImg');
-  const removeImageBtn = document.getElementById('removeImage');
-  const imageModeLabel = document.getElementById('imageModeLabel');
+  const imageThumbs = document.getElementById('imageThumbs');
+  const lightbox = document.getElementById('lightbox');
+  const lightboxImg = document.getElementById('lightboxImg');
+  const lightboxClose = document.getElementById('lightboxClose');
+  const lightboxOverlay = document.getElementById('lightboxOverlay');
   const regionModal = document.getElementById('regionModal');
   const regionModalTitle = document.getElementById('regionModalTitle');
   const regionCanvas = document.getElementById('regionCanvas');
@@ -155,9 +156,10 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // 截圖統一透過 background，支援跨視窗
   async function captureTab() {
-    const res = await chrome.runtime.sendMessage({ type: 'CAPTURE_TAB' });
-    if (!res.success) throw new Error(res.error);
-    return res.dataUrl;
+    // 直接從 side panel（extension page）呼叫，避免 activeTab 在 service worker 中失效
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab) throw new Error('找不到活動頁籤');
+    return await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
   }
 
   // ── 全頁截圖 ──────────────────────────────────────────
@@ -166,7 +168,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       statusText.textContent = '截圖中...';
       statusText.classList.remove('error');
       const dataUrl = await captureTab();
-      setImageData(dataUrl, 'screenshot');
+      addImageData(dataUrl, 'screenshot');
       statusText.textContent = '';
     } catch (error) {
       console.error('截圖失敗:', error);
@@ -197,25 +199,40 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   imageInput.addEventListener('change', (e) => {
-    const file = e.target.files[0];
-    if (file) {
+    const files = Array.from(e.target.files || []);
+    files.forEach(file => {
       const reader = new FileReader();
-      reader.onload = (event) => {
-        setImageData(event.target.result, 'upload');
-      };
+      reader.onload = (event) => addImageData(event.target.result, 'upload');
       reader.readAsDataURL(file);
+    });
+    imageInput.value = '';
+  });
+
+  // ── Ctrl+V 貼上圖片 ──────────────────────────────────
+  messageInput.addEventListener('paste', (e) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    for (const item of items) {
+      if (item.type.startsWith('image/')) {
+        e.preventDefault();
+        const file = item.getAsFile();
+        const reader = new FileReader();
+        reader.onload = (evt) => addImageData(evt.target.result, 'upload');
+        reader.readAsDataURL(file);
+        break;
+      }
     }
   });
 
   // ── OCR 文字辨識 ────────────────────────────────────────
   ocrBtn.addEventListener('click', (e) => {
     e.stopPropagation();
-    if (!currentImageData) {
-      // 無圖時顯示來源選擇器
+    if (!currentImages.length) {
       ocrPicker.classList.toggle('hidden');
     } else {
-      // 已有圖片：直接切換為 OCR 模式
-      setImageData(currentImageData, 'ocr');
+      // 把現有圖片全部標記為 OCR 模式
+      currentImages = currentImages.map(img => ({ ...img, mode: 'ocr' }));
+      renderImagePreviews();
       ocrPicker.classList.add('hidden');
     }
   });
@@ -225,8 +242,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     ocrPicker.classList.add('hidden');
     imageInput.click();
     imageInput.addEventListener('change', () => {
-      currentImageMode = 'ocr';
-      if (imageModeLabel) imageModeLabel.textContent = 'OCR';
+      // 最後加入的圖片設為 ocr（change 已在主 handler 處理，此處補標記）
+      if (currentImages.length) {
+        currentImages[currentImages.length - 1].mode = 'ocr';
+        renderImagePreviews();
+      }
     }, { once: true });
   });
 
@@ -237,7 +257,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       statusText.textContent = '截圖中...';
       statusText.classList.remove('error');
       const dataUrl = await captureTab();
-      setImageData(dataUrl, 'ocr');
+      addImageData(dataUrl, 'ocr');
       statusText.textContent = '';
     } catch (error) {
       statusText.textContent = '截圖失敗：' + error.message;
@@ -274,10 +294,25 @@ document.addEventListener('DOMContentLoaded', async () => {
     translatePanel.classList.toggle('hidden', !translateEnabled);
   });
 
-  // ── 移除圖片 ───────────────────────────────────────────
-  removeImageBtn.addEventListener('click', async () => {
-    clearImageData();
-    await checkApiKey();
+  // ── Lightbox ──────────────────────────────────────────
+  function openLightbox(src) {
+    lightboxImg.src = src;
+    lightbox.classList.remove('hidden');
+  }
+  function closeLightbox() {
+    lightbox.classList.add('hidden');
+    lightboxImg.src = '';
+  }
+  lightboxClose.addEventListener('click', closeLightbox);
+  lightboxOverlay.addEventListener('click', closeLightbox);
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeLightbox();
+  });
+  // 使用事件委派：chatMessages 內所有 .message-image 均可點擊
+  chatMessages.addEventListener('click', (e) => {
+    if (e.target.classList.contains('message-image')) {
+      openLightbox(e.target.src);
+    }
   });
 
   // ── 歷史面板 ───────────────────────────────────────────
@@ -423,7 +458,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     pendingRegionMode = null;
     regionModal.classList.add('hidden');
     resetRegionModal();
-    setImageData(finalData, mode);
+    addImageData(finalData, mode);
   });
 
   // 工具選擇
@@ -792,38 +827,55 @@ document.addEventListener('DOMContentLoaded', async () => {
       const croppedData = fullCanvas.toDataURL('image/png');
       const mode = pendingRegionMode || 'region';
       pendingRegionMode = null;
-      setImageData(croppedData, mode);
+      addImageData(croppedData, mode);
     };
     img.src = fullScreenshotData;
   }
 
   // ── Helpers ─────────────────────────────────────────────
-  function setImageData(dataUrl, mode) {
-    currentImageData = dataUrl;
-    currentImageMode = mode;
-    previewImg.src = dataUrl;
-    imagePreview.classList.remove('hidden');
-    const labels = { screenshot: '全頁截圖', region: '區域截圖', upload: '上傳圖片', ocr: 'OCR' };
-    if (imageModeLabel) imageModeLabel.textContent = labels[mode] || '';
+  function addImageData(dataUrl, mode) {
+    currentImages.push({ dataUrl, mode });
+    renderImagePreviews();
     updateSendButton();
   }
 
   function clearImageData() {
-    currentImageData = null;
-    currentImageMode = null;
-    imagePreview.classList.add('hidden');
+    currentImages = [];
+    renderImagePreviews();
     imageInput.value = '';
     updateSendButton();
   }
 
-  function showImagePreview(dataUrl) {
-    previewImg.src = dataUrl;
+  function renderImagePreviews() {
+    if (!currentImages.length) {
+      imagePreview.classList.add('hidden');
+      imageThumbs.innerHTML = '';
+      return;
+    }
     imagePreview.classList.remove('hidden');
-    updateSendButton();
+    const labels = { screenshot: '全頁截圖', region: '區域截圖', upload: '上傳', ocr: 'OCR' };
+    imageThumbs.innerHTML = '';
+    currentImages.forEach((img, idx) => {
+      const item = document.createElement('div');
+      item.className = 'thumb-item';
+      item.innerHTML = `
+        <img src="${img.dataUrl}" class="thumb-img" alt="">
+        <button class="btn-thumb-remove" title="移除">
+          <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+        <span class="thumb-label">${labels[img.mode] || img.mode}</span>
+      `;
+      item.querySelector('.btn-thumb-remove').addEventListener('click', () => {
+        currentImages.splice(idx, 1);
+        renderImagePreviews();
+        updateSendButton();
+      });
+      imageThumbs.appendChild(item);
+    });
   }
 
   function updateSendButton() {
-    const hasContent = messageInput.value.trim() || currentImageData;
+    const hasContent = messageInput.value.trim() || currentImages.length > 0;
     sendBtn.disabled = !hasContent || isLoading;
   }
 
@@ -850,7 +902,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       uploadBtn.disabled = true;
       regionScreenshotBtn.disabled = true;
       ocrBtn.disabled = true;
-      if (currentImageData) {
+      if (currentImages.length > 0) {
         statusText.textContent = '請先設定 Gemini API Key 才能分析圖片';
         statusText.classList.add('error');
       }
@@ -941,7 +993,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           (session.pinned ? ' pinned' : '');
 
         const firstUserMsg = session.messages.find(m => m.role === 'user');
-        const hasImage = session.messages.some(m => m.image);
+        const hasImage = session.messages.some(m => m.image || (m.images && m.images.length > 0));
         const defaultPreview = firstUserMsg
           ? firstUserMsg.content.substring(0, 40) + (firstUserMsg.content.length > 40 ? '...' : '')
           : '新對話';
@@ -1082,8 +1134,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     currentSession.messages.forEach(msg => {
       // 歷史訊息不知道當時語言設定，用內容自動偵測
       const ttsLang = detectLang(msg.content);
-      if (msg.image) {
-        addMessageWithImage(msg.content, msg.role, msg.image, ttsLang);
+      const imgs = msg.images || (msg.image ? [msg.image] : null);
+      if (imgs && imgs.length > 0) {
+        addMessageWithImages(msg.content, msg.role, imgs, ttsLang);
       } else {
         addMessage(msg.content, msg.role, ttsLang);
       }
@@ -1109,7 +1162,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   // ── 發送訊息 ────────────────────────────────────────────
   async function handleSend() {
     const message = messageInput.value.trim();
-    if (!message && !currentImageData) return;
+    if (!message && !currentImages.length) return;
 
     if (!currentSession) {
       startNewSession();
@@ -1124,16 +1177,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     statusText.classList.remove('error');
 
     const userMessage = { role: 'user', content: message };
-    if (currentImageData) {
-      userMessage.image = currentImageData;
+    const snapshotImages = [...currentImages]; // 快照，避免 clearImageData 後遺失
+    if (snapshotImages.length > 0) {
+      userMessage.images = snapshotImages.map(i => i.dataUrl);
     }
 
     currentSession.messages.push(userMessage);
-    addMessageWithImage(message, 'user', currentImageData);
+    addMessageWithImages(message, 'user', snapshotImages.map(i => i.dataUrl));
 
     const textMessage = message;
-    const imageData = currentImageData;
-    const imageMode = currentImageMode;
 
     messageInput.value = '';
     messageInput.style.height = 'auto';
@@ -1150,7 +1202,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       const historyForApi = currentSession.messages.slice(0, -1).map(m => ({
         role: m.role,
         content: m.content,
-        image: m.image || null
+        images: m.images || (m.image ? [m.image] : null)
       }));
 
       // 取得回覆模式的 systemPrompt
@@ -1162,8 +1214,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         data: {
           message: textMessage,
           history: historyForApi,
-          image: imageData,
-          mode: imageMode,
+          images: snapshotImages,
           translateConfig,
           model: currentModel,
           systemPrompt
@@ -1249,13 +1300,17 @@ document.addEventListener('DOMContentLoaded', async () => {
     scrollToBottom();
   }
 
-  function addMessageWithImage(content, role, imageData, ttsLang) {
+  function addMessageWithImages(content, role, imageUrls, ttsLang) {
     const lang = resolveTTSLang(role, ttsLang);
     const div = document.createElement('div');
     div.className = `message message-${role === 'user' ? 'user' : 'assistant'}`;
     let html = `<div class="message-content">`;
-    if (imageData) {
-      html += `<img src="${imageData}" class="message-image" alt="圖片">`;
+    if (imageUrls && imageUrls.length > 0) {
+      html += `<div class="message-images">`;
+      imageUrls.forEach(url => {
+        html += `<img src="${url}" class="message-image" alt="圖片" title="點擊放大">`;
+      });
+      html += `</div>`;
     }
     const bodyHtml = (role === 'assistant')
       ? renderMarkdown(content)
@@ -1267,6 +1322,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     div.querySelector('.btn-copy')?.addEventListener('click', handleCopy);
     chatMessages.appendChild(div);
     scrollToBottom();
+  }
+
+  // 向下相容舊呼叫
+  function addMessageWithImage(content, role, imageData, ttsLang) {
+    addMessageWithImages(content, role, imageData ? [imageData] : [], ttsLang);
   }
 
   // ── 複製訊息 ─────────────────────────────────────────────

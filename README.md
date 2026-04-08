@@ -4,7 +4,7 @@
 
 ## 版本
 
-**v1.4.4**
+**v1.4.6**
 
 ## 功能特色
 
@@ -83,6 +83,20 @@ npm run build:css
 - **TailwindCSS + SCSS**：樣式設計
 
 ## Changelog
+
+## [1.4.6] - 2026-04-08
+### Fixed
+- 跨分頁截圖失敗：直接從 Side Panel 呼叫 captureVisibleTab，不再透過 Service Worker，解決 activeTab 失效問題
+- Markdown 程式碼區塊（`<pre>`）溢出導致 UI 跑版：新增 `overflow-x: auto` 與 `max-width: 100%`
+- `.message-content` 改用 `max-width: 100%` 確保訊息區塊不超出容器
+
+## [1.4.5] - 2026-04-08
+### Added
+- 圖片 Lightbox：點擊訊息中的圖片可全螢幕預覽（Esc / 點遮罩關閉）
+- 多圖上傳：截圖/上傳/OCR 均可累積多張圖片一次送出
+- Ctrl+V 貼上：可直接在輸入欄貼上剪貼簿圖片
+### Changed
+- 圖片預覽區改為多縮圖列，每張可獨立移除
 
 ## [1.4.4] - 2026-04-08
 ### Added

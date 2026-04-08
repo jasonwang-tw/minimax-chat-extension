@@ -278,6 +278,7 @@ body {
   font-size: 14px;
   line-height: 1.5;
   word-break: break-word;
+  max-width: 100%;
 }
 
 /* ── Markdown 渲染樣式 ────────────────────────────────────── */
@@ -314,6 +315,10 @@ body {
   padding: 10px 12px;
   overflow-x: auto;
   margin: 6px 0;
+  max-width: 100%;
+  white-space: pre;
+  word-break: normal;
+  overflow-wrap: normal;
 }
 .message-content pre code {
   background: none;
@@ -490,40 +495,51 @@ textarea:disabled {
 }
 
 .image-preview {
-  position: relative;
-  display: inline-flex;
-  align-items: flex-start;
   margin-bottom: 8px;
-  gap: 6px;
 }
 .image-preview.hidden {
   display: none;
 }
-.image-preview img {
-  max-width: 120px;
-  max-height: 120px;
-  border-radius: 8px;
-  border: 1px solid var(--border-color);
-}
 
-.image-mode-label {
+/* 多圖縮圖列 */
+.image-thumbs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.thumb-item {
+  position: relative;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+}
+.thumb-img {
+  width: 72px;
+  height: 72px;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid var(--border-color);
+  cursor: pointer;
+}
+.thumb-label {
   position: absolute;
-  bottom: 4px;
-  left: 4px;
-  background: rgba(0, 0, 0, 0.65);
+  bottom: 3px;
+  left: 2px;
+  right: 2px;
+  background: rgba(0,0,0,0.65);
   color: #fff;
-  font-size: 10px;
-  padding: 1px 5px;
+  font-size: 9px;
+  text-align: center;
+  padding: 1px 3px;
   border-radius: 3px;
   pointer-events: none;
 }
-
-.btn-remove {
+.btn-thumb-remove {
   position: absolute;
-  top: -6px;
-  right: -6px;
-  width: 20px;
-  height: 20px;
+  top: -5px;
+  right: -5px;
+  width: 16px;
+  height: 16px;
   background: var(--danger);
   border: none;
   border-radius: 50%;
@@ -532,10 +548,9 @@ textarea:disabled {
   display: flex;
   align-items: center;
   justify-content: center;
+  padding: 0;
 }
-.btn-remove:hover {
-  background: #dc2626;
-}
+.btn-thumb-remove:hover { background: #dc2626; }
 
 .tool-bar {
   display: flex;
@@ -569,13 +584,62 @@ textarea:disabled {
   color: white;
 }
 
-.message-image {
-  max-width: 200px;
-  max-height: 200px;
-  border-radius: 8px;
+.message-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
   margin-bottom: 8px;
-  display: block;
 }
+.message-image {
+  max-width: 160px;
+  max-height: 160px;
+  border-radius: 8px;
+  display: block;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+.message-image:hover { opacity: 0.85; }
+
+/* Lightbox */
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.lightbox.hidden { display: none; }
+.lightbox-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0,0,0,0.85);
+}
+.lightbox-img {
+  position: relative;
+  max-width: 95vw;
+  max-height: 95vh;
+  border-radius: 8px;
+  object-fit: contain;
+  z-index: 1;
+}
+.lightbox-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 2;
+  background: rgba(255,255,255,0.15);
+  border: none;
+  border-radius: 50%;
+  width: 36px;
+  height: 36px;
+  color: white;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.lightbox-close:hover { background: rgba(255,255,255,0.3); }
 
 .translate-panel {
   margin-bottom: 8px;

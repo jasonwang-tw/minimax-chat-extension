@@ -128,17 +128,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 });
 
 // 處理聊天訊息
-async function handleChatMessage({ message, history, image, mode, translateConfig, model, systemPrompt }) {
-  if (image) {
-    // 圖片流程：Gemini 分析 → MiniMax 整理輸出
-    return handleImagePipeline(message, history, image, mode, model);
+async function handleChatMessage({ message, history, images, image, mode, translateConfig, model, systemPrompt }) {
+  // 支援新格式 images（陣列）與舊格式 image（單張）
+  const imgList = images && images.length > 0
+    ? images
+    : (image ? [{ dataUrl: image, mode: mode || 'upload' }] : null);
+
+  if (imgList && imgList.length > 0) {
+    return handleImagePipeline(message, history, imgList, model);
   }
-  // 一般文字對話（含翻譯模式）
   return handleMiniMaxChat(message, history, translateConfig, model, systemPrompt);
 }
 
-// 圖片處理管線：Gemini 分析 → MiniMax 整理
-async function handleImagePipeline(message, history, imageData, mode, model) {
+// 圖片處理管線：Gemini 分析 → MiniMax 整理（支援多張圖）
+async function handleImagePipeline(message, history, images, model) {
   const { geminiApiKey, defaultPrompts } = await chrome.storage.sync.get(['geminiApiKey', 'defaultPrompts']);
   if (!geminiApiKey) {
     throw new Error('請先在設定頁面輸入 Gemini API Key');
@@ -146,16 +149,21 @@ async function handleImagePipeline(message, history, imageData, mode, model) {
 
   const prompts = { ...DEFAULT_PROMPTS, ...(defaultPrompts || {}) };
 
-  // Step 1: Gemini 分析圖片（使用自訂提示詞）
+  // 判斷模式：全部 ocr → ocr；其餘 → image
+  const isOcr = images.every(img => (img.mode || img) === 'ocr' || img.mode === 'ocr');
+
+  // Step 1: Gemini 分析（一次送出所有圖片）
   let geminiPrompt;
-  if (mode === 'ocr') {
+  if (isOcr) {
     geminiPrompt = prompts.ocr || DEFAULT_PROMPTS.ocr;
+    if (images.length > 1) geminiPrompt = `以下有 ${images.length} 張圖片，請逐一辨識每張圖片中的文字：\n\n` + geminiPrompt;
   } else {
     const basePrompt = prompts.imageAnalysis || DEFAULT_PROMPTS.imageAnalysis;
-    geminiPrompt = message ? `${basePrompt}\n\n使用者問題：${message}` : basePrompt;
+    const multiHint = images.length > 1 ? `以下有 ${images.length} 張圖片，請逐一分析：\n\n` : '';
+    geminiPrompt = multiHint + (message ? `${basePrompt}\n\n使用者問題：${message}` : basePrompt);
   }
 
-  const geminiResult = await callGemini(geminiApiKey, imageData, geminiPrompt);
+  const geminiResult = await callGemini(geminiApiKey, images, geminiPrompt);
 
   // Step 2: MiniMax 整理輸出
   const { apiKey } = await chrome.storage.sync.get(['apiKey']);
@@ -164,7 +172,7 @@ async function handleImagePipeline(message, history, imageData, mode, model) {
   }
 
   let minimaxPrompt;
-  if (mode === 'ocr') {
+  if (isOcr) {
     minimaxPrompt = `以下是從圖片中辨識出的文字內容：\n\n${geminiResult}\n\n請整理並格式化這些文字，修正明顯的OCR錯誤，保持原始語意。`;
   } else {
     const userQuestion = message ? `\n\n使用者的問題：${message}` : '';
@@ -174,23 +182,25 @@ async function handleImagePipeline(message, history, imageData, mode, model) {
   return handleMiniMaxChat(minimaxPrompt, history, null, model, null);
 }
 
-// 呼叫 Gemini API
-async function callGemini(geminiApiKey, imageData, prompt) {
-  const base64Data = imageData.split(',')[1];
-  const mimeMatch = imageData.match(/data:(image\/\w+);base64/);
-  const mimeType = mimeMatch ? mimeMatch[1] : 'image/png';
+// 呼叫 Gemini API（支援多張圖片）
+async function callGemini(geminiApiKey, images, prompt) {
+  // images = [{ dataUrl, mode }] 或 [dataUrlString]
+  const imageParts = images.map(img => {
+    const dataUrl = typeof img === 'string' ? img : img.dataUrl;
+    const base64Data = dataUrl.split(',')[1];
+    const mimeMatch = dataUrl.match(/data:(image\/\w+);base64/);
+    const mimeType = mimeMatch ? mimeMatch[1] : 'image/png';
+    return { inline_data: { mime_type: mimeType, data: base64Data } };
+  });
 
-  console.log('發送請求到 Gemini API（圖片分析）');
+  console.log(`發送請求到 Gemini API（${images.length} 張圖片）`);
 
   const response = await fetch(`${GEMINI_API_URL}?key=${geminiApiKey}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       contents: [{
-        parts: [
-          { inline_data: { mime_type: mimeType, data: base64Data } },
-          { text: prompt }
-        ]
+        parts: [...imageParts, { text: prompt }]
       }]
     })
   });
@@ -336,11 +346,12 @@ function buildMessages(newMessage, history, translateConfig, systemPrompt, globa
   // 歷史訊息
   if (history && history.length > 0) {
     history.forEach(item => {
-      if (item.image) {
+      const histImgs = item.images || (item.image ? [item.image] : null);
+      if (histImgs && histImgs.length > 0) {
         messages.push({
           role: 'user',
           content: [
-            { type: 'image_url', image_url: { url: item.image } },
+            ...histImgs.map(url => ({ type: 'image_url', image_url: { url } })),
             { type: 'text', text: item.content || '請描述這張圖片' }
           ]
         });
