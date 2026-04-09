@@ -415,4 +415,21 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     msgTimer = setTimeout(() => div.remove(), 3000);
   }
+
+  // ── TOC 高亮（IntersectionObserver） ──────────────────────
+  const tocLinks = document.querySelectorAll('.toc a');
+  const sections = document.querySelectorAll('.section[id]');
+
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        const id = entry.target.id;
+        tocLinks.forEach(a => {
+          a.classList.toggle('active', a.getAttribute('href') === `#${id}`);
+        });
+      }
+    });
+  }, { rootMargin: '-40px 0px -60% 0px', threshold: 0 });
+
+  sections.forEach(sec => observer.observe(sec));
 });

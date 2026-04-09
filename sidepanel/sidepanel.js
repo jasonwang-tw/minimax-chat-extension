@@ -1570,6 +1570,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     items.forEach((item, idx) => {
       item.classList.toggle('active', idx === cmdPaletteIndex);
     });
+    // 確保選取項目在可視範圍內
+    if (cmdPaletteIndex >= 0 && items[cmdPaletteIndex]) {
+      items[cmdPaletteIndex].scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
   }
 
   function hideCommandPalette() {

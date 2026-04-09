@@ -25,8 +25,19 @@
       </div>
     </header>
 
+    <!-- TOC 快速導覽 -->
+    <nav class="toc">
+      <a href="#sec-api">API 設定</a>
+      <a href="#sec-chat">對話設定</a>
+      <a href="#sec-prompts">提示詞</a>
+      <a href="#sec-modes">回覆模式</a>
+      <a href="#sec-commands">自訂指令</a>
+      <a href="#sec-memory">長期記憶</a>
+      <a href="#sec-about">關於</a>
+    </nav>
+
     <main class="main">
-      <section class="section">
+      <section class="section" id="sec-api">
         <h2>API 設定</h2>
         <div class="form-group">
           <label for="apiKey">MiniMax API Key</label>
@@ -68,7 +79,7 @@
         <button id="saveBtn" class="btn-primary">儲存設定</button>
       </section>
 
-      <section class="section">
+      <section class="section" id="sec-chat">
         <h2>對話設定</h2>
         <div class="form-group">
           <label for="maxHistory">最大歷史紀錄數</label>
@@ -90,7 +101,7 @@
         <button id="saveConversationBtn" class="btn-primary">儲存對話設定</button>
       </section>
 
-      <section class="section">
+      <section class="section" id="sec-prompts">
         <h2>預設提示詞</h2>
         <p class="section-desc">設定各模式的預設 System Prompt，留空則使用內建提示詞</p>
         <div class="form-group">
@@ -114,7 +125,7 @@
         <button id="savePromptsBtn" class="btn-primary">儲存提示詞</button>
       </section>
 
-      <section class="section">
+      <section class="section" id="sec-modes">
         <h2>回覆模式</h2>
         <p class="section-desc">自訂對話模式，每個模式可設定不同的回覆風格指令</p>
         <div id="replyModesList" class="reply-modes-list"></div>
@@ -122,7 +133,7 @@
         <button id="saveModesBtn" class="btn-primary" style="margin-top:8px">儲存回覆模式</button>
       </section>
 
-      <section class="section">
+      <section class="section" id="sec-commands">
         <h2>自訂指令</h2>
         <p class="section-desc">💡 指令用於<strong>一次性訊息操作</strong>（套用模板後立即送出）。若要長期切換對話風格，請改用「回覆模式」。</p>
         <p class="section-desc">在對話框輸入 <code>/觸發詞</code> 即可快速使用。模板中的 <code>{input}</code> 會被替換為 / 後輸入的文字。</p>
@@ -131,7 +142,7 @@
         <button id="saveCommandsBtn" class="btn-primary" style="margin-top:8px">儲存自訂指令</button>
       </section>
 
-      <section class="section">
+      <section class="section" id="sec-memory">
         <h2>長期記憶</h2>
         <p class="section-desc">AI 在每次對話時都會記住這些資訊。在對話框使用 <code>/remember 內容</code> 來新增。</p>
         <div class="form-group">
@@ -152,7 +163,7 @@
         <div id="memoryInlineList" class="reply-modes-list hidden" style="margin-top:12px"></div>
       </section>
 
-      <section class="section">
+      <section class="section" id="sec-about">
         <h2>關於</h2>
         <div class="about-info">
           <p><strong>版本:</strong> 1.5.0</p>
