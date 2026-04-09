@@ -6,6 +6,10 @@ let currentModel = 'MiniMax-M2.7';  // 目前選擇的模型
 let currentReplyModeId = 'standard'; // 目前回覆模式 ID
 let replyModes = [];          // 從 storage 載入的回覆模式
 let historySearchQuery = '';  // 歷史紀錄搜尋關鍵字
+let memories = [];            // 全域長期記憶條目
+let customCommands = [];      // 使用者自訂指令
+let pageContext = null;       // 當前分頁內容（/page 指令觸發後）
+let cmdPaletteIndex = -1;     // 指令選單鍵盤選取游標
 
 document.addEventListener('DOMContentLoaded', async () => {
   const messageInput = document.getElementById('messageInput');
@@ -62,6 +66,15 @@ document.addEventListener('DOMContentLoaded', async () => {
   const replyModeSelect = document.getElementById('replyModeSelect');
   const historySearchInput = document.getElementById('historySearch');
   const historyClearSearchBtn = document.getElementById('historyClearSearch');
+  const commandPalette = document.getElementById('commandPalette');
+  const pageContextChip = document.getElementById('pageContextChip');
+  const pageContextLabel = document.getElementById('pageContextLabel');
+  const pageContextRemove = document.getElementById('pageContextRemove');
+  const memoryModal = document.getElementById('memoryModal');
+  const memoryModalOverlay = document.getElementById('memoryModalOverlay');
+  const memoryModalClose = document.getElementById('memoryModalClose');
+  const memoryList = document.getElementById('memoryList');
+  const memoryClearAllBtn = document.getElementById('memoryClearAllBtn');
 
   // SVG 圖示常數（必須在所有函式之前宣告，避免 TDZ 錯誤）
   const PIN_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="17" x2="12" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"/></svg>`;
@@ -96,8 +109,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   let annPreviewState = null;
   let annTextPos = { x: 0, y: 0 };
 
-  // 載入回覆模式
+  // 載入回覆模式、記憶、自訂指令
   await loadReplyModes();
+  await loadMemories();
+  await loadCustomCommands();
 
   // 檢查 API Key
   await checkApiKey();
@@ -108,6 +123,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
     if (changes.replyModes) {
       loadReplyModes();
+    }
+    if (changes.customCommands) {
+      loadCustomCommands();
     }
   });
 
@@ -138,19 +156,70 @@ document.addEventListener('DOMContentLoaded', async () => {
     renderHistory();
   });
 
-  // 自動調整輸入框高度
+  // 自動調整輸入框高度 + 指令選單
   messageInput.addEventListener('input', () => {
     messageInput.style.height = 'auto';
     messageInput.style.height = Math.min(messageInput.scrollHeight, 120) + 'px';
     updateSendButton();
+    handleCommandPaletteInput();
   });
 
   // 發送訊息
   sendBtn.addEventListener('click', handleSend);
   messageInput.addEventListener('keydown', (e) => {
+    // 指令選單鍵盤導航
+    if (!commandPalette.classList.contains('hidden')) {
+      const items = commandPalette.querySelectorAll('.command-item');
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        cmdPaletteIndex = Math.min(cmdPaletteIndex + 1, items.length - 1);
+        renderCommandPaletteActive(items);
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        cmdPaletteIndex = Math.max(cmdPaletteIndex - 1, 0);
+        renderCommandPaletteActive(items);
+        return;
+      }
+      if (e.key === 'Enter') {
+        const active = commandPalette.querySelector('.command-item.active') || items[0];
+        if (active) { e.preventDefault(); active.click(); return; }
+      }
+      if (e.key === 'Escape') {
+        hideCommandPalette();
+        return;
+      }
+      if (e.key === 'Tab') {
+        e.preventDefault();
+        const active = commandPalette.querySelector('.command-item.active') || items[0];
+        if (active) { active.click(); return; }
+      }
+    }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSend();
+    }
+  });
+
+  // 點擊其他地方關閉指令選單
+  document.addEventListener('click', (e) => {
+    if (!commandPalette.contains(e.target) && e.target !== messageInput) {
+      hideCommandPalette();
+    }
+  });
+
+  // Page context chip 移除
+  pageContextRemove.addEventListener('click', clearPageContext);
+
+  // Memory Modal
+  memoryModalClose.addEventListener('click', closeMemoryModal);
+  memoryModalOverlay.addEventListener('click', closeMemoryModal);
+  memoryClearAllBtn.addEventListener('click', async () => {
+    if (confirm('確定要清除所有長期記憶？')) {
+      memories = [];
+      await saveMemories();
+      renderMemoryList();
     }
   });
 
@@ -1176,6 +1245,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     statusText.textContent = '等待回應...';
     statusText.classList.remove('error');
 
+    // 若有頁面內容，包裝 user message
+    const finalMessage = buildPageContextMessage(message);
+
     const userMessage = { role: 'user', content: message };
     const snapshotImages = [...currentImages]; // 快照，避免 clearImageData 後遺失
     if (snapshotImages.length > 0) {
@@ -1185,7 +1257,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     currentSession.messages.push(userMessage);
     addMessageWithImages(message, 'user', snapshotImages.map(i => i.dataUrl));
 
-    const textMessage = message;
+    const textMessage = finalMessage;
 
     messageInput.value = '';
     messageInput.style.height = 'auto';
@@ -1209,6 +1281,8 @@ document.addEventListener('DOMContentLoaded', async () => {
       const activeMode = replyModes.find(m => m.id === currentReplyModeId);
       const systemPrompt = activeMode?.prompt || '';
 
+      const memoryContext = buildMemoryBlock();
+
       const response = await chrome.runtime.sendMessage({
         type: 'SEND_MESSAGE',
         data: {
@@ -1217,7 +1291,8 @@ document.addEventListener('DOMContentLoaded', async () => {
           images: snapshotImages,
           translateConfig,
           model: currentModel,
-          systemPrompt
+          systemPrompt,
+          memoryContext
         }
       });
 
@@ -1230,6 +1305,21 @@ document.addEventListener('DOMContentLoaded', async () => {
         statusText.textContent = '';
         await saveCurrentSession();
         await loadHistory();
+
+        // AI 自動萃取記憶（非同步，不阻塞 UI）
+        const { autoMemoryEnabled } = await chrome.storage.sync.get(['autoMemoryEnabled']);
+        if (autoMemoryEnabled && message && reply) {
+          chrome.runtime.sendMessage({
+            type: 'EXTRACT_MEMORY',
+            data: { userMessage: message, aiReply: reply }
+          }).then(async (res) => {
+            if (res.success && res.items.length > 0) {
+              for (const text of res.items) {
+                await addMemory(text, 'auto');
+              }
+            }
+          }).catch(() => {});
+        }
       } else {
         addMessage(`錯誤: ${response.error}`, 'error');
         statusText.textContent = response.error;
@@ -1423,6 +1513,250 @@ document.addEventListener('DOMContentLoaded', async () => {
       utterance.onerror = () => { if (currentTTSBtn === btn) stopCurrentAudio(); };
       window.speechSynthesis.speak(utterance);
     }
+  }
+
+  // ── Commands ─────────────────────────────────────────────
+
+  const BUILTIN_COMMANDS = [
+    { trigger: '/screenshot', name: '全頁截圖',    type: 'action', icon: '📷' },
+    { trigger: '/region',     name: '區域截圖',    type: 'action', icon: '✂️' },
+    { trigger: '/ocr',        name: 'OCR 文字辨識', type: 'action', icon: '🔍' },
+    { trigger: '/page',       name: '讀取當前頁面', type: 'action', icon: '📄' },
+    { trigger: '/new',        name: '新對話',      type: 'action', icon: '➕' },
+    { trigger: '/clear',      name: '清空對話',    type: 'action', icon: '🗑️' },
+    { trigger: '/remember',   name: '記住某件事',  type: 'action', icon: '🧠', argHint: '/remember <內容>' },
+    { trigger: '/forget',     name: '管理記憶',    type: 'action', icon: '📋' },
+    { trigger: '/mode',       name: '切換回覆模式', type: 'action', icon: '🔄', argHint: '/mode <模式名稱>' },
+    { trigger: '/summarize',  name: '摘要此段文字', type: 'template', icon: '📝', template: '請用條列式摘要以下內容：\n\n{input}' },
+  ];
+
+  async function loadCustomCommands() {
+    const { customCommands: stored } = await chrome.storage.sync.get(['customCommands']);
+    customCommands = stored || [];
+  }
+
+  function getAllCommands() {
+    return [...BUILTIN_COMMANDS, ...customCommands.map(c => ({ ...c, isCustom: true }))];
+  }
+
+  function handleCommandPaletteInput() {
+    const val = messageInput.value;
+    if (!val.startsWith('/')) { hideCommandPalette(); return; }
+    const query = val.toLowerCase();
+    const all = getAllCommands();
+    const filtered = all.filter(c => c.trigger.startsWith(query) || c.name.includes(val.slice(1)));
+    if (filtered.length === 0) { hideCommandPalette(); return; }
+    showCommandPaletteItems(filtered, val);
+  }
+
+  function showCommandPaletteItems(items, query) {
+    commandPalette.innerHTML = '';
+    cmdPaletteIndex = 0;
+    items.forEach((cmd, idx) => {
+      const div = document.createElement('div');
+      div.className = 'command-item' + (idx === 0 ? ' active' : '');
+      div.innerHTML = `
+        <span class="command-item-trigger">${escapeHtml(cmd.trigger)}</span>
+        <span class="command-item-name">${escapeHtml(cmd.name)}</span>
+        <span class="command-item-type">${cmd.type === 'template' ? '模板' : '動作'}</span>
+      `;
+      div.addEventListener('click', () => applyCommand(cmd, query));
+      commandPalette.appendChild(div);
+    });
+    commandPalette.classList.remove('hidden');
+  }
+
+  function renderCommandPaletteActive(items) {
+    items.forEach((item, idx) => {
+      item.classList.toggle('active', idx === cmdPaletteIndex);
+    });
+  }
+
+  function hideCommandPalette() {
+    commandPalette.classList.add('hidden');
+    commandPalette.innerHTML = '';
+    cmdPaletteIndex = -1;
+  }
+
+  function applyCommand(cmd, inputVal) {
+    hideCommandPalette();
+    // 擷取 trigger 之後的 args
+    const args = inputVal.slice(cmd.trigger.length).trim();
+
+    if (cmd.type === 'template') {
+      const filled = cmd.template.replace('{input}', args);
+      messageInput.value = filled;
+      messageInput.style.height = 'auto';
+      messageInput.style.height = Math.min(messageInput.scrollHeight, 120) + 'px';
+      updateSendButton();
+      messageInput.focus();
+      return;
+    }
+
+    // action 類型
+    messageInput.value = '';
+    updateSendButton();
+    executeAction(cmd.trigger, args);
+  }
+
+  function executeAction(trigger, args) {
+    switch (trigger) {
+      case '/screenshot':
+        screenshotBtn.click();
+        break;
+      case '/region':
+        regionScreenshotBtn.click();
+        break;
+      case '/ocr':
+        ocrPicker.classList.toggle('hidden');
+        break;
+      case '/page':
+        fetchPageContext();
+        break;
+      case '/new':
+        startNewSession();
+        historyPanel.classList.add('hidden');
+        break;
+      case '/clear':
+        chatMessages.innerHTML = '';
+        if (currentSession) currentSession.messages = [];
+        emptyState.classList.remove('hidden');
+        break;
+      case '/remember':
+        if (args) {
+          addMemory(args, 'manual');
+        } else {
+          statusText.textContent = '用法：/remember <要記住的內容>';
+          statusText.classList.remove('error');
+          setTimeout(() => { statusText.textContent = ''; }, 3000);
+        }
+        break;
+      case '/forget':
+        openMemoryModal();
+        break;
+      case '/mode':
+        if (args) {
+          const target = replyModes.find(m => m.name.includes(args) || m.id.includes(args));
+          if (target) {
+            currentReplyModeId = target.id;
+            replyModeSelect.value = target.id;
+            statusText.textContent = `已切換至：${target.name}`;
+            setTimeout(() => { statusText.textContent = ''; }, 2000);
+          } else {
+            statusText.textContent = `找不到模式「${args}」`;
+            setTimeout(() => { statusText.textContent = ''; }, 3000);
+          }
+        } else {
+          openMemoryModal();
+        }
+        break;
+      default:
+        break;
+    }
+    messageInput.focus();
+  }
+
+  // ── Memory ──────────────────────────────────────────────
+
+  async function loadMemories() {
+    const result = await chrome.storage.local.get(['memories']);
+    memories = result.memories || [];
+  }
+
+  async function saveMemories() {
+    await chrome.storage.local.set({ memories });
+  }
+
+  async function addMemory(text, source) {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    // 去重
+    if (memories.some(m => m.text === trimmed)) {
+      statusText.textContent = '此記憶已存在';
+      setTimeout(() => { statusText.textContent = ''; }, 2000);
+      return;
+    }
+    memories.push({ id: `mem_${Date.now()}`, text: trimmed, source, createdAt: Date.now() });
+    // 上限 50 筆
+    if (memories.length > 50) memories.shift();
+    await saveMemories();
+    statusText.textContent = `✓ 已記住：${trimmed.slice(0, 30)}${trimmed.length > 30 ? '...' : ''}`;
+    setTimeout(() => { statusText.textContent = ''; }, 3000);
+  }
+
+  function openMemoryModal() {
+    renderMemoryList();
+    memoryModal.classList.remove('hidden');
+  }
+
+  function closeMemoryModal() {
+    memoryModal.classList.add('hidden');
+  }
+
+  function renderMemoryList() {
+    memoryList.innerHTML = '';
+    if (memories.length === 0) {
+      memoryList.innerHTML = '<p class="memory-empty">尚無長期記憶。<br>使用 /remember 內容 來新增。</p>';
+      return;
+    }
+    memories.slice().reverse().forEach(mem => {
+      const div = document.createElement('div');
+      div.className = 'memory-item';
+      div.innerHTML = `
+        <span class="memory-item-badge ${mem.source}">${mem.source === 'manual' ? '手動' : '自動'}</span>
+        <span class="memory-item-text">${escapeHtml(mem.text)}</span>
+        <button class="btn-memory-delete" title="刪除">
+          <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
+        </button>
+      `;
+      div.querySelector('.btn-memory-delete').addEventListener('click', async () => {
+        memories = memories.filter(m => m.id !== mem.id);
+        await saveMemories();
+        renderMemoryList();
+      });
+      memoryList.appendChild(div);
+    });
+  }
+
+  function buildMemoryBlock() {
+    if (memories.length === 0) return '';
+    return `【使用者長期記憶】\n${memories.map(m => `- ${m.text}`).join('\n')}`;
+  }
+
+  // ── Page Context ─────────────────────────────────────────
+
+  async function fetchPageContext() {
+    statusText.textContent = '讀取頁面中...';
+    statusText.classList.remove('error');
+    try {
+      const response = await chrome.runtime.sendMessage({ type: 'READ_PAGE' });
+      if (!response.success) throw new Error(response.error);
+      pageContext = response.data;
+      const shortTitle = pageContext.title.slice(0, 25) + (pageContext.title.length > 25 ? '...' : '');
+      pageContextLabel.textContent = `📄 ${shortTitle}`;
+      pageContextChip.classList.remove('hidden');
+      statusText.textContent = '';
+      messageInput.focus();
+    } catch (err) {
+      statusText.textContent = '無法讀取頁面：' + err.message;
+      statusText.classList.add('error');
+      setTimeout(() => { statusText.textContent = ''; statusText.classList.remove('error'); }, 4000);
+    }
+  }
+
+  function clearPageContext() {
+    pageContext = null;
+    pageContextChip.classList.add('hidden');
+  }
+
+  function buildPageContextMessage(userMessage) {
+    if (!pageContext) return userMessage;
+    const parts = [`【當前頁面】`, `標題：${pageContext.title}`, `網址：${pageContext.url}`];
+    if (pageContext.description) parts.push(`描述：${pageContext.description}`);
+    parts.push(`內容：\n${pageContext.text}`);
+    parts.push(`\n使用者問題：\n${userMessage}`);
+    clearPageContext();
+    return parts.join('\n');
   }
 
   // ── 工具函式 ────────────────────────────────────────────

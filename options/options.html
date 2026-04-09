@@ -123,9 +123,39 @@
       </section>
 
       <section class="section">
+        <h2>自訂指令</h2>
+        <p class="section-desc">💡 指令用於<strong>一次性訊息操作</strong>（套用模板後立即送出）。若要長期切換對話風格，請改用「回覆模式」。</p>
+        <p class="section-desc">在對話框輸入 <code>/觸發詞</code> 即可快速使用。模板中的 <code>{input}</code> 會被替換為 / 後輸入的文字。</p>
+        <div id="customCommandsList" class="reply-modes-list"></div>
+        <button id="addCommandBtn" class="btn-secondary btn-add-mode">＋ 新增指令</button>
+        <button id="saveCommandsBtn" class="btn-primary" style="margin-top:8px">儲存自訂指令</button>
+      </section>
+
+      <section class="section">
+        <h2>長期記憶</h2>
+        <p class="section-desc">AI 在每次對話時都會記住這些資訊。在對話框使用 <code>/remember 內容</code> 來新增。</p>
+        <div class="form-group">
+          <div id="memoryCountDisplay" style="font-size:13px;color:var(--text-secondary,#aaa);margin-bottom:8px">載入中...</div>
+        </div>
+        <div class="form-group">
+          <label>
+            <input type="checkbox" id="autoMemoryEnabled" style="margin-right:6px">
+            AI 自動萃取記憶
+          </label>
+          <p class="hint">⚠️ 開啟後，每次對話結束會多消耗一次 API 請求，用於分析是否有值得記住的內容。</p>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button id="viewMemoryBtn" class="btn-secondary">管理記憶條目</button>
+          <button id="clearMemoryBtn" class="btn-secondary" style="color:#ef4444">清空全部記憶</button>
+        </div>
+        <!-- 內嵌記憶清單（展開後顯示） -->
+        <div id="memoryInlineList" class="reply-modes-list hidden" style="margin-top:12px"></div>
+      </section>
+
+      <section class="section">
         <h2>關於</h2>
         <div class="about-info">
-          <p><strong>版本:</strong> 1.4.0</p>
+          <p><strong>版本:</strong> 1.5.0</p>
           <p><strong>對話模型:</strong> MiniMax-M2.7 / M2.7-highspeed / M2.5</p>
           <p><strong>圖片模型:</strong> Gemini 2.5 Flash-lite</p>
           <p>串接 MiniMax API 的 Chrome 擴充功能</p>

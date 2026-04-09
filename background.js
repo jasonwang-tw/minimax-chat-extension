@@ -23,7 +23,9 @@ chrome.runtime.onInstalled.addListener(({ reason }) => {
       apiKey: '',
       settings: { model: MODEL_NAME, maxHistory: MAX_HISTORY },
       defaultPrompts: DEFAULT_PROMPTS,
-      replyModes: DEFAULT_REPLY_MODES
+      replyModes: DEFAULT_REPLY_MODES,
+      customCommands: [],
+      autoMemoryEnabled: false
     });
   }
 });
@@ -125,23 +127,62 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       .catch(error => sendResponse({ success: false, error: error.message }));
     return true;
   }
+
+  if (message.type === 'EXTRACT_MEMORY') {
+    extractMemories(message.data.userMessage, message.data.aiReply)
+      .then(items => sendResponse({ success: true, items }))
+      .catch(error => sendResponse({ success: false, error: error.message }));
+    return true;
+  }
+
+  if (message.type === 'READ_PAGE') {
+    chrome.windows.getLastFocused({ windowTypes: ['normal'] }, async (win) => {
+      if (chrome.runtime.lastError || !win) {
+        sendResponse({ success: false, error: '找不到可讀取的視窗' });
+        return;
+      }
+      try {
+        const tabs = await chrome.tabs.query({ active: true, windowId: win.id });
+        const tab = tabs[0];
+        if (!tab) {
+          sendResponse({ success: false, error: '找不到活動分頁' });
+          return;
+        }
+        const results = await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          func: () => {
+            const title = document.title || '';
+            const url = location.href || '';
+            const desc = document.querySelector('meta[name="description"]')?.content || '';
+            const raw = document.body?.innerText || '';
+            const text = raw.length > 8000 ? raw.slice(0, 8000) + '\n...（已截斷）' : raw;
+            return { title, url, description: desc, text };
+          }
+        });
+        sendResponse({ success: true, data: results[0].result });
+      } catch (err) {
+        sendResponse({ success: false, error: err.message });
+      }
+    });
+    return true;
+  }
 });
 
 // 處理聊天訊息
-async function handleChatMessage({ message, history, images, image, mode, translateConfig, model, systemPrompt }) {
+async function handleChatMessage({ message, history, images, image, mode, translateConfig, model, systemPrompt, memoryContext }) {
   // 支援新格式 images（陣列）與舊格式 image（單張）
   const imgList = images && images.length > 0
     ? images
     : (image ? [{ dataUrl: image, mode: mode || 'upload' }] : null);
 
   if (imgList && imgList.length > 0) {
-    return handleImagePipeline(message, history, imgList, model);
+    return handleImagePipeline(message, history, imgList, model, memoryContext);
   }
-  return handleMiniMaxChat(message, history, translateConfig, model, systemPrompt);
+  return handleMiniMaxChat(message, history, translateConfig, model, systemPrompt, memoryContext);
 }
 
 // 圖片處理管線：Gemini 分析 → MiniMax 整理（支援多張圖）
-async function handleImagePipeline(message, history, images, model) {
+async function handleImagePipeline(message, history, images, model, memoryContext) {
   const { geminiApiKey, defaultPrompts } = await chrome.storage.sync.get(['geminiApiKey', 'defaultPrompts']);
   if (!geminiApiKey) {
     throw new Error('請先在設定頁面輸入 Gemini API Key');
@@ -179,7 +220,7 @@ async function handleImagePipeline(message, history, images, model) {
     minimaxPrompt = `以下是圖片分析結果：\n\n${geminiResult}${userQuestion}\n\n請根據以上分析，提供清晰、有條理的回應。`;
   }
 
-  return handleMiniMaxChat(minimaxPrompt, history, null, model, null);
+  return handleMiniMaxChat(minimaxPrompt, history, null, model, null, memoryContext);
 }
 
 // 呼叫 Gemini API（支援多張圖片）
@@ -233,7 +274,7 @@ async function callGemini(geminiApiKey, images, prompt) {
 }
 
 // MiniMax 文字對話
-async function handleMiniMaxChat(message, history, translateConfig, model, systemPrompt) {
+async function handleMiniMaxChat(message, history, translateConfig, model, systemPrompt, memoryContext) {
   const { apiKey, defaultPrompts, globalPrompt: storedGlobal } = await chrome.storage.sync.get(['apiKey', 'defaultPrompts', 'globalPrompt']);
 
   if (!apiKey) {
@@ -254,15 +295,8 @@ async function handleMiniMaxChat(message, history, translateConfig, model, syste
     modePrompt = systemPrompt;
   }
 
-  // 全局提示詞最優先
-  let finalSystemPrompt = '';
-  if (globalPrompt && modePrompt) {
-    finalSystemPrompt = `${globalPrompt}\n\n${modePrompt}`;
-  } else if (globalPrompt) {
-    finalSystemPrompt = globalPrompt;
-  } else {
-    finalSystemPrompt = modePrompt;
-  }
+  // 優先序：memory > globalPrompt > modePrompt
+  const finalSystemPrompt = [memoryContext, globalPrompt, modePrompt].filter(Boolean).join('\n\n');
 
   const messages = buildMessages(message, history, translateConfig, finalSystemPrompt, globalPrompt);
 
@@ -461,6 +495,43 @@ async function fetchGoogleTTS(text, lang) {
     binary += String.fromCharCode(...merged.subarray(i, i + chunkSize));
   }
   return btoa(binary);
+}
+
+// AI 自動萃取記憶（獨立呼叫，不帶歷史節省 token）
+async function extractMemories(userMessage, aiReply) {
+  const { apiKey } = await chrome.storage.sync.get(['apiKey']);
+  if (!apiKey) return [];
+
+  const prompt = `以下是一段對話：\n\n使用者：${userMessage}\n\nAI：${aiReply}\n\n請判斷這段對話是否包含值得長期記憶的使用者偏好、身份、重要事實。若有，以 JSON 陣列格式回傳（每項字串最多 30 字，僅客觀事實，不含 AI 回應內容）；若無，回傳 []。只回傳 JSON，不要其他說明。`;
+
+  const response = await fetch(MINIMAX_API_URL, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${apiKey}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      model: MODEL_NAME,
+      messages: [{ role: 'user', content: prompt }]
+    })
+  });
+
+  if (!response.ok) return [];
+
+  const data = await response.json();
+  const content = data.choices?.[0]?.message?.content;
+  const text = Array.isArray(content)
+    ? content.filter(b => b.type === 'text').map(b => b.text).join('')
+    : (typeof content === 'string' ? content : '');
+
+  try {
+    const match = text.match(/\[[\s\S]*\]/);
+    if (!match) return [];
+    const items = JSON.parse(match[0]);
+    return Array.isArray(items) ? items.filter(i => typeof i === 'string' && i.trim()) : [];
+  } catch {
+    return [];
+  }
 }
 
 // 依長度切割文字（在句末或空格處斷開）

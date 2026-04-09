@@ -25,8 +25,17 @@ document.addEventListener("DOMContentLoaded", async () => {
   const addModeBtn = document.getElementById("addModeBtn");
   const saveModesBtn = document.getElementById("saveModesBtn");
   const messageDiv = document.getElementById("message");
+  const customCommandsList = document.getElementById("customCommandsList");
+  const addCommandBtn = document.getElementById("addCommandBtn");
+  const saveCommandsBtn = document.getElementById("saveCommandsBtn");
+  const memoryCountDisplay = document.getElementById("memoryCountDisplay");
+  const autoMemoryEnabledChk = document.getElementById("autoMemoryEnabled");
+  const viewMemoryBtn = document.getElementById("viewMemoryBtn");
+  const clearMemoryBtn = document.getElementById("clearMemoryBtn");
+  const memoryInlineList = document.getElementById("memoryInlineList");
 
   let replyModes = [];
+  let customCommands = [];
 
   const MINIMAX_API_URL = "https://api.minimax.io/v1/chat/completions";
   const TEST_MODEL = "MiniMax-M2.7";
@@ -37,6 +46,8 @@ document.addEventListener("DOMContentLoaded", async () => {
   await loadSettings();
   await loadPrompts();
   await loadReplyModes();
+  await loadCustomCommands();
+  await loadMemorySection();
 
   // 切換 MiniMax 密碼可見性
   toggleKeyBtn.addEventListener("click", () => {
@@ -216,6 +227,140 @@ document.addEventListener("DOMContentLoaded", async () => {
     const { replyModes: stored } = await chrome.storage.sync.get(['replyModes']);
     replyModes = (stored && stored.length > 0) ? stored : [...DEFAULT_REPLY_MODES];
     renderReplyModes();
+  }
+
+  // ── 自訂指令 ──────────────────────────────────────────────
+
+  addCommandBtn.addEventListener("click", () => {
+    customCommands.push({ id: `cmd_${Date.now()}`, trigger: '/', name: '新指令', type: 'template', template: '{input}' });
+    renderCustomCommands();
+  });
+
+  saveCommandsBtn.addEventListener("click", async () => {
+    const items = customCommandsList.querySelectorAll('.reply-mode-item');
+    const updated = Array.from(items).map(item => ({
+      id: item.dataset.id,
+      trigger: ('/' + (item.querySelector('.cmd-trigger').value.replace(/^\/+/, '').trim() || 'cmd')),
+      name: item.querySelector('.cmd-name').value.trim() || '未命名',
+      type: item.querySelector('.cmd-type').value,
+      template: item.querySelector('.cmd-template').value.trim()
+    }));
+    customCommands = updated;
+    await chrome.storage.sync.set({ customCommands });
+    showMessage("自訂指令已儲存", "success");
+  });
+
+  async function loadCustomCommands() {
+    const { customCommands: stored } = await chrome.storage.sync.get(['customCommands']);
+    customCommands = stored || [];
+    renderCustomCommands();
+  }
+
+  function renderCustomCommands() {
+    customCommandsList.innerHTML = '';
+    customCommands.forEach((cmd, idx) => {
+      const div = document.createElement('div');
+      div.className = 'reply-mode-item';
+      div.dataset.id = cmd.id;
+      div.innerHTML = `
+        <div class="reply-mode-header">
+          <div style="display:flex;gap:6px;flex:1;align-items:center">
+            <span style="color:#aaa;font-size:12px">/</span>
+            <input type="text" class="cmd-trigger mode-name" value="${escapeVal((cmd.trigger || '/').replace(/^\//, ''))}" placeholder="觸發詞" style="max-width:90px">
+            <input type="text" class="cmd-name mode-name" value="${escapeVal(cmd.name)}" placeholder="指令名稱">
+            <select class="cmd-type" style="font-size:12px;padding:2px 4px;background:var(--bg-card,#2d2d2d);color:var(--text-primary,#fff);border:1px solid var(--border,#444);border-radius:4px">
+              <option value="template" ${cmd.type === 'template' ? 'selected' : ''}>模板</option>
+              <option value="action" ${cmd.type === 'action' ? 'selected' : ''}>動作</option>
+            </select>
+          </div>
+          <button class="btn-mode-delete" data-idx="${idx}" title="刪除">
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
+          </button>
+        </div>
+        <textarea class="cmd-template mode-prompt" rows="2" placeholder="模板內容（{input} 會被替換為 / 後輸入的文字），動作類型可留空">${escapeVal(cmd.template || '')}</textarea>
+      `;
+      div.querySelector('.btn-mode-delete').addEventListener('click', (e) => {
+        const i = parseInt(e.currentTarget.dataset.idx);
+        customCommands.splice(i, 1);
+        renderCustomCommands();
+      });
+      customCommandsList.appendChild(div);
+    });
+  }
+
+  // ── 長期記憶 ──────────────────────────────────────────────
+
+  async function loadMemorySection() {
+    const { autoMemoryEnabled } = await chrome.storage.sync.get(['autoMemoryEnabled']);
+    if (autoMemoryEnabledChk) autoMemoryEnabledChk.checked = !!autoMemoryEnabled;
+
+    autoMemoryEnabledChk?.addEventListener('change', async () => {
+      await chrome.storage.sync.set({ autoMemoryEnabled: autoMemoryEnabledChk.checked });
+    });
+
+    await refreshMemoryCount();
+  }
+
+  async function refreshMemoryCount() {
+    const { memories } = await chrome.storage.local.get(['memories']);
+    const count = (memories || []).length;
+    if (memoryCountDisplay) {
+      memoryCountDisplay.textContent = `目前有 ${count} 筆長期記憶`;
+    }
+  }
+
+  viewMemoryBtn?.addEventListener("click", async () => {
+    const isHidden = memoryInlineList.classList.contains('hidden');
+    if (isHidden) {
+      await renderInlineMemoryList();
+      memoryInlineList.classList.remove('hidden');
+      viewMemoryBtn.textContent = '收起記憶清單';
+    } else {
+      memoryInlineList.classList.add('hidden');
+      viewMemoryBtn.textContent = '管理記憶條目';
+    }
+  });
+
+  clearMemoryBtn?.addEventListener("click", async () => {
+    if (confirm('確定要清除所有長期記憶？')) {
+      await chrome.storage.local.set({ memories: [] });
+      await refreshMemoryCount();
+      if (!memoryInlineList.classList.contains('hidden')) {
+        await renderInlineMemoryList();
+      }
+      showMessage("長期記憶已清空", "success");
+    }
+  });
+
+  async function renderInlineMemoryList() {
+    const { memories } = await chrome.storage.local.get(['memories']);
+    const list = memories || [];
+    memoryInlineList.innerHTML = '';
+    if (list.length === 0) {
+      memoryInlineList.innerHTML = '<p style="font-size:13px;color:#aaa;padding:8px 0">尚無記憶條目</p>';
+      return;
+    }
+    list.slice().reverse().forEach(mem => {
+      const div = document.createElement('div');
+      div.className = 'reply-mode-item';
+      div.style.cssText = 'display:flex;align-items:center;gap:8px;padding:6px 8px';
+      div.innerHTML = `
+        <span style="font-size:10px;padding:2px 6px;border-radius:10px;background:${mem.source === 'manual' ? 'rgba(139,92,246,0.2)' : 'rgba(16,185,129,0.2)'};color:${mem.source === 'manual' ? '#a78bfa' : '#34d399'};flex-shrink:0">${mem.source === 'manual' ? '手動' : '自動'}</span>
+        <span style="font-size:13px;flex:1;color:#ddd">${escapeVal(mem.text)}</span>
+        <button class="btn-mode-delete" data-id="${mem.id}" title="刪除">
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
+        </button>
+      `;
+      div.querySelector('.btn-mode-delete').addEventListener('click', async (e) => {
+        const id = e.currentTarget.dataset.id;
+        const { memories: cur } = await chrome.storage.local.get(['memories']);
+        const updated = (cur || []).filter(m => m.id !== id);
+        await chrome.storage.local.set({ memories: updated });
+        await refreshMemoryCount();
+        await renderInlineMemoryList();
+      });
+      memoryInlineList.appendChild(div);
+    });
   }
 
   function renderReplyModes() {

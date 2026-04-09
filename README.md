@@ -4,7 +4,7 @@
 
 ## 版本
 
-**v1.4.7**
+**v1.5.0**
 
 ## 功能特色
 
@@ -33,6 +33,20 @@
 - **重新命名**：點擊編輯圖示可 inline 重新命名 Session
 - **釘選**：重要對話釘選置頂，顯示紫色左邊框
 - **搜尋**：即時搜尋 Session 名稱或訊息內容，關鍵字高亮
+
+### 斜線指令 /Commands
+- 輸入框輸入 `/` 即彈出指令選單，支援鍵盤 ↑/↓/Enter/Tab/Esc 導航
+- **內建指令**：`/screenshot`、`/region`、`/ocr`、`/page`、`/new`、`/clear`、`/remember`、`/forget`、`/mode`、`/summarize`
+- **自訂指令**：在設定頁面新增模板類型指令，`{input}` 替換為 / 後輸入的文字
+
+### 長期記憶
+- `/remember <內容>` 新增記憶，AI 在每次對話時都會記住這些資訊
+- `/forget` 開啟記憶管理面板，可刪除個別條目或清空全部
+- **AI 自動萃取**（選擇性開啟）：每次對話後自動分析並記住重要使用者事實
+
+### 頁面讀取 Skill
+- `/page <問題>` 讀取當前分頁標題、描述與正文（前 8000 字），附加至訊息後送出
+- 輸入框上方顯示「已附加頁面內容」chip，可點 × 移除
 
 ### 模型與回覆模式
 - **模型選擇**：⚡ 快速 / 🔵 一般 / 💻 程式碼，可在對話視窗即時切換
@@ -83,6 +97,16 @@ npm run build:css
 - **TailwindCSS + SCSS**：樣式設計
 
 ## Changelog
+
+## [1.5.0] - 2026-04-09
+### Added
+- 斜線指令 /Commands：輸入 / 彈出選單，支援內建 10 個指令與使用者自訂模板指令
+- 長期記憶：/remember 新增、/forget 管理，跨對話注入 system prompt（優先於全局提示詞）
+- AI 自動萃取記憶：可選功能（設定頁開關），對話後自動分析並記住重要事實
+- 頁面讀取 Skill：/page 讀取當前分頁內容（8000字）附加至訊息，輸入框顯示 chip 指示
+### Changed
+- background.js：memory context 作為最高優先注入，優先序 memory > globalPrompt > replyMode > defaultPrompts
+- manifest.json：新增 scripting 權限（頁面讀取所需）
 
 ## [1.4.7] - 2026-04-08
 ### Changed
