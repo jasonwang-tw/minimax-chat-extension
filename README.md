@@ -4,7 +4,7 @@
 
 ## 版本
 
-**v1.5.3**
+**v1.5.6**
 
 ## 功能特色
 
@@ -97,6 +97,33 @@ npm run build:css
 - **TailwindCSS + SCSS**：樣式設計
 
 ## Changelog
+
+## [1.5.6] - 2026-04-10
+### Changed
+- 整體主色由紫色（#8B5CF6）改為玫紅色（#EC2970），暗色版 #d01f62
+- 同步替換所有硬碼的紫色 rgba 值（sidepanel.css + options.css 共 12 處）
+
+## [1.5.5] - 2026-04-10
+### Changed
+- UI Phase 1：整體色彩系統對標 Open WebUI 風格
+  - 背景色更偏中性黑（`#171717` / `#212121` / `#2a2a2a`）
+  - 文字色柔化（`#eeeeee` / `#757575`）
+  - 邊框改為極淡透明（`rgba(255,255,255,0.08)`），增強無框感
+- User 訊息泡泡改為深灰背景（移除紫色），Assistant 訊息改為透明無背景
+- 所有泡泡 border-radius 加大至 20px，視覺更圓潤
+- 按鈕 border-radius 統一加大（8→10px / 6→8px）
+- Header 加入 box-shadow，border-bottom 改為更淡的透明邊框
+- History item hover 改為 `rgba(255,255,255,0.04)` 極淡反白
+- 工具列按鈕改為透明背景 + 白色 alpha hover
+- Scrollbar 改為更細（5px）、更淡的中性灰
+- Command Palette border-radius 加大至 12px，修復 `var(--border)` 未定義 bug
+- Memory Modal 修復 `var(--bg-secondary)` / `var(--border)` 未定義 bug，border-radius 改 16px
+
+## [1.5.4] - 2026-04-10
+### Changed
+- `/page` 指令流程優化：Enter 後指令轉為頁面 chip，再按一次 Enter 可直接送出（無需附帶文字，問題為選填）
+- 送出按鈕在 pageContext chip 存在時自動啟用（即使輸入框為空）
+- 空訊息使用 /page 時，對話氣泡顯示頁面標題；API 請求省略「使用者問題」欄位
 
 ## [1.5.3] - 2026-04-10
 ### Changed

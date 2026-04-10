@@ -943,7 +943,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   function updateSendButton() {
-    const hasContent = messageInput.value.trim() || currentImages.length > 0;
+    const hasContent = messageInput.value.trim() || currentImages.length > 0 || pageContext;
     sendBtn.disabled = !hasContent || isLoading;
   }
 
@@ -1233,7 +1233,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   // ── 發送訊息 ────────────────────────────────────────────
   async function handleSend() {
     const message = messageInput.value.trim();
-    if (!message && !currentImages.length) return;
+    if (!message && !currentImages.length && !pageContext) return;
 
     if (!currentSession) {
       startNewSession();
@@ -1246,10 +1246,17 @@ document.addEventListener('DOMContentLoaded', async () => {
     emptyState.classList.add('hidden');
     clearStatus();
 
-    // 若有頁面內容，包裝 user message
+    // 若有頁面內容，包裝 user message（先擷取標題供顯示用）
+    const pageTitle = pageContext?.title;
+    const isPageOnly = !message && !!pageContext;
     const finalMessage = buildPageContextMessage(message);
 
-    const userMessage = { role: 'user', content: message };
+    // 顯示訊息：純 /page 無附帶文字時，顯示頁面標題
+    const displayMessage = isPageOnly
+      ? `📄 ${pageTitle?.slice(0, 40) || '讀取頁面'}`
+      : message;
+
+    const userMessage = { role: 'user', content: displayMessage };
     const snapshotImages = [...currentImages]; // 快照，避免 clearImageData 後遺失
     if (snapshotImages.length > 0) {
       userMessage.images = snapshotImages.map(i => i.dataUrl); // backward compat
@@ -1257,7 +1264,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     currentSession.messages.push(userMessage);
-    addMessageWithImages(message, 'user', snapshotImages);
+    addMessageWithImages(displayMessage, 'user', snapshotImages);
 
     const textMessage = finalMessage;
 
@@ -1840,6 +1847,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       pageContextLabel.textContent = `📄 ${shortTitle}`;
       pageContextChip.classList.remove('hidden');
       clearStatus();
+      updateSendButton();
       messageInput.focus();
     } catch (err) {
       setStatus('無法讀取頁面：' + err.message, true, 4000);
@@ -1856,7 +1864,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const parts = [`【當前頁面】`, `標題：${pageContext.title}`, `網址：${pageContext.url}`];
     if (pageContext.description) parts.push(`描述：${pageContext.description}`);
     parts.push(`內容：\n${pageContext.text}`);
-    parts.push(`\n使用者問題：\n${userMessage}`);
+    if (userMessage) parts.push(`\n使用者問題：\n${userMessage}`);
     clearPageContext();
     return parts.join('\n');
   }
