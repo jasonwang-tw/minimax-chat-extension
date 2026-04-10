@@ -300,32 +300,49 @@ async function callGemini(geminiApiKey, images, prompt) {
 // 文字檔分批處理：每段 6000 字 → 逐段分析 → 合併結果
 async function handleTextFilesPipeline(textFiles, userMessage, history, translateConfig, model, systemPrompt, memoryContext) {
   const CHUNK_SIZE = 6000;
+  const MAX_TOTAL_CHARS = 30000; // 最多 5 段，避免 merge 也超出 context
 
-  // 建立所有分段
-  const chunks = [];
+  // 讀取並裁切所有文字檔，總量限制 MAX_TOTAL_CHARS
+  const fileParts = [];
+  let totalChars = 0;
+  let truncated = false;
+
   for (const f of textFiles) {
+    if (totalChars >= MAX_TOTAL_CHARS) { truncated = true; break; }
     const base64 = f.dataUrl.split(',')[1];
-    const text = atob(base64);
+    let text = atob(base64);
     const name = f.fileName || '檔案';
+    const remaining = MAX_TOTAL_CHARS - totalChars;
+    if (text.length > remaining) {
+      text = text.slice(0, remaining);
+      truncated = true;
+    }
+    fileParts.push({ name, text });
+    totalChars += text.length;
+  }
+
+  const truncateNotice = truncated ? `\n\n⚠️ 檔案過大，本次僅分析前 ${MAX_TOTAL_CHARS.toLocaleString()} 字元。` : '';
+
+  // 建立分段
+  const chunks = [];
+  for (const { name, text } of fileParts) {
     if (text.length <= CHUNK_SIZE) {
       chunks.push({ label: name, content: text });
     } else {
-      let idx = 1;
-      for (let i = 0; i < text.length; i += CHUNK_SIZE) {
-        const total = Math.ceil(text.length / CHUNK_SIZE);
+      const total = Math.ceil(text.length / CHUNK_SIZE);
+      for (let i = 0, idx = 1; i < text.length; i += CHUNK_SIZE, idx++) {
         chunks.push({ label: `${name}（第 ${idx}/${total} 段）`, content: text.slice(i, i + CHUNK_SIZE) });
-        idx++;
       }
     }
   }
 
-  // 只有一段 → 直接送出，不需合併
+  // 只有一段 → 直接送出
   if (chunks.length === 1) {
-    const prompt = `以下是附加的檔案內容：\n\n=== ${chunks[0].label} ===\n${chunks[0].content}${userMessage ? `\n\n使用者問題：${userMessage}` : '\n\n請分析並整理以上內容。'}`;
+    const prompt = `以下是附加的檔案內容：\n\n=== ${chunks[0].label} ===\n${chunks[0].content}${userMessage ? `\n\n使用者問題：${userMessage}` : '\n\n請分析並整理以上內容。'}${truncateNotice}`;
     return handleMiniMaxChat(prompt, history, translateConfig, model, systemPrompt, memoryContext);
   }
 
-  // 多段 → 逐段分析
+  // 多段 → 逐段分析（空 history，避免累積過長）
   const segmentResults = [];
   for (const chunk of chunks) {
     const segPrompt = `以下是「${chunk.label}」的內容，請閱讀並摘要這段的重點：\n\n${chunk.content}`;
@@ -334,7 +351,7 @@ async function handleTextFilesPipeline(textFiles, userMessage, history, translat
   }
 
   // 合併所有段落分析
-  const mergePrompt = `以下是對同一份（或多份）文件各段落的分析摘要，請整合成一份完整、有條理的分析報告：\n\n${segmentResults.join('\n\n')}${userMessage ? `\n\n使用者問題：${userMessage}` : ''}`;
+  const mergePrompt = `以下是對同一份（或多份）文件各段落的分析摘要，請整合成一份完整、有條理的分析報告：\n\n${segmentResults.join('\n\n')}${userMessage ? `\n\n使用者問題：${userMessage}` : ''}${truncateNotice}`;
   return handleMiniMaxChat(mergePrompt, history, translateConfig, model, systemPrompt, memoryContext);
 }
 
@@ -416,7 +433,12 @@ async function handleMiniMaxChat(message, history, translateConfig, model, syste
 
   if (!assistantMessage || assistantMessage.trim() === '') {
     console.error('無法解析 API 回應格式:', data);
-    throw new Error('API 回應格式異常，請檢查 API Key 和模型設定');
+    const finishReason = data.choices?.[0]?.finish_reason;
+    if (finishReason === 'length') throw new Error('輸入或輸出超過模型 context window 限制，請縮短內容後重試');
+    const errCode = data.error?.code || data.base_resp?.status_code;
+    const errMsg = data.error?.message || data.base_resp?.status_msg;
+    if (errMsg) throw new Error(`API 錯誤 (${errCode || '?'}): ${errMsg}`);
+    throw new Error('API 回應為空，可能是 API Key 無效或模型暫時不可用');
   }
 
   return { reply: assistantMessage.trim() };
