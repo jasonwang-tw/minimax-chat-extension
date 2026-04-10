@@ -4,7 +4,7 @@
 
 ## 版本
 
-**v1.5.6**
+**v1.5.9**
 
 ## 功能特色
 
@@ -97,6 +97,29 @@ npm run build:css
 - **TailwindCSS + SCSS**：樣式設計
 
 ## Changelog
+
+## [1.5.9] - 2026-04-10
+### Changed
+- 設定頁面：input / textarea / select / 訊息提示框 border-radius 統一加大至 12px，背景改為透明白色 alpha，focus 改為玫紅邊框
+- 設定頁面：回覆模式 mode-name / mode-prompt 同步套用一致樣式
+- 歷史紀錄：btn-text 加入邊框與 hover 效果，搜尋框 / rename input 改為透明底 + 圓角 10px
+- 歷史紀錄：批次刪除按鈕邊框改為透明紅色 alpha
+
+## [1.5.8] - 2026-04-10
+### Changed
+- UI Phase 3：精緻化
+  - Empty State 改為 Greeting Card 風格：玫紅圖示框、大標題、4 個建議 chip（點擊自動填入輸入框）
+  - Header 與 Input Area 加入 `backdrop-filter: blur(12px)` 半透明效果
+  - Suggestion chip hover 呈現玫紅色調
+
+## [1.5.7] - 2026-04-10
+### Changed
+- UI Phase 2：HTML 結構重構
+  - 工具列與輸入框合併為單一 `input-container`（`border-radius: 20px` 大圓角容器）
+  - 工具按鈕移至輸入框底部左側，Send button 移至右下角
+  - Send button 改為圓形（`border-radius: 50%`），disabled 時改為淡白色
+  - 訊息泡泡 border-radius 加大至 24px
+  - 訊息操作按鈕（TTS / Copy）改為 hover 才顯示
 
 ## [1.5.6] - 2026-04-10
 ### Changed

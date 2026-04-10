@@ -82,13 +82,14 @@ body {
 .input-wrapper {
   display: flex;
   gap: 8px;
-  background: var(--bg-darker);
-  border-radius: 8px;
-  padding: 4px 12px;
-  border: 1px solid var(--border-color);
+  background: rgba(255,255,255,0.04);
+  border-radius: 12px;
+  padding: 4px 14px;
+  border: 1px solid rgba(255,255,255,0.08);
+  transition: border-color 0.2s;
 }
 .input-wrapper:focus-within {
-  border-color: var(--primary);
+  border-color: rgba(236,41,112,0.5);
 }
 
 input[type=text],
@@ -109,17 +110,18 @@ input[type=password]::placeholder {
 
 select {
   width: 100%;
-  background: var(--bg-darker);
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  padding: 10px 12px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 12px;
+  padding: 10px 14px;
   color: var(--text-primary);
   font-size: 14px;
   outline: none;
   cursor: pointer;
+  transition: border-color 0.2s;
 }
 select:focus {
-  border-color: var(--primary);
+  border-color: rgba(236,41,112,0.5);
 }
 select option {
   background: var(--bg-dark);
@@ -194,7 +196,7 @@ select option {
 
 .message {
   padding: 12px 16px;
-  border-radius: 8px;
+  border-radius: 12px;
   font-size: 14px;
   text-align: center;
 }
@@ -225,23 +227,24 @@ select option {
 /* ── 提示詞 textarea ──────────────────────────────────── */
 .prompt-textarea {
   width: 100%;
-  background: var(--bg-darker);
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 12px;
   color: var(--text-primary);
   font-size: 13px;
   font-family: inherit;
-  padding: 10px 12px;
+  padding: 10px 14px;
   resize: vertical;
   outline: none;
-  transition: border-color 0.15s;
+  transition: border-color 0.2s;
   line-height: 1.5;
 }
 .prompt-textarea:focus {
-  border-color: var(--primary);
+  border-color: rgba(236,41,112,0.5);
 }
 .prompt-textarea::placeholder {
   color: var(--text-secondary);
+  opacity: 0.6;
 }
 
 /* ── 回覆模式列表 ──────────────────────────────────────── */
@@ -265,16 +268,17 @@ select option {
 }
 .mode-name {
   flex: 1;
-  background: var(--bg-card);
-  border: 1px solid var(--border-color);
-  border-radius: 6px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 8px;
   color: var(--text-primary);
   font-size: 13px;
   padding: 5px 10px;
   outline: none;
+  transition: border-color 0.2s;
 }
 .mode-name:focus {
-  border-color: var(--primary);
+  border-color: rgba(236,41,112,0.5);
 }
 .btn-mode-delete {
   background: none;
@@ -292,9 +296,9 @@ select option {
 }
 .mode-prompt {
   width: 100%;
-  background: var(--bg-card);
-  border: 1px solid var(--border-color);
-  border-radius: 6px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 8px;
   color: var(--text-primary);
   font-size: 12px;
   font-family: inherit;
@@ -302,12 +306,14 @@ select option {
   resize: vertical;
   outline: none;
   line-height: 1.5;
+  transition: border-color 0.2s;
 }
 .mode-prompt:focus {
-  border-color: var(--primary);
+  border-color: rgba(236,41,112,0.5);
 }
 .mode-prompt::placeholder {
   color: var(--text-secondary);
+  opacity: 0.6;
 }
 .btn-add-mode {
   width: 100%;

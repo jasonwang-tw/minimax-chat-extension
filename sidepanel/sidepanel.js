@@ -220,6 +220,17 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Page context chip 移除
   pageContextRemove.addEventListener('click', clearPageContext);
 
+  // Suggestion chips
+  document.querySelectorAll('.suggestion-chip').forEach(btn => {
+    btn.addEventListener('click', () => {
+      messageInput.value = btn.dataset.prompt;
+      messageInput.style.height = 'auto';
+      messageInput.style.height = Math.min(messageInput.scrollHeight, 120) + 'px';
+      updateSendButton();
+      messageInput.focus();
+    });
+  });
+
   // Memory Modal
   memoryModalClose.addEventListener('click', closeMemoryModal);
   memoryModalOverlay.addEventListener('click', closeMemoryModal);
