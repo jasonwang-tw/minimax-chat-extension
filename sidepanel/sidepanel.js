@@ -1,6 +1,6 @@
 // sidepanel.js - 側邊欄邏輯
 
-let currentImages = [];  // [{ dataUrl, mode }]  目前附加的圖片（支援多張）
+let currentImages = [];  // [{ dataUrl, mode, fileType, fileName }]  目前附加的檔案（圖片/PDF/文字）
 let pendingRegionMode = null; // 區域截圖完成後要套用的 mode（null = 'region'）
 let currentModel = 'MiniMax-M2.7';  // 目前選擇的模型
 let currentReplyModeId = 'standard'; // 目前回覆模式 ID
@@ -81,6 +81,14 @@ document.addEventListener('DOMContentLoaded', async () => {
   const TTS_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>`;
   const COPY_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`;
   const COPY_OK_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>`;
+  const FILE_SVG_PDF = `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#f87171" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="15" y2="17"/></svg>`;
+  const FILE_SVG_DOC = `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#93c5fd" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="15" y2="17"/></svg>`;
+  // 判斷 MIME type → fileType
+  function getFileType(mimeType) {
+    if (!mimeType || mimeType.startsWith('image/')) return 'image';
+    if (mimeType === 'application/pdf') return 'pdf';
+    return 'text';
+  }
 
   let sessions = [];
   let currentSession = null;
@@ -270,8 +278,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   imageInput.addEventListener('change', (e) => {
     const files = Array.from(e.target.files || []);
     files.forEach(file => {
+      const fileType = getFileType(file.type);
       const reader = new FileReader();
-      reader.onload = (event) => addImageData(event.target.result, 'upload');
+      reader.onload = (event) => addImageData(event.target.result, 'upload', file.name, fileType);
       reader.readAsDataURL(file);
     });
     imageInput.value = '';
@@ -902,8 +911,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   // ── Helpers ─────────────────────────────────────────────
-  function addImageData(dataUrl, mode) {
-    currentImages.push({ dataUrl, mode });
+  function addImageData(dataUrl, mode, fileName = null, fileType = 'image') {
+    currentImages.push({ dataUrl, mode, fileName, fileType });
     renderImagePreviews();
     updateSendButton();
   }
@@ -922,17 +931,23 @@ document.addEventListener('DOMContentLoaded', async () => {
       return;
     }
     imagePreview.classList.remove('hidden');
-    const labels = { screenshot: '全頁截圖', region: '區域截圖', upload: '上傳', ocr: 'OCR' };
+    const modeLabels = { screenshot: '全頁截圖', region: '區域截圖', upload: '上傳', ocr: 'OCR' };
+    const removeSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`;
     imageThumbs.innerHTML = '';
-    currentImages.forEach((img, idx) => {
+    currentImages.forEach((file, idx) => {
       const item = document.createElement('div');
       item.className = 'thumb-item';
+      const isImage = file.fileType === 'image' || !file.fileType;
+      const previewHtml = isImage
+        ? `<img src="${file.dataUrl}" class="thumb-img" alt="">`
+        : `<div class="thumb-file-icon">${file.fileType === 'pdf' ? FILE_SVG_PDF : FILE_SVG_DOC}</div>`;
+      const labelText = file.fileName
+        ? (file.fileName.length > 12 ? file.fileName.slice(0, 10) + '…' : file.fileName)
+        : (modeLabels[file.mode] || file.mode);
       item.innerHTML = `
-        <img src="${img.dataUrl}" class="thumb-img" alt="">
-        <button class="btn-thumb-remove" title="移除">
-          <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-        </button>
-        <span class="thumb-label">${labels[img.mode] || img.mode}</span>
+        ${previewHtml}
+        <button class="btn-thumb-remove" title="移除">${removeSvg}</button>
+        <span class="thumb-label">${labelText}</span>
       `;
       item.querySelector('.btn-thumb-remove').addEventListener('click', () => {
         currentImages.splice(idx, 1);
@@ -1205,7 +1220,13 @@ document.addEventListener('DOMContentLoaded', async () => {
       const ttsLang = detectLang(msg.content);
       const imgs = msg.images || (msg.image ? [msg.image] : null);
       if (imgs && imgs.length > 0) {
-        addMessageWithImages(msg.content, msg.role, imgs, ttsLang);
+        const fileInfos = msg.fileInfos || null;
+        const fileObjs = imgs.map((url, i) => ({
+          dataUrl: url,
+          fileType: fileInfos?.[i]?.fileType || 'image',
+          fileName: fileInfos?.[i]?.fileName || null
+        }));
+        addMessageWithImages(msg.content, msg.role, fileObjs, ttsLang);
       } else {
         addMessage(msg.content, msg.role, ttsLang);
       }
@@ -1251,11 +1272,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     const userMessage = { role: 'user', content: message };
     const snapshotImages = [...currentImages]; // 快照，避免 clearImageData 後遺失
     if (snapshotImages.length > 0) {
-      userMessage.images = snapshotImages.map(i => i.dataUrl);
+      userMessage.images = snapshotImages.map(i => i.dataUrl); // backward compat
+      userMessage.fileInfos = snapshotImages.map(i => ({ fileType: i.fileType || 'image', fileName: i.fileName || null }));
     }
 
     currentSession.messages.push(userMessage);
-    addMessageWithImages(message, 'user', snapshotImages.map(i => i.dataUrl));
+    addMessageWithImages(message, 'user', snapshotImages);
 
     const textMessage = finalMessage;
 
@@ -1390,15 +1412,23 @@ document.addEventListener('DOMContentLoaded', async () => {
     scrollToBottom();
   }
 
-  function addMessageWithImages(content, role, imageUrls, ttsLang) {
+  function addMessageWithImages(content, role, files, ttsLang) {
     const lang = resolveTTSLang(role, ttsLang);
     const div = document.createElement('div');
     div.className = `message message-${role === 'user' ? 'user' : 'assistant'}`;
     let html = `<div class="message-content">`;
-    if (imageUrls && imageUrls.length > 0) {
+    if (files && files.length > 0) {
       html += `<div class="message-images">`;
-      imageUrls.forEach(url => {
-        html += `<img src="${url}" class="message-image" alt="圖片" title="點擊放大">`;
+      files.forEach(f => {
+        const url = typeof f === 'string' ? f : f.dataUrl;
+        const fileType = typeof f === 'string' ? 'image' : (f.fileType || 'image');
+        const fileName = typeof f === 'string' ? null : f.fileName;
+        if (fileType === 'image') {
+          html += `<img src="${url}" class="message-image" alt="圖片" title="點擊放大">`;
+        } else {
+          const icon = fileType === 'pdf' ? FILE_SVG_PDF : FILE_SVG_DOC;
+          html += `<div class="message-file">${icon}<span class="message-file-name">${escapeHtml(fileName || '檔案')}</span></div>`;
+        }
       });
       html += `</div>`;
     }

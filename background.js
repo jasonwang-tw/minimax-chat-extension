@@ -171,14 +171,41 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 // 處理聊天訊息
 async function handleChatMessage({ message, history, images, image, mode, translateConfig, model, systemPrompt, memoryContext }) {
   // 支援新格式 images（陣列）與舊格式 image（單張）
-  const imgList = images && images.length > 0
+  const fileList = images && images.length > 0
     ? images
-    : (image ? [{ dataUrl: image, mode: mode || 'upload' }] : null);
+    : (image ? [{ dataUrl: image, mode: mode || 'upload', fileType: 'image' }] : null);
 
-  if (imgList && imgList.length > 0) {
-    return handleImagePipeline(message, history, imgList, model, memoryContext);
+  if (!fileList || fileList.length === 0) {
+    return handleMiniMaxChat(message, history, translateConfig, model, systemPrompt, memoryContext);
   }
-  return handleMiniMaxChat(message, history, translateConfig, model, systemPrompt, memoryContext);
+
+  // 分離文字檔與視覺檔（圖片 / PDF）
+  const textFiles = fileList.filter(f => f.fileType === 'text');
+  const visualFiles = fileList.filter(f => !f.fileType || f.fileType === 'image' || f.fileType === 'pdf');
+
+  // 提取文字檔內容（base64 decode）
+  let textContent = '';
+  if (textFiles.length > 0) {
+    const parts = textFiles.map(f => {
+      const base64 = f.dataUrl.split(',')[1];
+      const text = atob(base64);
+      const name = f.fileName || '檔案';
+      return `=== ${name} ===\n${text}`;
+    });
+    textContent = parts.join('\n\n');
+  }
+
+  if (visualFiles.length > 0) {
+    // 有圖片或 PDF → Gemini pipeline（文字檔內容一併附加進 message）
+    const combinedMessage = textContent
+      ? `${message || ''}\n\n[附加文字檔案內容]\n${textContent}`.trim()
+      : message;
+    return handleImagePipeline(combinedMessage, history, visualFiles, model, memoryContext);
+  } else {
+    // 純文字檔 → 直接 MiniMax
+    const combinedMessage = `以下是附加的檔案內容：\n\n${textContent}${message ? `\n\n使用者問題：${message}` : '\n\n請分析並整理以上內容。'}`;
+    return handleMiniMaxChat(combinedMessage, history, translateConfig, model, systemPrompt, memoryContext);
+  }
 }
 
 // 圖片處理管線：Gemini 分析 → MiniMax 整理（支援多張圖）
@@ -229,7 +256,7 @@ async function callGemini(geminiApiKey, images, prompt) {
   const imageParts = images.map(img => {
     const dataUrl = typeof img === 'string' ? img : img.dataUrl;
     const base64Data = dataUrl.split(',')[1];
-    const mimeMatch = dataUrl.match(/data:(image\/\w+);base64/);
+    const mimeMatch = dataUrl.match(/data:([^;]+);base64/);
     const mimeType = mimeMatch ? mimeMatch[1] : 'image/png';
     return { inline_data: { mime_type: mimeType, data: base64Data } };
   });
