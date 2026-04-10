@@ -1,6 +1,7 @@
 // sidepanel.js - 側邊欄邏輯
 
 let currentImages = [];  // [{ dataUrl, mode, fileType, fileName }]  目前附加的檔案（圖片/PDF/文字）
+let statusNoticeEl = null; // 聊天區底部的狀態通知元素
 let pendingRegionMode = null; // 區域截圖完成後要套用的 mode（null = 'region'）
 let currentModel = 'MiniMax-M2.7';  // 目前選擇的模型
 let currentReplyModeId = 'standard'; // 目前回覆模式 ID
@@ -17,7 +18,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   const chatMessages = document.getElementById('chatMessages');
   const emptyState = document.getElementById('emptyState');
   const typingIndicator = document.getElementById('typingIndicator');
-  const statusText = document.getElementById('statusText');
   const historyPanel = document.getElementById('historyPanel');
   const historyList = document.getElementById('historyList');
   const newSessionBtn = document.getElementById('newSessionBtn');
@@ -242,31 +242,23 @@ document.addEventListener('DOMContentLoaded', async () => {
   // ── 全頁截圖 ──────────────────────────────────────────
   screenshotBtn.addEventListener('click', async () => {
     try {
-      statusText.textContent = '截圖中...';
-      statusText.classList.remove('error');
       const dataUrl = await captureTab();
       addImageData(dataUrl, 'screenshot');
-      statusText.textContent = '';
     } catch (error) {
       console.error('截圖失敗:', error);
-      statusText.textContent = '截圖失敗：' + error.message;
-      statusText.classList.add('error');
+      setStatus('截圖失敗：' + error.message, true, 4000);
     }
   });
 
   // ── 區域截圖 ──────────────────────────────────────────
   regionScreenshotBtn.addEventListener('click', async () => {
     try {
-      statusText.textContent = '擷取畫面中...';
-      statusText.classList.remove('error');
       const dataUrl = await captureTab();
       fullScreenshotData = dataUrl;
       openRegionModal(dataUrl);
-      statusText.textContent = '';
     } catch (error) {
       console.error('截圖失敗:', error);
-      statusText.textContent = '截圖失敗：' + error.message;
-      statusText.classList.add('error');
+      setStatus('截圖失敗：' + error.message, true, 4000);
     }
   });
 
@@ -332,14 +324,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('ocrScreenshotOpt').addEventListener('click', async () => {
     ocrPicker.classList.add('hidden');
     try {
-      statusText.textContent = '截圖中...';
-      statusText.classList.remove('error');
       const dataUrl = await captureTab();
       addImageData(dataUrl, 'ocr');
-      statusText.textContent = '';
     } catch (error) {
-      statusText.textContent = '截圖失敗：' + error.message;
-      statusText.classList.add('error');
+      setStatus('截圖失敗：' + error.message, true, 4000);
     }
   });
 
@@ -347,16 +335,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('ocrRegionOpt').addEventListener('click', async () => {
     ocrPicker.classList.add('hidden');
     try {
-      statusText.textContent = '擷取畫面中...';
-      statusText.classList.remove('error');
       const dataUrl = await captureTab();
       fullScreenshotData = dataUrl;
       pendingRegionMode = 'ocr';
       openRegionModal(dataUrl);
-      statusText.textContent = '';
     } catch (error) {
-      statusText.textContent = '截圖失敗：' + error.message;
-      statusText.classList.add('error');
+      setStatus('截圖失敗：' + error.message, true, 4000);
     }
   });
 
@@ -967,8 +951,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const { apiKey, geminiApiKey } = await chrome.storage.sync.get(['apiKey', 'geminiApiKey']);
 
     if (!apiKey) {
-      statusText.textContent = '請先設定 MiniMax API Key';
-      statusText.classList.add('error');
+      setStatus('請先設定 MiniMax API Key', true);
       messageInput.disabled = true;
       sendBtn.disabled = true;
       screenshotBtn.disabled = true;
@@ -976,9 +959,8 @@ document.addEventListener('DOMContentLoaded', async () => {
       regionScreenshotBtn.disabled = true;
       ocrBtn.disabled = true;
     } else {
+      clearStatus();
       messageInput.disabled = false;
-      statusText.textContent = '';
-      statusText.classList.remove('error');
     }
 
     if (!geminiApiKey) {
@@ -987,8 +969,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       regionScreenshotBtn.disabled = true;
       ocrBtn.disabled = true;
       if (currentImages.length > 0) {
-        statusText.textContent = '請先設定 Gemini API Key 才能分析圖片';
-        statusText.classList.add('error');
+        setStatus('請先設定 Gemini API Key 才能分析圖片', true);
       }
     } else {
       if (apiKey) {
@@ -1263,8 +1244,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     messageInput.disabled = true;
     typingIndicator.classList.remove('hidden');
     emptyState.classList.add('hidden');
-    statusText.textContent = '等待回應...';
-    statusText.classList.remove('error');
+    clearStatus();
 
     // 若有頁面內容，包裝 user message
     const finalMessage = buildPageContextMessage(message);
@@ -1320,7 +1300,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     port.onMessage.addListener(async (msg) => {
       if (msg.type === 'status') {
-        statusText.textContent = msg.text;
+        setStatus(msg.text);
         return;
       }
       if (msg.type === 'chunk') {
@@ -1333,7 +1313,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         const reply = msg.reply;
         currentSession.messages.push({ role: 'assistant', content: reply });
         finalizeLiveMessage(liveDiv, rawContent, reply, replyLang);
-        statusText.textContent = '';
+        clearStatus();
         port.disconnect();
         resetLoading();
         await saveCurrentSession();
@@ -1354,8 +1334,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (msg.type === 'error') {
         liveDiv.remove();
         addMessage(`錯誤: ${msg.message}`, 'error');
-        statusText.textContent = msg.message;
-        statusText.classList.add('error');
+        clearStatus();
         port.disconnect();
         resetLoading();
       }
@@ -1366,8 +1345,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       liveDiv.remove();
       const errMsg = chrome.runtime.lastError?.message || '連線中斷，請重試';
       addMessage(`錯誤: ${errMsg}`, 'error');
-      statusText.textContent = errMsg;
-      statusText.classList.add('error');
+      clearStatus();
       resetLoading();
     });
 
@@ -1447,6 +1425,19 @@ document.addEventListener('DOMContentLoaded', async () => {
     div.classList.remove('message-live');
     scrollToBottom();
   }
+
+  // ── 狀態通知（顯示於聊天區底部）──────────────────────
+  function setStatus(text, isError = false, duration = 0) {
+    if (statusNoticeEl) { statusNoticeEl.remove(); statusNoticeEl = null; }
+    if (!text) return;
+    statusNoticeEl = document.createElement('div');
+    statusNoticeEl.className = 'status-notice' + (isError ? ' error' : '');
+    statusNoticeEl.textContent = text;
+    chatMessages.appendChild(statusNoticeEl);
+    scrollToBottom();
+    if (duration > 0) setTimeout(() => { if (statusNoticeEl) { statusNoticeEl.remove(); statusNoticeEl = null; } }, duration);
+  }
+  function clearStatus() { setStatus(''); }
 
   async function saveCurrentSession() {
     if (!currentSession || currentSession.messages.length === 0) return;
@@ -1746,9 +1737,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (args) {
           addMemory(args, 'manual');
         } else {
-          statusText.textContent = '用法：/remember <要記住的內容>';
-          statusText.classList.remove('error');
-          setTimeout(() => { statusText.textContent = ''; }, 3000);
+          setStatus('用法：/remember <要記住的內容>', false, 3000);
         }
         break;
       case '/forget':
@@ -1760,11 +1749,9 @@ document.addEventListener('DOMContentLoaded', async () => {
           if (target) {
             currentReplyModeId = target.id;
             replyModeSelect.value = target.id;
-            statusText.textContent = `已切換至：${target.name}`;
-            setTimeout(() => { statusText.textContent = ''; }, 2000);
+            setStatus(`已切換至：${target.name}`, false, 2000);
           } else {
-            statusText.textContent = `找不到模式「${args}」`;
-            setTimeout(() => { statusText.textContent = ''; }, 3000);
+            setStatus(`找不到模式「${args}」`, false, 3000);
           }
         } else {
           openMemoryModal();
@@ -1792,16 +1779,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (!trimmed) return;
     // 去重
     if (memories.some(m => m.text === trimmed)) {
-      statusText.textContent = '此記憶已存在';
-      setTimeout(() => { statusText.textContent = ''; }, 2000);
+      setStatus('此記憶已存在', false, 2000);
       return;
     }
     memories.push({ id: `mem_${Date.now()}`, text: trimmed, source, createdAt: Date.now() });
     // 上限 50 筆
     if (memories.length > 50) memories.shift();
     await saveMemories();
-    statusText.textContent = `✓ 已記住：${trimmed.slice(0, 30)}${trimmed.length > 30 ? '...' : ''}`;
-    setTimeout(() => { statusText.textContent = ''; }, 3000);
+    setStatus(`✓ 已記住：${trimmed.slice(0, 30)}${trimmed.length > 30 ? '...' : ''}`, false, 3000);
   }
 
   function openMemoryModal() {
@@ -1846,8 +1831,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   // ── Page Context ─────────────────────────────────────────
 
   async function fetchPageContext() {
-    statusText.textContent = '讀取頁面中...';
-    statusText.classList.remove('error');
+    setStatus('讀取頁面中...');
     try {
       const response = await chrome.runtime.sendMessage({ type: 'READ_PAGE' });
       if (!response.success) throw new Error(response.error);
@@ -1855,12 +1839,10 @@ document.addEventListener('DOMContentLoaded', async () => {
       const shortTitle = pageContext.title.slice(0, 25) + (pageContext.title.length > 25 ? '...' : '');
       pageContextLabel.textContent = `📄 ${shortTitle}`;
       pageContextChip.classList.remove('hidden');
-      statusText.textContent = '';
+      clearStatus();
       messageInput.focus();
     } catch (err) {
-      statusText.textContent = '無法讀取頁面：' + err.message;
-      statusText.classList.add('error');
-      setTimeout(() => { statusText.textContent = ''; statusText.classList.remove('error'); }, 4000);
+      setStatus('無法讀取頁面：' + err.message, true, 4000);
     }
   }
 

@@ -485,13 +485,16 @@ textarea:disabled {
   cursor: not-allowed;
 }
 
-.status-text {
+/* 聊天區底部狀態通知（取代原輸入欄下方 status-text） */
+.status-notice {
   font-size: 11px;
   color: var(--text-secondary);
-  margin-top: 6px;
   text-align: center;
+  padding: 4px 12px 6px;
+  opacity: 0.85;
+  animation: fadeIn 0.15s ease;
 }
-.status-text.error {
+.status-notice.error {
   color: var(--danger);
 }
 
