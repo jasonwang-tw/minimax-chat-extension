@@ -1292,43 +1292,52 @@ document.addEventListener('DOMContentLoaded', async () => {
       targetLang: targetLangSelect.value
     } : null;
 
-    try {
-      const historyForApi = currentSession.messages.slice(0, -1).map(m => ({
-        role: m.role,
-        content: m.content,
-        images: m.images || (m.image ? [m.image] : null)
-      }));
+    const historyForApi = currentSession.messages.slice(0, -1).map(m => ({
+      role: m.role,
+      content: m.content,
+      images: m.images || (m.image ? [m.image] : null)
+    }));
 
-      // 取得回覆模式的 systemPrompt
-      const activeMode = replyModes.find(m => m.id === currentReplyModeId);
-      const systemPrompt = activeMode?.prompt || '';
+    const activeMode = replyModes.find(m => m.id === currentReplyModeId);
+    const systemPrompt = activeMode?.prompt || '';
+    const memoryContext = buildMemoryBlock();
+    const replyLang = translateEnabled ? targetLangSelect.value : sourceLangSelect.value;
 
-      const memoryContext = buildMemoryBlock();
+    // 建立即時串流訊息 div
+    typingIndicator.classList.add('hidden');
+    const liveDiv = createLiveMessageDiv();
 
-      const response = await chrome.runtime.sendMessage({
-        type: 'SEND_MESSAGE',
-        data: {
-          message: textMessage,
-          history: historyForApi,
-          images: snapshotImages,
-          translateConfig,
-          model: currentModel,
-          systemPrompt,
-          memoryContext
-        }
-      });
+    const port = chrome.runtime.connect({ name: 'chat-stream' });
+    let rawContent = '';
 
-      if (response.success) {
-        const reply = response.data.reply;
+    function resetLoading() {
+      isLoading = false;
+      sendBtn.disabled = false;
+      messageInput.disabled = false;
+      messageInput.focus();
+      updateSendButton();
+    }
+
+    port.onMessage.addListener(async (msg) => {
+      if (msg.type === 'status') {
+        statusText.textContent = msg.text;
+        return;
+      }
+      if (msg.type === 'chunk') {
+        rawContent = msg.full;
+        updateLiveMessageContent(liveDiv, rawContent);
+        scrollToBottom();
+        return;
+      }
+      if (msg.type === 'done') {
+        const reply = msg.reply;
         currentSession.messages.push({ role: 'assistant', content: reply });
-        // 翻譯開：AI 回覆是 targetLang；翻譯關：AI 回覆與使用者同語言
-        const replyLang = translateEnabled ? targetLangSelect.value : sourceLangSelect.value;
-        addMessage(reply, 'assistant', replyLang);
+        finalizeLiveMessage(liveDiv, rawContent, reply, replyLang);
         statusText.textContent = '';
+        port.disconnect();
+        resetLoading();
         await saveCurrentSession();
         await loadHistory();
-
-        // AI 自動萃取記憶（非同步，不阻塞 UI）
         const { autoMemoryEnabled } = await chrome.storage.sync.get(['autoMemoryEnabled']);
         if (autoMemoryEnabled && message && reply) {
           chrome.runtime.sendMessage({
@@ -1336,30 +1345,107 @@ document.addEventListener('DOMContentLoaded', async () => {
             data: { userMessage: message, aiReply: reply }
           }).then(async (res) => {
             if (res.success && res.items.length > 0) {
-              for (const text of res.items) {
-                await addMemory(text, 'auto');
-              }
+              for (const text of res.items) await addMemory(text, 'auto');
             }
           }).catch(() => {});
         }
-      } else {
-        addMessage(`錯誤: ${response.error}`, 'error');
-        statusText.textContent = response.error;
-        statusText.classList.add('error');
+        return;
       }
-    } catch (error) {
-      console.error('傳送失敗:', error);
-      addMessage(`錯誤: ${error.message}`, 'error');
-      statusText.textContent = error.message;
+      if (msg.type === 'error') {
+        liveDiv.remove();
+        addMessage(`錯誤: ${msg.message}`, 'error');
+        statusText.textContent = msg.message;
+        statusText.classList.add('error');
+        port.disconnect();
+        resetLoading();
+      }
+    });
+
+    port.onDisconnect.addListener(() => {
+      if (!isLoading) return;
+      liveDiv.remove();
+      const errMsg = chrome.runtime.lastError?.message || '連線中斷，請重試';
+      addMessage(`錯誤: ${errMsg}`, 'error');
+      statusText.textContent = errMsg;
       statusText.classList.add('error');
-    } finally {
-      isLoading = false;
-      sendBtn.disabled = false;
-      messageInput.disabled = false;
-      typingIndicator.classList.add('hidden');
-      messageInput.focus();
-      updateSendButton();
+      resetLoading();
+    });
+
+    port.postMessage({
+      type: 'STREAM_MESSAGE',
+      data: {
+        message: textMessage,
+        history: historyForApi,
+        images: snapshotImages,
+        translateConfig,
+        model: currentModel,
+        systemPrompt,
+        memoryContext
+      }
+    });
+  }
+
+  function createLiveMessageDiv() {
+    const div = document.createElement('div');
+    div.className = 'message message-assistant message-live';
+    div.innerHTML = `
+      <div class="message-content">
+        <div class="think-box hidden">
+          <button class="think-toggle-btn" type="button">
+            <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="think-chevron"><polyline points="6 9 12 15 18 9"/></svg>
+            思考過程
+          </button>
+          <div class="think-body"></div>
+        </div>
+        <div class="reply-live"><span class="cursor-blink">▋</span></div>
+      </div>`;
+    div.querySelector('.think-toggle-btn')?.addEventListener('click', () => {
+      const thinkBody = div.querySelector('.think-body');
+      const chevron = div.querySelector('.think-chevron');
+      const closing = !thinkBody.classList.toggle('hidden');
+      if (chevron) chevron.style.transform = closing ? '' : 'rotate(-90deg)';
+    });
+    chatMessages.appendChild(div);
+    scrollToBottom();
+    return div;
+  }
+
+  function updateLiveMessageContent(div, raw) {
+    const thinkBox = div.querySelector('.think-box');
+    const thinkBody = div.querySelector('.think-body');
+    const replyLive = div.querySelector('.reply-live');
+    if (!replyLive) return;
+
+    const thinkMatch = raw.match(/<think>([\s\S]*?)(<\/think>|$)/i);
+    if (thinkMatch) {
+      thinkBox.classList.remove('hidden');
+      thinkBody.textContent = thinkMatch[1];
+      const afterThink = thinkMatch[2] === '</think>'
+        ? raw.slice(raw.indexOf('</think>') + 8) : '';
+      const replyText = afterThink.replace(/<result>|<\/result>/gi, '').trim();
+      replyLive.innerHTML = replyText
+        ? escapeHtml(replyText).replace(/\n/g, '<br>') + '<span class="cursor-blink">▋</span>'
+        : '<span class="cursor-blink">▋</span>';
+    } else {
+      const replyText = raw.replace(/<result>|<\/result>/gi, '').trim();
+      replyLive.innerHTML = replyText
+        ? escapeHtml(replyText).replace(/\n/g, '<br>') + '<span class="cursor-blink">▋</span>'
+        : '<span class="cursor-blink">▋</span>';
     }
+  }
+
+  function finalizeLiveMessage(div, raw, cleanReply, lang) {
+    const replyLive = div.querySelector('.reply-live');
+    if (replyLive) {
+      replyLive.className = '';
+      replyLive.innerHTML = renderMarkdown(cleanReply);
+    }
+    const actionsHtml = buildMessageActions(cleanReply, resolveTTSLang('assistant', lang), 'assistant');
+    div.querySelector('.message-content').insertAdjacentHTML('afterend', actionsHtml);
+    div.querySelector('.btn-tts')?.addEventListener('click', handleTTS);
+    div.querySelector('.btn-copy')?.addEventListener('click', handleCopy);
+    div.classList.remove('message-live');
+    scrollToBottom();
   }
 
   async function saveCurrentSession() {

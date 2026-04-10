@@ -168,6 +168,194 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 });
 
+// ── Streaming（Port 長連線）─────────────────────────────
+chrome.runtime.onConnect.addListener(port => {
+  if (port.name !== 'chat-stream') return;
+  port.onMessage.addListener(async (msg) => {
+    if (msg.type !== 'STREAM_MESSAGE') return;
+    try {
+      await streamHandleMessage(msg.data, port);
+    } catch (err) {
+      try { port.postMessage({ type: 'error', message: err.message }); } catch {}
+    }
+  });
+});
+
+async function streamHandleMessage({ message, history, images, image, mode, translateConfig, model, systemPrompt, memoryContext }, port) {
+  const fileList = images && images.length > 0
+    ? images
+    : (image ? [{ dataUrl: image, mode: mode || 'upload', fileType: 'image' }] : null);
+
+  if (!fileList || fileList.length === 0) {
+    await streamMiniMaxChat(message, history, translateConfig, model, systemPrompt, memoryContext, port);
+    return;
+  }
+
+  const textFiles = fileList.filter(f => f.fileType === 'text');
+  const visualFiles = fileList.filter(f => !f.fileType || f.fileType === 'image' || f.fileType === 'pdf');
+
+  if (visualFiles.length > 0) {
+    port.postMessage({ type: 'status', text: visualFiles.length > 1 ? `分析 ${visualFiles.length} 個視覺檔案中...` : '分析圖片中...' });
+
+    let textAppend = '';
+    if (textFiles.length > 0) {
+      const parts = textFiles.map(f => {
+        const base64 = f.dataUrl.split(',')[1];
+        let text = atob(base64);
+        const name = f.fileName || '檔案';
+        if (text.length > 6000) text = text.slice(0, 6000) + '\n...[已截斷]';
+        return `=== ${name} ===\n${text}`;
+      });
+      textAppend = '\n\n[附加文字檔案內容]\n' + parts.join('\n\n');
+    }
+    const combinedMessage = `${message || ''}${textAppend}`.trim();
+
+    const { geminiApiKey, defaultPrompts } = await chrome.storage.sync.get(['geminiApiKey', 'defaultPrompts']);
+    if (!geminiApiKey) throw new Error('請先在設定頁面輸入 Gemini API Key');
+
+    const prompts = { ...DEFAULT_PROMPTS, ...(defaultPrompts || {}) };
+    const isOcr = visualFiles.every(img => img.mode === 'ocr');
+    let geminiPrompt;
+    if (isOcr) {
+      geminiPrompt = prompts.ocr || DEFAULT_PROMPTS.ocr;
+      if (visualFiles.length > 1) geminiPrompt = `以下有 ${visualFiles.length} 張圖片，請逐一辨識：\n\n` + geminiPrompt;
+    } else {
+      const basePrompt = prompts.imageAnalysis || DEFAULT_PROMPTS.imageAnalysis;
+      const multiHint = visualFiles.length > 1 ? `以下有 ${visualFiles.length} 張圖片，請逐一分析：\n\n` : '';
+      geminiPrompt = multiHint + (combinedMessage ? `${basePrompt}\n\n使用者問題：${combinedMessage}` : basePrompt);
+    }
+
+    const geminiResult = await callGemini(geminiApiKey, visualFiles, geminiPrompt);
+    port.postMessage({ type: 'status', text: '整理回應中...' });
+
+    let minimaxPrompt;
+    if (isOcr) {
+      minimaxPrompt = `以下是從圖片中辨識出的文字：\n\n${geminiResult}\n\n請整理並格式化，修正OCR錯誤，保持原始語意。`;
+    } else {
+      const userQ = combinedMessage ? `\n\n使用者問題：${combinedMessage}` : '';
+      minimaxPrompt = `以下是圖片分析結果：\n\n${geminiResult}${userQ}\n\n請根據以上分析，提供清晰、有條理的回應。`;
+    }
+    await streamMiniMaxChat(minimaxPrompt, history, null, model, null, memoryContext, port);
+    return;
+  }
+
+  // 純文字檔 → 分批分析 + stream 合併
+  await streamTextFilesPipeline(textFiles, message, history, translateConfig, model, systemPrompt, memoryContext, port);
+}
+
+async function streamTextFilesPipeline(textFiles, userMessage, history, translateConfig, model, systemPrompt, memoryContext, port) {
+  const CHUNK_SIZE = 6000;
+  const MAX_TOTAL_CHARS = 30000;
+
+  const fileParts = [];
+  let totalChars = 0;
+  let truncated = false;
+  for (const f of textFiles) {
+    if (totalChars >= MAX_TOTAL_CHARS) { truncated = true; break; }
+    const base64 = f.dataUrl.split(',')[1];
+    let text = atob(base64);
+    const name = f.fileName || '檔案';
+    const remaining = MAX_TOTAL_CHARS - totalChars;
+    if (text.length > remaining) { text = text.slice(0, remaining); truncated = true; }
+    fileParts.push({ name, text });
+    totalChars += text.length;
+  }
+  const truncateNotice = truncated ? `\n\n⚠️ 檔案過大，僅分析前 ${MAX_TOTAL_CHARS.toLocaleString()} 字元。` : '';
+
+  const chunks = [];
+  for (const { name, text } of fileParts) {
+    if (text.length <= CHUNK_SIZE) {
+      chunks.push({ label: name, content: text });
+    } else {
+      const total = Math.ceil(text.length / CHUNK_SIZE);
+      for (let i = 0, idx = 1; i < text.length; i += CHUNK_SIZE, idx++) {
+        chunks.push({ label: `${name}（第 ${idx}/${total} 段）`, content: text.slice(i, i + CHUNK_SIZE) });
+      }
+    }
+  }
+
+  if (chunks.length === 1) {
+    const prompt = `以下是附加的檔案內容：\n\n=== ${chunks[0].label} ===\n${chunks[0].content}${userMessage ? `\n\n使用者問題：${userMessage}` : '\n\n請分析並整理以上內容。'}${truncateNotice}`;
+    await streamMiniMaxChat(prompt, history, translateConfig, model, systemPrompt, memoryContext, port);
+    return;
+  }
+
+  const segmentResults = [];
+  for (let i = 0; i < chunks.length; i++) {
+    port.postMessage({ type: 'status', text: `分析第 ${i + 1}/${chunks.length} 段...` });
+    const segPrompt = `以下是「${chunks[i].label}」的內容，請閱讀並摘要重點：\n\n${chunks[i].content}`;
+    const res = await handleMiniMaxChat(segPrompt, [], null, model, null, memoryContext);
+    segmentResults.push(`【${chunks[i].label}】\n${res.reply}`);
+  }
+  port.postMessage({ type: 'status', text: '整合結果中...' });
+  const mergePrompt = `以下是對文件各段落的分析摘要，請整合成完整報告：\n\n${segmentResults.join('\n\n')}${userMessage ? `\n\n使用者問題：${userMessage}` : ''}${truncateNotice}`;
+  await streamMiniMaxChat(mergePrompt, history, translateConfig, model, systemPrompt, memoryContext, port);
+}
+
+async function streamMiniMaxChat(message, history, translateConfig, model, systemPrompt, memoryContext, port) {
+  const { apiKey, defaultPrompts, globalPrompt: storedGlobal } = await chrome.storage.sync.get(['apiKey', 'defaultPrompts', 'globalPrompt']);
+  if (!apiKey) throw new Error('請先在設定頁面輸入 API Key');
+
+  const useModel = model || MODEL_NAME;
+  const globalPrompt = storedGlobal?.trim() || '';
+  const chatDefaultPrompt = defaultPrompts?.chat?.trim() || '';
+  let modePrompt = '';
+  if (chatDefaultPrompt && systemPrompt) modePrompt = `${chatDefaultPrompt}\n\n${systemPrompt}`;
+  else if (chatDefaultPrompt) modePrompt = chatDefaultPrompt;
+  else if (systemPrompt) modePrompt = systemPrompt;
+
+  const finalSystemPrompt = [memoryContext, globalPrompt, modePrompt].filter(Boolean).join('\n\n');
+  const messages = buildMessages(message, history, translateConfig, finalSystemPrompt, globalPrompt);
+
+  const response = await fetch(MINIMAX_API_URL, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model: useModel, messages, stream: true })
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.error?.message || errorData.base_resp?.status_msg || `API 錯誤: ${response.status}`);
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let sseBuffer = '';
+  let fullContent = '';
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      sseBuffer += decoder.decode(value, { stream: true });
+      const lines = sseBuffer.split('\n');
+      sseBuffer = lines.pop();
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const data = line.slice(6).trim();
+        if (data === '[DONE]') continue;
+        try {
+          const json = JSON.parse(data);
+          const delta = json.choices?.[0]?.delta?.content || '';
+          if (delta) {
+            fullContent += delta;
+            port.postMessage({ type: 'chunk', text: delta, full: fullContent });
+          }
+        } catch {}
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const cleaned = fullContent
+    .replace(/<think>[\s\S]*?<\/think>/gi, '')
+    .replace(/<result>[\s\S]*?<\/result>/gi, '')
+    .trim();
+
+  port.postMessage({ type: 'done', reply: cleaned || fullContent });
+}
+
 // 處理聊天訊息
 async function handleChatMessage({ message, history, images, image, mode, translateConfig, model, systemPrompt, memoryContext }) {
   // 支援新格式 images（陣列）與舊格式 image（單張）
