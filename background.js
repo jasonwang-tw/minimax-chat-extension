@@ -183,31 +183,25 @@ async function handleChatMessage({ message, history, images, image, mode, transl
   const textFiles = fileList.filter(f => f.fileType === 'text');
   const visualFiles = fileList.filter(f => !f.fileType || f.fileType === 'image' || f.fileType === 'pdf');
 
-  // 提取文字檔內容（base64 decode），每個檔案限制 8000 字
-  const MAX_FILE_CHARS = 8000;
-  let textContent = '';
-  if (textFiles.length > 0) {
-    const parts = textFiles.map(f => {
-      const base64 = f.dataUrl.split(',')[1];
-      let text = atob(base64);
-      const name = f.fileName || '檔案';
-      const truncated = text.length > MAX_FILE_CHARS;
-      if (truncated) text = text.slice(0, MAX_FILE_CHARS) + `\n...[內容過長，已截斷，原始長度 ${text.length} 字元]`;
-      return `=== ${name} ===\n${text}`;
-    });
-    textContent = parts.join('\n\n');
-  }
-
   if (visualFiles.length > 0) {
-    // 有圖片或 PDF → Gemini pipeline（文字檔內容一併附加進 message）
-    const combinedMessage = textContent
-      ? `${message || ''}\n\n[附加文字檔案內容]\n${textContent}`.trim()
-      : message;
+    // 有圖片或 PDF → Gemini pipeline
+    // 文字檔若存在，內容截至 6000 字附加進 message（Gemini prompt 不做分批）
+    let textAppend = '';
+    if (textFiles.length > 0) {
+      const parts = textFiles.map(f => {
+        const base64 = f.dataUrl.split(',')[1];
+        let text = atob(base64);
+        const name = f.fileName || '檔案';
+        if (text.length > 6000) text = text.slice(0, 6000) + '\n...[已截斷]';
+        return `=== ${name} ===\n${text}`;
+      });
+      textAppend = '\n\n[附加文字檔案內容]\n' + parts.join('\n\n');
+    }
+    const combinedMessage = `${message || ''}${textAppend}`.trim();
     return handleImagePipeline(combinedMessage, history, visualFiles, model, memoryContext);
   } else {
-    // 純文字檔 → 直接 MiniMax
-    const combinedMessage = `以下是附加的檔案內容：\n\n${textContent}${message ? `\n\n使用者問題：${message}` : '\n\n請分析並整理以上內容。'}`;
-    return handleMiniMaxChat(combinedMessage, history, translateConfig, model, systemPrompt, memoryContext);
+    // 純文字檔 → 分批送 MiniMax，最後合併
+    return handleTextFilesPipeline(textFiles, message, history, translateConfig, model, systemPrompt, memoryContext);
   }
 }
 
@@ -301,6 +295,47 @@ async function callGemini(geminiApiKey, images, prompt) {
   }
 
   return result.trim();
+}
+
+// 文字檔分批處理：每段 6000 字 → 逐段分析 → 合併結果
+async function handleTextFilesPipeline(textFiles, userMessage, history, translateConfig, model, systemPrompt, memoryContext) {
+  const CHUNK_SIZE = 6000;
+
+  // 建立所有分段
+  const chunks = [];
+  for (const f of textFiles) {
+    const base64 = f.dataUrl.split(',')[1];
+    const text = atob(base64);
+    const name = f.fileName || '檔案';
+    if (text.length <= CHUNK_SIZE) {
+      chunks.push({ label: name, content: text });
+    } else {
+      let idx = 1;
+      for (let i = 0; i < text.length; i += CHUNK_SIZE) {
+        const total = Math.ceil(text.length / CHUNK_SIZE);
+        chunks.push({ label: `${name}（第 ${idx}/${total} 段）`, content: text.slice(i, i + CHUNK_SIZE) });
+        idx++;
+      }
+    }
+  }
+
+  // 只有一段 → 直接送出，不需合併
+  if (chunks.length === 1) {
+    const prompt = `以下是附加的檔案內容：\n\n=== ${chunks[0].label} ===\n${chunks[0].content}${userMessage ? `\n\n使用者問題：${userMessage}` : '\n\n請分析並整理以上內容。'}`;
+    return handleMiniMaxChat(prompt, history, translateConfig, model, systemPrompt, memoryContext);
+  }
+
+  // 多段 → 逐段分析
+  const segmentResults = [];
+  for (const chunk of chunks) {
+    const segPrompt = `以下是「${chunk.label}」的內容，請閱讀並摘要這段的重點：\n\n${chunk.content}`;
+    const res = await handleMiniMaxChat(segPrompt, [], null, model, null, memoryContext);
+    segmentResults.push(`【${chunk.label}】\n${res.reply}`);
+  }
+
+  // 合併所有段落分析
+  const mergePrompt = `以下是對同一份（或多份）文件各段落的分析摘要，請整合成一份完整、有條理的分析報告：\n\n${segmentResults.join('\n\n')}${userMessage ? `\n\n使用者問題：${userMessage}` : ''}`;
+  return handleMiniMaxChat(mergePrompt, history, translateConfig, model, systemPrompt, memoryContext);
 }
 
 // MiniMax 文字對話
