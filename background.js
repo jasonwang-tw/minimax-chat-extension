@@ -183,13 +183,16 @@ async function handleChatMessage({ message, history, images, image, mode, transl
   const textFiles = fileList.filter(f => f.fileType === 'text');
   const visualFiles = fileList.filter(f => !f.fileType || f.fileType === 'image' || f.fileType === 'pdf');
 
-  // 提取文字檔內容（base64 decode）
+  // 提取文字檔內容（base64 decode），每個檔案限制 8000 字
+  const MAX_FILE_CHARS = 8000;
   let textContent = '';
   if (textFiles.length > 0) {
     const parts = textFiles.map(f => {
       const base64 = f.dataUrl.split(',')[1];
-      const text = atob(base64);
+      let text = atob(base64);
       const name = f.fileName || '檔案';
+      const truncated = text.length > MAX_FILE_CHARS;
+      if (truncated) text = text.slice(0, MAX_FILE_CHARS) + `\n...[內容過長，已截斷，原始長度 ${text.length} 字元]`;
       return `=== ${name} ===\n${text}`;
     });
     textContent = parts.join('\n\n');
