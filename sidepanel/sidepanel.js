@@ -1524,7 +1524,10 @@ document.addEventListener('DOMContentLoaded', async () => {
             `[${i + 1}] ${r.title}\n${r.snippet}\n來源：${r.url}`
           ).join('\n\n');
           augmentedMessage = `【自動網路搜尋：${autoResult.query}（${autoResult.provider}）】\n${snippets}\n\n---\n${textMessage}`;
-          setStatus(`🔍 已搜尋：${autoResult.query}`, false, 3000);
+          const queryLabel = autoResult.rawQuery && autoResult.rawQuery !== autoResult.query
+            ? `${autoResult.rawQuery} → ${autoResult.query}`
+            : autoResult.query;
+          setStatus(`🔍 已搜尋：${queryLabel}`, false, 4000);
         } else {
           clearStatus();
         }

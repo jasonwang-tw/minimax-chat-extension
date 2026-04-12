@@ -1106,19 +1106,46 @@ function splitTextChunks(text, maxLen) {
   return chunks;
 }
 
+// ── 關鍵字精修（修錯字 + 補全 + 最佳化）────────────────────────
+async function refineQuery(rawQuery, apiKey) {
+  const refinePrompt = `將以下搜尋關鍵字修正錯字、補全縮寫，並優化為適合 Google 搜尋的格式（20字以內，英文專有名詞保留英文，只回覆修正後的關鍵字，不要任何說明）。
+原始關鍵字：${rawQuery}`;
+  try {
+    const res = await fetch(MINIMAX_API_URL, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: MODEL_NAME,
+        messages: [{ role: 'user', content: refinePrompt }],
+        max_tokens: 30
+      })
+    });
+    if (!res.ok) return rawQuery;
+    const data = await res.json();
+    const content = data.choices?.[0]?.message?.content;
+    const refined = (Array.isArray(content)
+      ? content.filter(b => b.type === 'text').map(b => b.text).join('')
+      : (typeof content === 'string' ? content : '')).trim();
+    return refined || rawQuery;
+  } catch {
+    return rawQuery;
+  }
+}
+
 // ── 自動搜尋判斷 ──────────────────────────────────────────────
 async function autoSearch(userMessage) {
   const { braveApiKey, exaApiKey, apiKey, globalPrompt } = await chrome.storage.sync.get(['braveApiKey', 'exaApiKey', 'apiKey', 'globalPrompt']);
   if (!braveApiKey && !exaApiKey) return { needed: false };
   if (!apiKey) return { needed: false };
 
-  // 明確搜尋意圖：直接用原始訊息當關鍵字，跳過分類步驟
+  // 明確搜尋意圖：偵測到搜尋前綴 → 修正關鍵字後搜尋
   const SEARCH_TRIGGERS = /^(搜尋|搜索|查詢|查找|幫我搜|幫我查|search|find|look up)\s*/i;
   if (SEARCH_TRIGGERS.test(userMessage.trim())) {
-    const query = userMessage.trim().replace(SEARCH_TRIGGERS, '').trim() || userMessage.trim();
+    const rawQuery = userMessage.trim().replace(SEARCH_TRIGGERS, '').trim() || userMessage.trim();
+    const query = await refineQuery(rawQuery, apiKey);
     const searchResult = await webSearch(query);
     if (!searchResult.success) return { needed: false };
-    return { needed: true, query, results: searchResult.results, provider: searchResult.provider };
+    return { needed: true, rawQuery, query, results: searchResult.results, provider: searchResult.provider };
   }
 
   // 一次 API 呼叫：判斷是否需要搜尋，若需要同時回傳搜尋關鍵字
@@ -1139,19 +1166,20 @@ async function autoSearch(userMessage) {
     if (!res.ok) return { needed: false };
     const data = await res.json();
     const content = data.choices?.[0]?.message?.content;
-    const text = (Array.isArray(content)
+    const rawText = (Array.isArray(content)
       ? content.filter(b => b.type === 'text').map(b => b.text).join('')
       : (typeof content === 'string' ? content : '')).trim();
 
     // 判斷回覆是否為 NO（中英文）
-    if (!text || /^(NO|不需要|不用|否)/i.test(text)) {
+    if (!rawText || /^(NO|不需要|不用|否)/i.test(rawText)) {
       return { needed: false };
     }
 
-    // text 是搜尋關鍵字，執行搜尋
-    const searchResult = await webSearch(text);
+    // rawText 是 AI 萃取的關鍵字，再進一步精修後搜尋
+    const query = await refineQuery(rawText, apiKey);
+    const searchResult = await webSearch(query);
     if (!searchResult.success) return { needed: false };
-    return { needed: true, query: text, results: searchResult.results, provider: searchResult.provider };
+    return { needed: true, rawQuery: rawText, query, results: searchResult.results, provider: searchResult.provider };
   } catch {
     return { needed: false };
   }
