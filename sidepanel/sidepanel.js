@@ -359,7 +359,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
       if (e.key === 'Escape') { hideKbPalette(); return; }
     }
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
       e.preventDefault();
       handleSend();
     }
@@ -1512,6 +1512,25 @@ document.addEventListener('DOMContentLoaded', async () => {
     const memoryContext = buildMemoryBlock();
     const replyLang = translateEnabled ? targetLangSelect.value : sourceLangSelect.value;
 
+    // ── 自動搜尋（有 Search API Key 且純文字訊息時觸發）──────
+    let augmentedMessage = textMessage;
+    if (message && !snapshotImages.length) {
+      const { braveApiKey, exaApiKey } = await chrome.storage.sync.get(['braveApiKey', 'exaApiKey']);
+      if (braveApiKey || exaApiKey) {
+        setStatus('🔍 分析問題...');
+        const autoResult = await chrome.runtime.sendMessage({ type: 'AUTO_SEARCH', data: { message } });
+        if (autoResult.needed && autoResult.results?.length) {
+          const snippets = autoResult.results.map((r, i) =>
+            `[${i + 1}] ${r.title}\n${r.snippet}\n來源：${r.url}`
+          ).join('\n\n');
+          augmentedMessage = `【自動網路搜尋：${autoResult.query}（${autoResult.provider}）】\n${snippets}\n\n---\n${textMessage}`;
+          setStatus(`🔍 已搜尋：${autoResult.query}`, false, 3000);
+        } else {
+          clearStatus();
+        }
+      }
+    }
+
     // 建立即時串流訊息 div
     typingIndicator.classList.add('hidden');
     const liveDiv = createLiveMessageDiv();
@@ -1589,7 +1608,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     port.postMessage({
       type: 'STREAM_MESSAGE',
       data: {
-        message: textMessage,
+        message: augmentedMessage,
         history: historyForApi,
         images: snapshotImages,
         translateConfig,
