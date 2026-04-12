@@ -1108,24 +1108,33 @@ function splitTextChunks(text, maxLen) {
 
 // ── 自動搜尋判斷 ──────────────────────────────────────────────
 async function autoSearch(userMessage) {
-  const { braveApiKey, exaApiKey, apiKey } = await chrome.storage.sync.get(['braveApiKey', 'exaApiKey', 'apiKey']);
+  const { braveApiKey, exaApiKey, apiKey, globalPrompt } = await chrome.storage.sync.get(['braveApiKey', 'exaApiKey', 'apiKey', 'globalPrompt']);
   if (!braveApiKey && !exaApiKey) return { needed: false };
   if (!apiKey) return { needed: false };
+
+  // 明確搜尋意圖：直接用原始訊息當關鍵字，跳過分類步驟
+  const SEARCH_TRIGGERS = /^(搜尋|搜索|查詢|查找|幫我搜|幫我查|search|find|look up)\s*/i;
+  if (SEARCH_TRIGGERS.test(userMessage.trim())) {
+    const query = userMessage.trim().replace(SEARCH_TRIGGERS, '').trim() || userMessage.trim();
+    const searchResult = await webSearch(query);
+    if (!searchResult.success) return { needed: false };
+    return { needed: true, query, results: searchResult.results, provider: searchResult.provider };
+  }
 
   // 一次 API 呼叫：判斷是否需要搜尋，若需要同時回傳搜尋關鍵字
   const classifyPrompt = `判斷以下問題是否需要即時網路搜尋才能準確回答（涉及最新事件、當前版本、即時狀態、近期發布等）。
 若需要搜尋，只回覆最佳搜尋關鍵字（20字以內，不含標點）；若不需要，只回覆 NO。不要其他說明。
 問題：${userMessage.slice(0, 300)}`;
 
+  const messages = [];
+  if (globalPrompt) messages.push({ role: 'system', content: globalPrompt });
+  messages.push({ role: 'user', content: classifyPrompt });
+
   try {
     const res = await fetch(MINIMAX_API_URL, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: MODEL_NAME,
-        messages: [{ role: 'user', content: classifyPrompt }],
-        max_tokens: 30
-      })
+      body: JSON.stringify({ model: MODEL_NAME, messages, max_tokens: 30 })
     });
     if (!res.ok) return { needed: false };
     const data = await res.json();
@@ -1134,7 +1143,8 @@ async function autoSearch(userMessage) {
       ? content.filter(b => b.type === 'text').map(b => b.text).join('')
       : (typeof content === 'string' ? content : '')).trim();
 
-    if (!text || text.toUpperCase() === 'NO' || text.toUpperCase().startsWith('NO')) {
+    // 判斷回覆是否為 NO（中英文）
+    if (!text || /^(NO|不需要|不用|否)/i.test(text)) {
       return { needed: false };
     }
 
