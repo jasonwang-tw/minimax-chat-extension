@@ -28,11 +28,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   const customCommandsList = document.getElementById("customCommandsList");
   const addCommandBtn = document.getElementById("addCommandBtn");
   const saveCommandsBtn = document.getElementById("saveCommandsBtn");
-  const memoryCountDisplay = document.getElementById("memoryCountDisplay");
   const autoMemoryEnabledChk = document.getElementById("autoMemoryEnabled");
-  const viewMemoryBtn = document.getElementById("viewMemoryBtn");
-  const clearMemoryBtn = document.getElementById("clearMemoryBtn");
-  const memoryInlineList = document.getElementById("memoryInlineList");
 
   let replyModes = [];
   let customCommands = [];
@@ -298,69 +294,6 @@ document.addEventListener("DOMContentLoaded", async () => {
       await chrome.storage.sync.set({ autoMemoryEnabled: autoMemoryEnabledChk.checked });
     });
 
-    await refreshMemoryCount();
-  }
-
-  async function refreshMemoryCount() {
-    const { memories } = await chrome.storage.sync.get(['memories']);
-    const count = (memories || []).length;
-    if (memoryCountDisplay) {
-      memoryCountDisplay.textContent = `目前有 ${count} 筆長期記憶`;
-    }
-  }
-
-  viewMemoryBtn?.addEventListener("click", async () => {
-    const isHidden = memoryInlineList.classList.contains('hidden');
-    if (isHidden) {
-      await renderInlineMemoryList();
-      memoryInlineList.classList.remove('hidden');
-      viewMemoryBtn.textContent = '收起記憶清單';
-    } else {
-      memoryInlineList.classList.add('hidden');
-      viewMemoryBtn.textContent = '管理記憶條目';
-    }
-  });
-
-  clearMemoryBtn?.addEventListener("click", async () => {
-    if (confirm('確定要清除所有長期記憶？')) {
-      await chrome.storage.sync.set({ memories: [] });
-      await refreshMemoryCount();
-      if (!memoryInlineList.classList.contains('hidden')) {
-        await renderInlineMemoryList();
-      }
-      showMessage("長期記憶已清空", "success");
-    }
-  });
-
-  async function renderInlineMemoryList() {
-    const { memories } = await chrome.storage.sync.get(['memories']);
-    const list = memories || [];
-    memoryInlineList.innerHTML = '';
-    if (list.length === 0) {
-      memoryInlineList.innerHTML = '<p style="font-size:13px;color:#aaa;padding:8px 0">尚無記憶條目</p>';
-      return;
-    }
-    list.slice().reverse().forEach(mem => {
-      const div = document.createElement('div');
-      div.className = 'reply-mode-item';
-      div.style.cssText = 'display:flex;align-items:center;gap:8px;padding:6px 8px';
-      div.innerHTML = `
-        <span style="font-size:10px;padding:2px 6px;border-radius:10px;background:${mem.source === 'manual' ? 'rgba(139,92,246,0.2)' : 'rgba(16,185,129,0.2)'};color:${mem.source === 'manual' ? '#a78bfa' : '#34d399'};flex-shrink:0">${mem.source === 'manual' ? '手動' : '自動'}</span>
-        <span style="font-size:13px;flex:1;color:#ddd">${escapeVal(mem.text)}</span>
-        <button class="btn-mode-delete" data-id="${mem.id}" title="刪除">
-          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
-        </button>
-      `;
-      div.querySelector('.btn-mode-delete').addEventListener('click', async (e) => {
-        const id = e.currentTarget.dataset.id;
-        const { memories: cur } = await chrome.storage.sync.get(['memories']);
-        const updated = (cur || []).filter(m => m.id !== id);
-        await chrome.storage.sync.set({ memories: updated });
-        await refreshMemoryCount();
-        await renderInlineMemoryList();
-      });
-      memoryInlineList.appendChild(div);
-    });
   }
 
   function renderReplyModes() {

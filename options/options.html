@@ -144,10 +144,7 @@
 
       <section class="section" id="sec-memory">
         <h2>長期記憶</h2>
-        <p class="section-desc">AI 在每次對話時都會記住這些資訊。在對話框使用 <code>/remember 內容</code> 來新增。</p>
-        <div class="form-group">
-          <div id="memoryCountDisplay" style="font-size:13px;color:var(--text-secondary,#aaa);margin-bottom:8px">載入中...</div>
-        </div>
+        <p class="section-desc">AI 在每次對話時都會記住這些資訊。在對話框使用 <code>/remember 內容</code> 來新增，或透過側邊欄的記憶管理進行編輯。</p>
         <div class="form-group">
           <label>
             <input type="checkbox" id="autoMemoryEnabled" style="margin-right:6px">
@@ -155,12 +152,6 @@
           </label>
           <p class="hint">⚠️ 開啟後，每次對話結束會多消耗一次 API 請求，用於分析是否有值得記住的內容。</p>
         </div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap">
-          <button id="viewMemoryBtn" class="btn-secondary">管理記憶條目</button>
-          <button id="clearMemoryBtn" class="btn-secondary" style="color:#ef4444">清空全部記憶</button>
-        </div>
-        <!-- 內嵌記憶清單（展開後顯示） -->
-        <div id="memoryInlineList" class="reply-modes-list hidden" style="margin-top:12px"></div>
       </section>
 
       <section class="section" id="sec-about">
