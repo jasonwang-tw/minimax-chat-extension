@@ -3126,6 +3126,20 @@ document.addEventListener('DOMContentLoaded', async () => {
       return `\x02I${i}\x03`;
     });
 
+    // 2.5. 抽出連結（HTML escape 前處理，避免 & 被轉成 &amp; 破壞 URL）
+    // Markdown 連結：[text](url)
+    text = text.replace(/\[([^\]\n]+)\]\((https?:\/\/[^\)\s]+)\)/g, (_, linkText, url) => {
+      const i = inlines.length;
+      inlines.push(`<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(linkText)}</a>`);
+      return `\x02I${i}\x03`;
+    });
+    // Bare URL 自動連結
+    text = text.replace(/(https?:\/\/[^\s\)\]"'<>]+)/g, (_, url) => {
+      const i = inlines.length;
+      inlines.push(`<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(url)}</a>`);
+      return `\x02I${i}\x03`;
+    });
+
     // 3. 轉義剩餘 HTML
     text = escapeHtml(text);
 

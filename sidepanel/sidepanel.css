@@ -723,6 +723,15 @@ textarea:disabled {
 }
 .think-toggle-btn:hover { background: rgba(236,41,112,0.18); }
 .think-chevron { transition: transform 0.2s; flex-shrink: 0; }
+/* 訊息內連結 */
+.message-content a {
+  color: #818cf8;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  word-break: break-all;
+}
+.message-content a:hover { opacity: 0.75; }
+
 .think-body {
   padding: 8px 10px;
   font-size: 11px;
