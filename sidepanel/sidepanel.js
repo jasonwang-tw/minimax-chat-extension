@@ -291,7 +291,9 @@ document.addEventListener('DOMContentLoaded', async () => {
       clearStatus();
       if (rawContent) {
         const partial = rawContent.trimEnd();
-        if (currentSession) currentSession.messages.push({ role: 'assistant', content: partial });
+        const stopThinkMatch = rawContent.match(/<think>([\s\S]*?)(?:<\/think>|$)/i);
+        const stopThinkContent = stopThinkMatch ? stopThinkMatch[1].trim() : undefined;
+        if (currentSession) currentSession.messages.push({ role: 'assistant', content: partial, ...(stopThinkContent && { thinkContent: stopThinkContent }) });
         finalizeLiveMessage(liveDiv, partial, partial, translateEnabled ? targetLangSelect.value : sourceLangSelect.value);
         await saveCurrentSession();
         await loadHistory();
@@ -1427,7 +1429,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         }));
         addMessageWithImages(msg.content, msg.role, fileObjs, ttsLang);
       } else {
-        addMessage(msg.content, msg.role, ttsLang);
+        addMessage(msg.content, msg.role, ttsLang, msg.thinkContent || '');
       }
     });
 
@@ -1569,7 +1571,9 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
       if (msg.type === 'done') {
         const reply = msg.reply;
-        currentSession.messages.push({ role: 'assistant', content: reply });
+        const doneThinkMatch = rawContent.match(/<think>([\s\S]*?)<\/think>/i);
+        const thinkContent = doneThinkMatch ? doneThinkMatch[1].trim() : undefined;
+        currentSession.messages.push({ role: 'assistant', content: reply, ...(thinkContent && { thinkContent }) });
         finalizeLiveMessage(liveDiv, rawContent, reply, replyLang);
         clearStatus();
         port.disconnect();
@@ -1657,6 +1661,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (thinkMatch) {
       thinkBox.classList.remove('hidden');
       thinkBody.textContent = thinkMatch[1];
+      thinkBody.scrollTop = thinkBody.scrollHeight;
       const afterThink = thinkMatch[2] === '</think>'
         ? raw.slice(raw.indexOf('</think>') + 8) : '';
       const replyText = afterThink.replace(/<result>|<\/result>/gi, '').trim();
@@ -1731,17 +1736,31 @@ document.addEventListener('DOMContentLoaded', async () => {
       </div>`;
   }
 
-  function addMessage(content, role, ttsLang) {
+  function addMessage(content, role, ttsLang, thinkContent = '') {
     const lang = resolveTTSLang(role, ttsLang);
     const div = document.createElement('div');
     div.className = `message message-${role === 'user' ? 'user' : role === 'error' ? 'error' : 'assistant'}`;
     const contentHtml = (role === 'assistant')
       ? renderMarkdown(content)
       : escapeHtml(content).replace(/\n/g, '<br>');
+    const thinkHtml = (role === 'assistant' && thinkContent) ? `
+      <div class="think-box">
+        <button class="think-toggle-btn" type="button">
+          <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="think-chevron"><polyline points="6 9 12 15 18 9"/></svg>
+          思考過程
+        </button>
+        <div class="think-body hidden">${escapeHtml(thinkContent)}</div>
+      </div>` : '';
     div.innerHTML = `
-      <div class="message-content">${contentHtml}</div>
+      <div class="message-content">${thinkHtml}${contentHtml}</div>
       ${buildMessageActions(content, lang, role)}
     `;
+    div.querySelector('.think-toggle-btn')?.addEventListener('click', () => {
+      const thinkBodyEl = div.querySelector('.think-body');
+      const chevron = div.querySelector('.think-chevron');
+      const closing = !thinkBodyEl.classList.toggle('hidden');
+      if (chevron) chevron.style.transform = closing ? '' : 'rotate(-90deg)';
+    });
     div.querySelector('.btn-tts')?.addEventListener('click', handleTTS);
     div.querySelector('.btn-copy')?.addEventListener('click', handleCopy);
     chatMessages.appendChild(div);
@@ -2073,7 +2092,9 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
       if (msg.type === 'done') {
         const reply = msg.reply;
-        currentSession.messages.push({ role: 'assistant', content: reply });
+        const doneThinkMatch2 = rawContent.match(/<think>([\s\S]*?)<\/think>/i);
+        const thinkContent2 = doneThinkMatch2 ? doneThinkMatch2[1].trim() : undefined;
+        currentSession.messages.push({ role: 'assistant', content: reply, ...(thinkContent2 && { thinkContent: thinkContent2 }) });
         finalizeLiveMessage(liveDiv, rawContent, reply, replyLang);
         port.disconnect();
         resetWebSearch();

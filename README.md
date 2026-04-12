@@ -4,7 +4,7 @@
 
 ## 版本
 
-**v1.7.0** (2026-04-12)
+**v1.7.1** (2026-04-12)
 
 ## 功能特色
 
@@ -97,6 +97,11 @@ npm run build:css
 - **TailwindCSS + SCSS**：樣式設計
 
 ## Changelog
+
+## [1.7.1] - 2026-04-12
+### Fixed
+- **思考過程持久化**：`thinkContent` 現在會隨 session message 一起存入 storage；從歷史紀錄載入 session 時，有思考過程的訊息會顯示可折疊的「思考過程」區塊（預設收合）
+- **思考過程 scrollbar 置底**：串流進行中，think-body 內容增加時自動捲到底部
 
 ## [1.7.0] - 2026-04-12
 ### Fixed
