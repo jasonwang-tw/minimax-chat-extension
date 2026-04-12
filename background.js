@@ -1107,8 +1107,11 @@ function splitTextChunks(text, maxLen) {
 }
 
 // ── 關鍵字精修（修錯字 + 補全 + 最佳化）────────────────────────
-async function refineQuery(rawQuery, apiKey) {
-  const refinePrompt = `將以下搜尋關鍵字修正錯字、補全縮寫，並優化為適合 Google 搜尋的格式（20字以內，英文專有名詞保留英文，只回覆修正後的關鍵字，不要任何說明）。
+async function refineQuery(rawQuery, apiKey, originalMessage = '') {
+  const contextHint = originalMessage && originalMessage !== rawQuery
+    ? `\n使用者原始訊息（供參考）：${originalMessage.slice(0, 200)}`
+    : '';
+  const refinePrompt = `你是搜尋引擎關鍵字優化助手。將以下搜尋關鍵字修正拼字錯誤（包含品牌、平台、產品名稱的錯誤拼法）、補全縮寫，並優化為適合 Google 搜尋的格式。只回覆修正後的關鍵字（20字以內，英文專有名詞與品牌名保留英文，不要任何說明或標點）。${contextHint}
 原始關鍵字：${rawQuery}`;
   try {
     const res = await fetch(MINIMAX_API_URL, {
@@ -1142,7 +1145,7 @@ async function autoSearch(userMessage) {
   const SEARCH_TRIGGERS = /^(搜尋|搜索|查詢|查找|幫我搜|幫我查|search|find|look up)\s*/i;
   if (SEARCH_TRIGGERS.test(userMessage.trim())) {
     const rawQuery = userMessage.trim().replace(SEARCH_TRIGGERS, '').trim() || userMessage.trim();
-    const query = await refineQuery(rawQuery, apiKey);
+    const query = await refineQuery(rawQuery, apiKey, userMessage);
     const searchResult = await webSearch(query);
     if (!searchResult.success) return { needed: false };
     return { needed: true, rawQuery, query, results: searchResult.results, provider: searchResult.provider };
@@ -1176,7 +1179,7 @@ async function autoSearch(userMessage) {
     }
 
     // rawText 是 AI 萃取的關鍵字，再進一步精修後搜尋
-    const query = await refineQuery(rawText, apiKey);
+    const query = await refineQuery(rawText, apiKey, userMessage);
     const searchResult = await webSearch(query);
     if (!searchResult.success) return { needed: false };
     return { needed: true, rawQuery: rawText, query, results: searchResult.results, provider: searchResult.provider };
