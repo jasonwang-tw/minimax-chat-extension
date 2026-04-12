@@ -330,7 +330,14 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (e.key === 'Tab') {
         e.preventDefault();
         const active = commandPalette.querySelector('.command-item.active') || items[0];
-        if (active) { active.click(); return; }
+        if (active) {
+          // 從 data 屬性取得 trigger，找到對應的 cmd 物件
+          const trigger = active.querySelector('.command-item-trigger')?.textContent;
+          const cmd = getAllCommands().find(c => c.trigger === trigger);
+          const query = messageInput.value;
+          if (cmd) applyCommand(cmd, query, true); // tabComplete=true
+          return;
+        }
       }
     }
     // @ palette 鍵盤導航
@@ -1914,7 +1921,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     cmdPaletteIndex = -1;
   }
 
-  function applyCommand(cmd, inputVal) {
+  function applyCommand(cmd, inputVal, tabComplete = false) {
     hideCommandPalette();
     // 擷取 trigger 之後的 args
     const args = inputVal.slice(cmd.trigger.length).trim();
@@ -1929,7 +1936,16 @@ document.addEventListener('DOMContentLoaded', async () => {
       return;
     }
 
-    // action 類型
+    // 有 argHint 的指令（/search、/remember）：Tab 只補全 trigger，讓使用者繼續輸入參數
+    if (tabComplete && cmd.argHint) {
+      messageInput.value = cmd.trigger + ' ';
+      messageInput.style.height = 'auto';
+      updateSendButton();
+      messageInput.focus();
+      return;
+    }
+
+    // action 類型：直接執行
     messageInput.value = '';
     updateSendButton();
     executeAction(cmd.trigger, args);
