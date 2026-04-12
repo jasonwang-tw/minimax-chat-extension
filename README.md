@@ -4,7 +4,7 @@
 
 ## 版本
 
-**v1.6.4** (2026-04-12)
+**v1.6.5** (2026-04-12)
 
 ## 功能特色
 
@@ -97,6 +97,12 @@ npm run build:css
 - **TailwindCSS + SCSS**：樣式設計
 
 ## Changelog
+
+## [1.6.5] - 2026-04-12
+### Fixed
+- 停止按鈕點擊後游標持續閃爍、icon 未復原：根本原因是 Chrome Extension 中自己呼叫 `port.disconnect()` 不會觸發自己的 `port.onDisconnect`（只觸發對方的），導致 `resetLoading()` 永遠不執行
+- 改為在 click handler 中直接清理狀態（`setStreamingMode(false)`、移除游標、保留已生成內容）
+- `onDisconnect` 改為只處理意外斷線錯誤，不再負責主動停止的清理
 
 ## [1.6.4] - 2026-04-12
 ### Fixed

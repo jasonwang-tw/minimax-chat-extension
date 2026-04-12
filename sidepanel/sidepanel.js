@@ -30,7 +30,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   const sendBtn = document.getElementById('sendBtn');
   const sendIcon = document.getElementById('sendIcon');
   const stopIcon = document.getElementById('stopIcon');
-  let currentPort = null; // 追蹤目前串流 port，供停止按鈕使用
+  let currentPort = null;    // 追蹤目前串流 port，供停止按鈕使用
+  let currentLiveDiv = null; // 追蹤目前 live message div
+  let currentRawContent = ''; // 追蹤目前串流已累積的內容
   const chatMessages = document.getElementById('chatMessages');
   const emptyState = document.getElementById('emptyState');
   const typingIndicator = document.getElementById('typingIndicator');
@@ -272,11 +274,31 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   // 發送 / 停止
-  sendBtn.addEventListener('click', () => {
+  sendBtn.addEventListener('click', async () => {
     if (isLoading && currentPort) {
-      // 停止串流
-      currentPort.disconnect();
+      // 停止串流：主動斷線並直接清理（自己呼叫 disconnect，onDisconnect 不會在自己這側觸發）
+      const port = currentPort;
+      const liveDiv = currentLiveDiv;
+      const rawContent = currentRawContent;
+      port.disconnect();
+      // 立即清理狀態
+      isLoading = false;
       currentPort = null;
+      currentLiveDiv = null;
+      currentRawContent = '';
+      setStreamingMode(false);
+      messageInput.disabled = false;
+      clearStatus();
+      if (rawContent) {
+        const partial = rawContent.trimEnd();
+        if (currentSession) currentSession.messages.push({ role: 'assistant', content: partial });
+        finalizeLiveMessage(liveDiv, partial, partial, translateEnabled ? targetLangSelect.value : sourceLangSelect.value);
+        await saveCurrentSession();
+        await loadHistory();
+      } else {
+        liveDiv?.remove();
+      }
+      messageInput.focus();
     } else {
       handleSend();
     }
@@ -1486,6 +1508,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     // 建立即時串流訊息 div
     typingIndicator.classList.add('hidden');
     const liveDiv = createLiveMessageDiv();
+    currentLiveDiv = liveDiv;
+    currentRawContent = '';
 
     const port = chrome.runtime.connect({ name: 'chat-stream' });
     currentPort = port;
@@ -1495,6 +1519,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     function resetLoading() {
       isLoading = false;
       currentPort = null;
+      currentLiveDiv = null;
+      currentRawContent = '';
       setStreamingMode(false);
       messageInput.disabled = false;
       messageInput.focus();
@@ -1507,6 +1533,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
       if (msg.type === 'chunk') {
         rawContent = msg.full;
+        currentRawContent = rawContent;
         updateLiveMessageContent(liveDiv, rawContent);
         scrollToBottom();
         return;
@@ -1543,21 +1570,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
 
     port.onDisconnect.addListener(async () => {
+      // 僅處理非主動停止的意外斷線（主動停止已在 click handler 清理完畢）
       if (!isLoading) return;
       clearStatus();
-      if (rawContent) {
-        // 使用者手動停止：保留已生成的內容
-        const partial = rawContent.trimEnd();
-        currentSession.messages.push({ role: 'assistant', content: partial });
-        finalizeLiveMessage(liveDiv, partial, partial, replyLang);
-        await saveCurrentSession();
-        await loadHistory();
-      } else {
-        // 連線錯誤（無任何內容）
-        liveDiv.remove();
-        const errMsg = chrome.runtime.lastError?.message;
-        if (errMsg) addMessage(`錯誤: ${errMsg}`, 'error');
-      }
+      liveDiv.remove();
+      const errMsg = chrome.runtime.lastError?.message;
+      if (errMsg) addMessage(`錯誤: ${errMsg}`, 'error');
       resetLoading();
     });
 
