@@ -21,6 +21,15 @@
         <button id="toggleHistory" class="btn-icon" title="歷史紀錄">
           <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/></svg>
         </button>
+        <button id="openMemoryBtn" class="btn-icon" title="長期記憶">
+          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96-.46 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 1.98-3A2.5 2.5 0 0 1 9.5 2Z"/><path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96-.46 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-1.98-3A2.5 2.5 0 0 0 14.5 2Z"/></svg>
+        </button>
+        <button id="openVocabularyBtn" class="btn-icon" title="單字簿">
+          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
+        </button>
+        <button id="openKnowledgeBtn" class="btn-icon" title="知識庫">
+          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.66 4.03 3 9 3s9-1.34 9-3V5"/><path d="M3 12c0 1.66 4.03 3 9 3s9-1.34 9-3"/></svg>
+        </button>
         <button id="openSettings" class="btn-icon" title="設定">
           <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
         </button>
@@ -55,26 +64,41 @@
         <div id="historyList" class="history-list"></div>
       </aside>
 
-      <div id="chatMessages" class="chat-messages"></div>
+      <!-- Chat Body: Messages + Right Toolbar -->
+      <div class="chat-body-wrapper">
+        <div class="chat-main">
+          <div id="chatMessages" class="chat-messages"></div>
 
-      <!-- Empty State -->
-      <div id="emptyState" class="empty-state">
-        <div class="empty-state-icon">
-          <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg>
-        </div>
-        <h2 class="empty-state-title">有什麼需要幫忙的？</h2>
-        <p class="empty-state-sub">輸入訊息，或使用 <code>/</code> 指令開始</p>
-        <div class="empty-state-suggestions">
-          <button class="suggestion-chip" data-prompt="幫我摘要這個頁面的內容">📄 摘要頁面</button>
-          <button class="suggestion-chip" data-prompt="幫我翻譯以下文字：">🌐 翻譯文字</button>
-          <button class="suggestion-chip" data-prompt="幫我解釋這段程式碼：">💻 解釋程式碼</button>
-          <button class="suggestion-chip" data-prompt="幫我改善這段文字的語氣和可讀性：">✍️ 潤飾文字</button>
-        </div>
-      </div>
+          <!-- Empty State -->
+          <div id="emptyState" class="empty-state">
+            <div class="empty-state-icon">
+              <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg>
+            </div>
+            <h2 class="empty-state-title">有什麼需要幫忙的？</h2>
+            <p class="empty-state-sub">輸入訊息，或使用 <code>/</code> 指令開始</p>
+            <div class="empty-state-suggestions">
+              <button class="suggestion-chip" data-prompt="幫我摘要這個頁面的內容">📄 摘要頁面</button>
+              <button class="suggestion-chip" data-prompt="幫我翻譯以下文字：">🌐 翻譯文字</button>
+              <button class="suggestion-chip" data-prompt="幫我解釋這段程式碼：">💻 解釋程式碼</button>
+              <button class="suggestion-chip" data-prompt="幫我改善這段文字的語氣和可讀性：">✍️ 潤飾文字</button>
+            </div>
+          </div>
 
-      <!-- Typing Indicator -->
-      <div id="typingIndicator" class="typing-indicator hidden">
-        <span></span><span></span><span></span>
+          <!-- Typing Indicator -->
+          <div id="typingIndicator" class="typing-indicator hidden">
+            <span></span><span></span><span></span>
+          </div>
+        </div>
+
+        <!-- Right Toolbar -->
+        <div id="chatToolbar" class="chat-toolbar">
+          <button id="summarizeBtn" class="chat-toolbar-btn" title="立即總結">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/></svg>
+          </button>
+          <button id="manageSummaryBtn" class="chat-toolbar-btn" title="管理總結">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6h13"/><path d="M8 12h13"/><path d="M8 18h13"/><path d="M3 6h.01"/><path d="M3 12h.01"/><path d="M3 18h.01"/></svg>
+          </button>
+        </div>
       </div>
     </main>
 
@@ -138,8 +162,14 @@
         </select>
       </div>
 
+      <!-- 知識庫 Chips（已選取） -->
+      <div id="knowledgeChips" class="knowledge-chips hidden"></div>
+
       <!-- 斜線指令 Palette -->
       <div id="commandPalette" class="command-palette hidden"></div>
+
+      <!-- 知識庫 @ Palette -->
+      <div id="knowledgePalette" class="knowledge-palette hidden"></div>
 
       <!-- 統一輸入容器 -->
       <div class="input-container">
@@ -287,10 +317,95 @@
         </button>
       </div>
       <p class="memory-modal-hint">AI 在每次對話時都會記住這些資訊。使用 <code>/remember 內容</code> 新增。</p>
+      <div class="modal-filter-bar">
+        <select id="memoryCategoryFilter" class="modal-filter-select"></select>
+        <button id="manageMemoryCatBtn" class="btn-manage-cat">管理分類</button>
+      </div>
+      <div id="memoryCatManager" class="category-manager hidden">
+        <div class="cat-add-row">
+          <input type="text" id="memoryNewCatInput" class="cat-add-input" placeholder="新增分類名稱...">
+          <button id="memoryAddCatBtn" class="btn-cat-add">+</button>
+        </div>
+        <div id="memoryCatList" class="cat-tag-list"></div>
+      </div>
       <div id="memoryList" class="memory-list"></div>
       <div class="memory-modal-actions">
         <button id="memoryClearAllBtn" class="btn-secondary-sm">清空全部</button>
       </div>
+    </div>
+  </div>
+
+  <!-- Vocabulary Modal -->
+  <div id="vocabularyModal" class="memory-modal hidden">
+    <div class="memory-modal-overlay" id="vocabularyModalOverlay"></div>
+    <div class="memory-modal-content">
+      <div class="memory-modal-header">
+        <h3>單字簿</h3>
+        <button id="vocabularyModalClose" class="btn-icon" title="關閉">
+          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+      <p class="memory-modal-hint">在任意網頁反白文字後點右鍵「加入單字簿」即可新增。</p>
+      <div class="modal-filter-bar">
+        <select id="vocabularyCategoryFilter" class="modal-filter-select"></select>
+        <button id="manageVocabularyCatBtn" class="btn-manage-cat">管理分類</button>
+      </div>
+      <div id="vocabularyCatManager" class="category-manager hidden">
+        <div class="cat-add-row">
+          <input type="text" id="vocabularyNewCatInput" class="cat-add-input" placeholder="新增分類名稱...">
+          <button id="vocabularyAddCatBtn" class="btn-cat-add">+</button>
+        </div>
+        <div id="vocabularyCatList" class="cat-tag-list"></div>
+      </div>
+      <div id="vocabularyList" class="memory-list"></div>
+      <div class="memory-modal-actions">
+        <button id="vocabularyClearAllBtn" class="btn-secondary-sm">清空全部</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Knowledge Modal -->
+  <div id="knowledgeModal" class="memory-modal hidden">
+    <div class="memory-modal-overlay" id="knowledgeModalOverlay"></div>
+    <div class="memory-modal-content">
+      <div class="memory-modal-header">
+        <h3>知識庫</h3>
+        <button id="knowledgeModalClose" class="btn-icon" title="關閉">
+          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+      <p class="memory-modal-hint">在任意頁面右鍵「加入知識庫」，或選取文字後加入。輸入 <code>@</code> 呼叫知識庫內容注入對話。</p>
+      <div class="modal-filter-bar">
+        <select id="knowledgeCategoryFilter" class="modal-filter-select"></select>
+        <button id="manageKnowledgeCatBtn" class="btn-manage-cat">管理分類</button>
+      </div>
+      <div id="knowledgeCatManager" class="category-manager hidden">
+        <div class="cat-add-row">
+          <input type="text" id="knowledgeNewCatInput" class="cat-add-input" placeholder="新增分類名稱...">
+          <button id="knowledgeAddCatBtn" class="btn-cat-add">+</button>
+        </div>
+        <div id="knowledgeCatList" class="cat-tag-list"></div>
+      </div>
+      <div id="knowledgeTagFilters" class="kb-tag-filters hidden"></div>
+      <div id="knowledgeList" class="memory-list"></div>
+      <div class="memory-modal-actions">
+        <button id="knowledgeClearAllBtn" class="btn-secondary-sm">清空全部</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Summary Modal -->
+  <div id="summaryModal" class="memory-modal hidden">
+    <div class="memory-modal-overlay" id="summaryModalOverlay"></div>
+    <div class="memory-modal-content">
+      <div class="memory-modal-header">
+        <h3>對話總結</h3>
+        <button id="summaryModalClose" class="btn-icon" title="關閉">
+          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+      <p class="memory-modal-hint">點擊右側工具列的「立即總結」按鈕，AI 將為當前對話生成摘要並儲存於此。</p>
+      <div id="summaryList" class="memory-list"></div>
     </div>
   </div>
 

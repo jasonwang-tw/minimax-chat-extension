@@ -8,6 +8,19 @@ let currentReplyModeId = 'standard'; // 目前回覆模式 ID
 let replyModes = [];          // 從 storage 載入的回覆模式
 let historySearchQuery = '';  // 歷史紀錄搜尋關鍵字
 let memories = [];            // 全域長期記憶條目
+let memoryCategoryFilter = '';     // 長期記憶分類篩選
+let vocabularyCategoryFilter = ''; // 單字簿分類篩選
+let knowledgeBase = [];            // 全域知識庫條目
+let selectedKnowledge = [];        // 本次訊息已選取的知識庫條目
+let kbPaletteIndex = -1;           // @ palette 鍵盤游標
+let knowledgeCategoryFilter = '';  // 知識庫分類篩選
+let knowledgeTagFilter = '';       // 知識庫標籤篩選
+let sessionSummaries = {};         // { [sessionId]: [{ id, text, createdAt, addedToMemory }] }
+let isSummarizing = false;         // 防止重複總結
+// Render 版本計數器：防止 async render 競爭導致資料重複
+let _renderMemoryVer = 0;
+let _renderVocabVer = 0;
+let _renderKbVer = 0;
 let customCommands = [];      // 使用者自訂指令
 let pageContext = null;       // 當前分頁內容（/page 指令觸發後）
 let cmdPaletteIndex = -1;     // 指令選單鍵盤選取游標
@@ -75,6 +88,51 @@ document.addEventListener('DOMContentLoaded', async () => {
   const memoryModalClose = document.getElementById('memoryModalClose');
   const memoryList = document.getElementById('memoryList');
   const memoryClearAllBtn = document.getElementById('memoryClearAllBtn');
+  const openMemoryBtn = document.getElementById('openMemoryBtn');
+  const vocabularyModal = document.getElementById('vocabularyModal');
+  const vocabularyModalOverlay = document.getElementById('vocabularyModalOverlay');
+  const vocabularyModalClose = document.getElementById('vocabularyModalClose');
+  const vocabularyList = document.getElementById('vocabularyList');
+  const vocabularyClearAllBtn = document.getElementById('vocabularyClearAllBtn');
+  const openVocabularyBtn = document.getElementById('openVocabularyBtn');
+  // 知識庫元素
+  const openKnowledgeBtn = document.getElementById('openKnowledgeBtn');
+  const knowledgeChips = document.getElementById('knowledgeChips');
+  const knowledgePalette = document.getElementById('knowledgePalette');
+  const knowledgeModal = document.getElementById('knowledgeModal');
+  const knowledgeModalOverlay = document.getElementById('knowledgeModalOverlay');
+  const knowledgeModalClose = document.getElementById('knowledgeModalClose');
+  const knowledgeList = document.getElementById('knowledgeList');
+  const knowledgeClearAllBtn = document.getElementById('knowledgeClearAllBtn');
+  const knowledgeCategoryFilterEl = document.getElementById('knowledgeCategoryFilter');
+  const manageKnowledgeCatBtn = document.getElementById('manageKnowledgeCatBtn');
+  const knowledgeCatManager = document.getElementById('knowledgeCatManager');
+  const knowledgeNewCatInput = document.getElementById('knowledgeNewCatInput');
+  const knowledgeAddCatBtn = document.getElementById('knowledgeAddCatBtn');
+  const knowledgeCatList = document.getElementById('knowledgeCatList');
+  const knowledgeTagFilters = document.getElementById('knowledgeTagFilters');
+  // 總結工具列元素
+  const summarizeBtn = document.getElementById('summarizeBtn');
+  const manageSummaryBtn = document.getElementById('manageSummaryBtn');
+  const summaryModal = document.getElementById('summaryModal');
+  const summaryModalOverlay = document.getElementById('summaryModalOverlay');
+  const summaryModalClose = document.getElementById('summaryModalClose');
+  const summaryList = document.getElementById('summaryList');
+
+  // 分類管理元素 — Memory
+  const memoryCategoryFilterEl = document.getElementById('memoryCategoryFilter');
+  const manageMemoryCatBtn = document.getElementById('manageMemoryCatBtn');
+  const memoryCatManager = document.getElementById('memoryCatManager');
+  const memoryNewCatInput = document.getElementById('memoryNewCatInput');
+  const memoryAddCatBtn = document.getElementById('memoryAddCatBtn');
+  const memoryCatList = document.getElementById('memoryCatList');
+  // 分類管理元素 — Vocabulary
+  const vocabularyCategoryFilterEl = document.getElementById('vocabularyCategoryFilter');
+  const manageVocabularyCatBtn = document.getElementById('manageVocabularyCatBtn');
+  const vocabularyCatManager = document.getElementById('vocabularyCatManager');
+  const vocabularyNewCatInput = document.getElementById('vocabularyNewCatInput');
+  const vocabularyAddCatBtn = document.getElementById('vocabularyAddCatBtn');
+  const vocabularyCatList = document.getElementById('vocabularyCatList');
 
   // SVG 圖示常數（必須在所有函式之前宣告，避免 TDZ 錯誤）
   const PIN_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="17" x2="12" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"/></svg>`;
@@ -117,10 +175,14 @@ document.addEventListener('DOMContentLoaded', async () => {
   let annPreviewState = null;
   let annTextPos = { x: 0, y: 0 };
 
-  // 載入回覆模式、記憶、自訂指令
+  // 載入回覆模式、記憶、自訂指令、知識庫
   await loadReplyModes();
   await loadMemories();
   await loadCustomCommands();
+  const { knowledgeBase: initKb = [] } = await chrome.storage.local.get(['knowledgeBase']);
+  knowledgeBase = initKb;
+  const { sessionSummaries: initSS = {} } = await chrome.storage.local.get(['sessionSummaries']);
+  sessionSummaries = initSS;
 
   // 檢查 API Key
   await checkApiKey();
@@ -134,6 +196,31 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
     if (changes.customCommands) {
       loadCustomCommands();
+    }
+    // 右鍵選單從 background 直接寫入 storage，sidepanel 透過此監聽同步
+    if (changes.memories) {
+      memories = changes.memories.newValue || [];
+      if (memoryModal && !memoryModal.classList.contains('hidden')) {
+        renderMemoryList();
+      }
+    }
+    if (changes.vocabulary) {
+      if (vocabularyModal && !vocabularyModal.classList.contains('hidden')) {
+        renderVocabularyList(changes.vocabulary.newValue || []);
+      }
+    }
+    if (changes.knowledgeBase) {
+      knowledgeBase = changes.knowledgeBase.newValue || [];
+      if (knowledgeModal && !knowledgeModal.classList.contains('hidden')) {
+        renderKnowledgeTagFilters();
+        renderKnowledgeList();
+      }
+    }
+    if (changes.sessionSummaries) {
+      sessionSummaries = changes.sessionSummaries.newValue || {};
+      if (summaryModal && !summaryModal.classList.contains('hidden')) {
+        renderSummaryList();
+      }
     }
   });
 
@@ -164,12 +251,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     renderHistory();
   });
 
-  // 自動調整輸入框高度 + 指令選單
+  // 自動調整輸入框高度 + 指令選單 + 知識庫 @ palette
   messageInput.addEventListener('input', () => {
     messageInput.style.height = 'auto';
     messageInput.style.height = Math.min(messageInput.scrollHeight, 120) + 'px';
     updateSendButton();
     handleCommandPaletteInput();
+    handleKbPaletteInput();
   });
 
   // 發送訊息
@@ -204,6 +292,25 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (active) { active.click(); return; }
       }
     }
+    // @ palette 鍵盤導航
+    if (!knowledgePalette.classList.contains('hidden')) {
+      const kbItems = knowledgePalette.querySelectorAll('.kb-palette-item');
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        kbPaletteIndex = Math.min(kbPaletteIndex + 1, kbItems.length - 1);
+        renderKbPaletteActive(kbItems); return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        kbPaletteIndex = Math.max(kbPaletteIndex - 1, 0);
+        renderKbPaletteActive(kbItems); return;
+      }
+      if (e.key === 'Enter' || e.key === 'Tab') {
+        const active = knowledgePalette.querySelector('.kb-palette-item.active') || kbItems[0];
+        if (active) { e.preventDefault(); active.click(); return; }
+      }
+      if (e.key === 'Escape') { hideKbPalette(); return; }
+    }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSend();
@@ -232,13 +339,51 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   // Memory Modal
+  openMemoryBtn.addEventListener('click', openMemoryModal);
   memoryModalClose.addEventListener('click', closeMemoryModal);
   memoryModalOverlay.addEventListener('click', closeMemoryModal);
+
+  // Vocabulary Modal
+  openVocabularyBtn.addEventListener('click', openVocabularyModal);
+  vocabularyModalClose.addEventListener('click', closeVocabularyModal);
+  vocabularyModalOverlay.addEventListener('click', closeVocabularyModal);
   memoryClearAllBtn.addEventListener('click', async () => {
     if (confirm('確定要清除所有長期記憶？')) {
       memories = [];
       await saveMemories();
       renderMemoryList();
+    }
+  });
+
+  vocabularyClearAllBtn.addEventListener('click', async () => {
+    if (confirm('確定要清除所有單字簿內容？')) {
+      await chrome.storage.local.set({ vocabulary: [] });
+      renderVocabularyList([]);
+    }
+  });
+
+  // Knowledge Modal
+  openKnowledgeBtn.addEventListener('click', openKnowledgeModal);
+  knowledgeModalClose.addEventListener('click', closeKnowledgeModal);
+  knowledgeModalOverlay.addEventListener('click', closeKnowledgeModal);
+  knowledgeClearAllBtn.addEventListener('click', async () => {
+    if (confirm('確定要清除所有知識庫內容？')) {
+      knowledgeBase = [];
+      await chrome.storage.local.set({ knowledgeBase: [] });
+      renderKnowledgeList();
+    }
+  });
+
+  // Summary Toolbar
+  summarizeBtn.addEventListener('click', handleSummarize);
+  manageSummaryBtn.addEventListener('click', openSummaryModal);
+  summaryModalClose.addEventListener('click', closeSummaryModal);
+  summaryModalOverlay.addEventListener('click', closeSummaryModal);
+
+  // 點擊其他地方關閉 @ palette
+  document.addEventListener('click', (e) => {
+    if (!knowledgePalette.contains(e.target) && e.target !== messageInput) {
+      hideKbPalette();
     }
   });
 
@@ -1260,7 +1405,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     // 若有頁面內容，包裝 user message（先擷取標題供顯示用）
     const pageTitle = pageContext?.title;
     const isPageOnly = !message && !!pageContext;
-    const finalMessage = buildPageContextMessage(message);
+    const knowledgePrefix = buildKnowledgeBlock();
+    const finalMessage = knowledgePrefix + buildPageContextMessage(message);
+    // 清除已選知識庫 chips
+    selectedKnowledge = [];
+    renderKnowledgeChips();
 
     // 顯示訊息：純 /page 無附帶文字時，顯示頁面標題
     const displayMessage = isPageOnly
@@ -1807,31 +1956,89 @@ document.addEventListener('DOMContentLoaded', async () => {
     setStatus(`✓ 已記住：${trimmed.slice(0, 30)}${trimmed.length > 30 ? '...' : ''}`, false, 3000);
   }
 
-  function openMemoryModal() {
-    renderMemoryList();
+  async function openMemoryModal() {
     memoryModal.classList.remove('hidden');
+    await populateCategoryFilter('memory', memoryCategoryFilterEl);
+    renderMemoryList();
   }
 
   function closeMemoryModal() {
     memoryModal.classList.add('hidden');
+    memoryCatManager.classList.add('hidden');
+    manageMemoryCatBtn.classList.remove('active');
   }
 
-  function renderMemoryList() {
+  function formatItemDate(ts) {
+    if (!ts) return '';
+    const d = new Date(ts);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}/${m}/${day}`;
+  }
+
+  async function renderMemoryList() {
+    const _v = ++_renderMemoryVer;
+    const cats = await getCategories('memory');
+    if (_v !== _renderMemoryVer) return; // 已有更新的 render，捨棄本次
     memoryList.innerHTML = '';
-    if (memories.length === 0) {
-      memoryList.innerHTML = '<p class="memory-empty">尚無長期記憶。<br>使用 /remember 內容 來新增。</p>';
+    const filtered = memoryCategoryFilter
+      ? memories.filter(m => m.category === memoryCategoryFilter)
+      : memories;
+    if (filtered.length === 0) {
+      memoryList.innerHTML = memoryCategoryFilter
+        ? '<p class="memory-empty">此分類沒有記憶。</p>'
+        : '<p class="memory-empty">尚無長期記憶。<br>使用 /remember 內容 來新增。</p>';
       return;
     }
-    memories.slice().reverse().forEach(mem => {
+    filtered.slice().reverse().forEach(mem => {
       const div = document.createElement('div');
       div.className = 'memory-item';
+      const badgeLabel = { manual: '手動', auto: '自動', 'context-menu': '右鍵', summary: '總結' }[mem.source] || mem.source;
+      const catOptions = `<option value="">${cats.length ? '無分類' : '新增分類後使用'}</option>`
+        + cats.map(c => `<option value="${escapeAttr(c)}" ${mem.category === c ? 'selected' : ''}>${escapeHtml(c)}</option>`).join('');
       div.innerHTML = `
-        <span class="memory-item-badge ${mem.source}">${mem.source === 'manual' ? '手動' : '自動'}</span>
-        <span class="memory-item-text">${escapeHtml(mem.text)}</span>
+        <span class="memory-item-badge ${mem.source}">${badgeLabel}</span>
+        <span class="memory-item-text editable" title="點擊編輯">${escapeHtml(mem.text)}</span>
+        <span class="memory-item-date">${formatItemDate(mem.createdAt)}</span>
+        <select class="item-cat-select ${mem.category ? 'has-value' : ''}" title="分類">${catOptions}</select>
         <button class="btn-memory-delete" title="刪除">
           <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
         </button>
       `;
+      // 分類選擇
+      div.querySelector('.item-cat-select').addEventListener('change', async e => {
+        const idx = memories.findIndex(m => m.id === mem.id);
+        if (idx !== -1) {
+          memories[idx].category = e.target.value;
+          await saveMemories();
+          e.target.classList.toggle('has-value', !!e.target.value);
+        }
+      });
+      // 點擊文字進入編輯模式（textarea）
+      const textSpan = div.querySelector('.memory-item-text');
+      textSpan.addEventListener('click', () => {
+        const ta = document.createElement('textarea');
+        ta.className = 'memory-item-textarea';
+        ta.value = mem.text;
+        ta.rows = Math.max(2, Math.ceil(mem.text.length / 40));
+        textSpan.replaceWith(ta);
+        ta.focus();
+        ta.setSelectionRange(ta.value.length, ta.value.length);
+        const save = async () => {
+          const newText = ta.value.trim();
+          if (newText && newText !== mem.text) {
+            const idx = memories.findIndex(m => m.id === mem.id);
+            if (idx !== -1) { memories[idx].text = newText; await saveMemories(); }
+          }
+          renderMemoryList();
+        };
+        ta.addEventListener('blur', save);
+        ta.addEventListener('keydown', e => {
+          if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); ta.blur(); }
+          if (e.key === 'Escape') { renderMemoryList(); }
+        });
+      });
       div.querySelector('.btn-memory-delete').addEventListener('click', async () => {
         memories = memories.filter(m => m.id !== mem.id);
         await saveMemories();
@@ -1841,9 +2048,769 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
+  // ── Category Management Helpers ──────────────────────────
+
+  async function getCategories(type) {
+    const { categories = {} } = await chrome.storage.local.get(['categories']);
+    return Array.isArray(categories[type]) ? categories[type] : [];
+  }
+
+  async function saveCategories(type, list) {
+    const { categories = {} } = await chrome.storage.local.get(['categories']);
+    categories[type] = list;
+    await chrome.storage.local.set({ categories });
+  }
+
+  async function populateCategoryFilter(type, selectEl) {
+    const cats = await getCategories(type);
+    const current = selectEl.value;
+    selectEl.innerHTML = '<option value="">全部分類</option>';
+    cats.forEach(c => {
+      const opt = document.createElement('option');
+      opt.value = c;
+      opt.textContent = c;
+      if (c === current) opt.selected = true;
+      selectEl.appendChild(opt);
+    });
+    // 若目前篩選值已不存在則重置
+    if (current && !cats.includes(current)) {
+      selectEl.value = '';
+      if (type === 'memory') memoryCategoryFilter = '';
+      else vocabularyCategoryFilter = '';
+    }
+  }
+
+  async function renderCategoryManager(type, listEl) {
+    const cats = await getCategories(type);
+    listEl.innerHTML = '';
+    if (cats.length === 0) {
+      listEl.innerHTML = '<span class="cat-empty-hint">尚無分類，請在上方輸入並新增。</span>';
+      return;
+    }
+    cats.forEach(cat => {
+      const tag = document.createElement('span');
+      tag.className = 'cat-tag';
+      tag.innerHTML = `${escapeHtml(cat)}<button class="btn-cat-delete" title="刪除分類">×</button>`;
+      tag.querySelector('.btn-cat-delete').addEventListener('click', async () => {
+        const updated = cats.filter(c => c !== cat);
+        await saveCategories(type, updated);
+        // 清除條目中此分類的指派
+        if (type === 'memory') {
+          memories.forEach(m => { if (m.category === cat) m.category = ''; });
+          await saveMemories();
+          if (memoryCategoryFilter === cat) { memoryCategoryFilter = ''; memoryCategoryFilterEl.value = ''; }
+          await populateCategoryFilter('memory', memoryCategoryFilterEl);
+          renderMemoryList();
+        } else if (type === 'vocabulary') {
+          const { vocabulary: vocab = [] } = await chrome.storage.local.get(['vocabulary']);
+          vocab.forEach(v => { if (v.category === cat) v.category = ''; });
+          await chrome.storage.local.set({ vocabulary: vocab });
+          if (vocabularyCategoryFilter === cat) { vocabularyCategoryFilter = ''; vocabularyCategoryFilterEl.value = ''; }
+          await populateCategoryFilter('vocabulary', vocabularyCategoryFilterEl);
+          const { vocabulary: latest = [] } = await chrome.storage.local.get(['vocabulary']);
+          renderVocabularyList(latest);
+        } else if (type === 'knowledge') {
+          knowledgeBase.forEach(k => { if (k.category === cat) k.category = ''; });
+          await chrome.storage.local.set({ knowledgeBase });
+          if (knowledgeCategoryFilter === cat) { knowledgeCategoryFilter = ''; knowledgeCategoryFilterEl.value = ''; }
+          await populateCategoryFilter('knowledge', knowledgeCategoryFilterEl);
+          renderKnowledgeList();
+        }
+        await renderCategoryManager(type, listEl);
+      });
+      listEl.appendChild(tag);
+    });
+  }
+
+  // 分類篩選事件
+  memoryCategoryFilterEl.addEventListener('change', e => {
+    memoryCategoryFilter = e.target.value;
+    renderMemoryList();
+  });
+  vocabularyCategoryFilterEl.addEventListener('change', async e => {
+    vocabularyCategoryFilter = e.target.value;
+    const { vocabulary = [] } = await chrome.storage.local.get(['vocabulary']);
+    renderVocabularyList(vocabulary);
+  });
+
+  // 管理分類 toggle
+  manageMemoryCatBtn.addEventListener('click', async () => {
+    const hidden = memoryCatManager.classList.contains('hidden');
+    memoryCatManager.classList.toggle('hidden');
+    manageMemoryCatBtn.classList.toggle('active', hidden);
+    if (hidden) await renderCategoryManager('memory', memoryCatList);
+  });
+  manageVocabularyCatBtn.addEventListener('click', async () => {
+    const hidden = vocabularyCatManager.classList.contains('hidden');
+    vocabularyCatManager.classList.toggle('hidden');
+    manageVocabularyCatBtn.classList.toggle('active', hidden);
+    if (hidden) await renderCategoryManager('vocabulary', vocabularyCatList);
+  });
+
+  // 新增分類
+  async function handleAddCategory(type, inputEl, listEl, filterEl) {
+    const name = inputEl.value.trim();
+    if (!name) return;
+    const cats = await getCategories(type);
+    if (cats.includes(name)) { inputEl.value = ''; return; }
+    cats.push(name);
+    await saveCategories(type, cats);
+    inputEl.value = '';
+    await renderCategoryManager(type, listEl);
+    await populateCategoryFilter(type, filterEl);
+    if (type === 'memory') renderMemoryList();
+    else if (type === 'vocabulary') { const { vocabulary = [] } = await chrome.storage.local.get(['vocabulary']); renderVocabularyList(vocabulary); }
+    else if (type === 'knowledge') renderKnowledgeList();
+  }
+
+  memoryAddCatBtn.addEventListener('click', () =>
+    handleAddCategory('memory', memoryNewCatInput, memoryCatList, memoryCategoryFilterEl));
+  memoryNewCatInput.addEventListener('keydown', e => { if (e.key === 'Enter') memoryAddCatBtn.click(); });
+
+  vocabularyAddCatBtn.addEventListener('click', () =>
+    handleAddCategory('vocabulary', vocabularyNewCatInput, vocabularyCatList, vocabularyCategoryFilterEl));
+  vocabularyNewCatInput.addEventListener('keydown', e => { if (e.key === 'Enter') vocabularyAddCatBtn.click(); });
+
+  // 知識庫分類
+  knowledgeCategoryFilterEl.addEventListener('change', e => {
+    knowledgeCategoryFilter = e.target.value;
+    renderKnowledgeList();
+  });
+  manageKnowledgeCatBtn.addEventListener('click', async () => {
+    const hidden = knowledgeCatManager.classList.contains('hidden');
+    knowledgeCatManager.classList.toggle('hidden');
+    manageKnowledgeCatBtn.classList.toggle('active', hidden);
+    if (hidden) await renderCategoryManager('knowledge', knowledgeCatList);
+  });
+  knowledgeAddCatBtn.addEventListener('click', () =>
+    handleAddCategory('knowledge', knowledgeNewCatInput, knowledgeCatList, knowledgeCategoryFilterEl));
+  knowledgeNewCatInput.addEventListener('keydown', e => { if (e.key === 'Enter') knowledgeAddCatBtn.click(); });
+
+  // ─────────────────────────────────────────────────────────
+
+  // ── Knowledge Base 函式 ──────────────────────────────────
+
+  function buildKnowledgeBlock() {
+    if (selectedKnowledge.length === 0) return '';
+    const blocks = selectedKnowledge.map(item => {
+      const lines = [`【知識庫參考】`, `標題：${item.title}`];
+      if (item.summary) lines.push(`摘要：${item.summary}`);
+      if (item.tags?.length) lines.push(`標籤：${item.tags.join('、')}`);
+      if (item.url && item.source === 'url') lines.push(`來源：${item.url}`);
+      if (item.content) lines.push(`內容：\n${item.content.slice(0, 2000)}${item.content.length > 2000 ? '\n...（已截斷）' : ''}`);
+      return lines.join('\n');
+    });
+    return blocks.join('\n\n') + '\n\n';
+  }
+
+  function renderKnowledgeChips() {
+    knowledgeChips.innerHTML = '';
+    if (selectedKnowledge.length === 0) {
+      knowledgeChips.classList.add('hidden');
+      return;
+    }
+    knowledgeChips.classList.remove('hidden');
+    selectedKnowledge.forEach(item => {
+      const chip = document.createElement('span');
+      chip.className = 'kb-chip';
+      chip.innerHTML = `<span class="kb-chip-label" title="${escapeAttr(item.title)}">@ ${escapeHtml(item.title)}</span><button class="kb-chip-remove" title="移除">×</button>`;
+      chip.querySelector('.kb-chip-remove').addEventListener('click', () => {
+        selectedKnowledge = selectedKnowledge.filter(k => k.id !== item.id);
+        renderKnowledgeChips();
+        updateSendButton();
+      });
+      knowledgeChips.appendChild(chip);
+    });
+  }
+
+  // @ palette
+  function handleKbPaletteInput() {
+    const val = messageInput.value;
+    const cursor = messageInput.selectionStart;
+    const textBefore = val.slice(0, cursor);
+    const atMatch = textBefore.match(/@([^\s@]*)$/);
+    if (!atMatch) { hideKbPalette(); return; }
+    const query = atMatch[1].toLowerCase();
+    const filtered = knowledgeBase.filter(kb =>
+      !query ||
+      kb.title.toLowerCase().includes(query) ||
+      (kb.summary || '').toLowerCase().includes(query) ||
+      (kb.tags || []).some(t => t.toLowerCase().includes(query))
+    );
+    if (knowledgeBase.length === 0) {
+      showKbPaletteEmpty();
+      return;
+    }
+    showKbPaletteItems(filtered.length > 0 ? filtered : knowledgeBase);
+  }
+
+  function showKbPaletteEmpty() {
+    knowledgePalette.innerHTML = '<div class="kb-palette-empty">知識庫尚無內容<br>請先右鍵「加入知識庫」</div>';
+    knowledgePalette.classList.remove('hidden');
+    kbPaletteIndex = -1;
+  }
+
+  function showKbPaletteItems(items) {
+    knowledgePalette.innerHTML = '';
+    kbPaletteIndex = 0;
+    items.forEach((item, idx) => {
+      const div = document.createElement('div');
+      div.className = 'kb-palette-item' + (idx === 0 ? ' active' : '');
+      const statusLabel = item.status === 'processing' ? '分析中' : '就緒';
+      const tagsHtml = (item.tags || []).slice(0, 3).map(t => `<span class="kb-palette-tag">${escapeHtml(t)}</span>`).join('');
+      div.innerHTML = `
+        <span class="kb-palette-status ${item.status}">${statusLabel}</span>
+        <div class="kb-palette-info">
+          <div class="kb-palette-title">${escapeHtml(item.title)}</div>
+          ${item.summary ? `<div class="kb-palette-summary">${escapeHtml(item.summary)}</div>` : ''}
+          ${tagsHtml ? `<div class="kb-palette-tags">${tagsHtml}</div>` : ''}
+        </div>
+      `;
+      div.addEventListener('click', () => selectKbItem(item));
+      knowledgePalette.appendChild(div);
+    });
+    knowledgePalette.classList.remove('hidden');
+  }
+
+  function renderKbPaletteActive(items) {
+    items.forEach((item, idx) => item.classList.toggle('active', idx === kbPaletteIndex));
+    if (kbPaletteIndex >= 0 && items[kbPaletteIndex]) {
+      items[kbPaletteIndex].scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+  }
+
+  function hideKbPalette() {
+    knowledgePalette.classList.add('hidden');
+    knowledgePalette.innerHTML = '';
+    kbPaletteIndex = -1;
+  }
+
+  function selectKbItem(item) {
+    // 移除 @query 文字
+    const val = messageInput.value;
+    const cursor = messageInput.selectionStart;
+    const textBefore = val.slice(0, cursor);
+    const atMatch = textBefore.match(/@([^\s@]*)$/);
+    if (atMatch) {
+      const start = cursor - atMatch[0].length;
+      messageInput.value = val.slice(0, start) + val.slice(cursor);
+      messageInput.setSelectionRange(start, start);
+    }
+    hideKbPalette();
+    if (!selectedKnowledge.find(k => k.id === item.id)) {
+      selectedKnowledge.push(item);
+      renderKnowledgeChips();
+    }
+    updateSendButton();
+    messageInput.focus();
+  }
+
+  // Knowledge Modal
+  async function openKnowledgeModal() {
+    knowledgeModal.classList.remove('hidden');
+    await populateCategoryFilter('knowledge', knowledgeCategoryFilterEl);
+    renderKnowledgeTagFilters();
+    renderKnowledgeList();
+    pollKbProcessing(); // 若有分析中項目，每 2 秒自動刷新
+  }
+
+  function closeKnowledgeModal() {
+    knowledgeModal.classList.add('hidden');
+    knowledgeCatManager.classList.add('hidden');
+    manageKnowledgeCatBtn.classList.remove('active');
+  }
+
+  // ── Summary Toolbar ──────────────────────────────────────────
+  async function handleSummarize() {
+    if (isSummarizing) return;
+    if (!currentSession || currentSession.messages.length === 0) {
+      setStatus('目前沒有可總結的對話內容', false, 2500);
+      return;
+    }
+    isSummarizing = true;
+    summarizeBtn.disabled = true;
+
+    const convText = currentSession.messages.map(m => {
+      const role = m.role === 'user' ? '用戶' : 'AI';
+      const content = typeof m.content === 'string' ? m.content : '[多媒體內容]';
+      return `${role}：${content}`;
+    }).join('\n\n');
+
+    const prompt = `請為以下對話內容生成一份簡潔的繁體中文摘要，重點列出：\n1. 主要討論的主題\n2. 重要結論或決定\n3. 待辦事項（如有）\n\n---\n${convText}`;
+
+    // 建立總結 live div（不加入 currentSession.messages，不影響對話歷史）
+    const liveDiv = document.createElement('div');
+    liveDiv.className = 'message message-summary message-live';
+    liveDiv.innerHTML = `
+      <div class="summary-badge">AI 總結</div>
+      <div class="message-content">
+        <div class="reply-live"><span class="cursor-blink">▋</span></div>
+      </div>`;
+    chatMessages.appendChild(liveDiv);
+    emptyState.classList.add('hidden');
+    scrollToBottom();
+
+    const port = chrome.runtime.connect({ name: 'chat-stream' });
+    let rawContent = '';
+
+    port.onMessage.addListener(async (msg) => {
+      if (msg.type === 'chunk') {
+        rawContent = msg.full;
+        const replyLive = liveDiv.querySelector('.reply-live');
+        if (replyLive) {
+          replyLive.innerHTML = escapeHtml(rawContent).replace(/\n/g, '<br>') + '<span class="cursor-blink">▋</span>';
+        }
+        scrollToBottom();
+        return;
+      }
+      if (msg.type === 'done') {
+        const reply = msg.reply;
+        const replyLive = liveDiv.querySelector('.reply-live');
+        if (replyLive) {
+          replyLive.className = 'summary-result';
+          replyLive.innerHTML = renderMarkdown(reply);
+        }
+        liveDiv.classList.remove('message-live');
+        scrollToBottom();
+        port.disconnect();
+
+        // 儲存至 sessionSummaries
+        const { sessionSummaries: stored = {} } = await chrome.storage.local.get(['sessionSummaries']);
+        const sid = currentSession.id;
+        if (!stored[sid]) stored[sid] = [];
+        stored[sid].push({ id: `sum_${Date.now()}`, text: reply, createdAt: Date.now(), addedToMemory: false });
+        await chrome.storage.local.set({ sessionSummaries: stored });
+        sessionSummaries = stored;
+
+        isSummarizing = false;
+        summarizeBtn.disabled = false;
+        setStatus('總結已儲存', false, 2000);
+        return;
+      }
+      if (msg.type === 'error') {
+        liveDiv.remove();
+        setStatus(`總結失敗: ${msg.message}`, true, 3000);
+        port.disconnect();
+        isSummarizing = false;
+        summarizeBtn.disabled = false;
+      }
+    });
+
+    port.onDisconnect.addListener(() => {
+      if (!isSummarizing) return;
+      liveDiv.remove();
+      setStatus('連線中斷，請重試', true, 3000);
+      isSummarizing = false;
+      summarizeBtn.disabled = false;
+    });
+
+    port.postMessage({
+      type: 'STREAM_MESSAGE',
+      data: {
+        message: prompt,
+        history: [],
+        images: [],
+        translateConfig: null,
+        model: currentModel,
+        systemPrompt: '你是一位專業的對話總結助手，請以繁體中文生成簡潔且有條理的摘要。',
+        memoryContext: ''
+      }
+    });
+  }
+
+  function openSummaryModal() {
+    summaryModal.classList.remove('hidden');
+    renderSummaryList();
+  }
+
+  function closeSummaryModal() {
+    summaryModal.classList.add('hidden');
+  }
+
+  // 純文字預覽（strip markdown 標記）
+  function getSummaryPreview(text) {
+    return text
+      .replace(/^#{1,6}\s+/gm, '')
+      .replace(/\*{1,3}|_{1,3}|~~|`/g, '')
+      .replace(/\n{2,}/g, ' ')
+      .replace(/\n/g, ' ')
+      .trim();
+  }
+
+  function renderSummaryList() {
+    if (!summaryList) return;
+    const sid = currentSession?.id;
+    const items = sid ? (sessionSummaries[sid] || []).slice().reverse() : [];
+    if (items.length === 0) {
+      summaryList.innerHTML = '<div class="summary-empty-hint">目前沒有總結記錄。<br>點擊右側工具列的「立即總結」按鈕開始。</div>';
+      return;
+    }
+
+    const CHEVRON = `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>`;
+    const TRASH = `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>`;
+
+    const actionBtns = (item) => `
+      <div class="summary-item-footer">
+        <button class="btn-summary-action btn-add-to-memory${item.addedToMemory ? ' disabled' : ''}" data-id="${item.id}"${item.addedToMemory ? ' disabled' : ''}>
+          ${item.addedToMemory ? '✓ 已加入長期記憶' : '+ 加入長期記憶'}
+        </button>
+        <button class="btn-summary-action btn-add-to-kb${item.addedToKb ? ' disabled' : ''}" data-id="${item.id}"${item.addedToKb ? ' disabled' : ''}>
+          ${item.addedToKb ? '✓ 已加入知識庫' : '+ 加入知識庫'}
+        </button>
+      </div>`;
+
+    summaryList.innerHTML = items.map(item => `
+      <div class="summary-item" data-id="${item.id}">
+        <div class="summary-item-header">
+          <span class="summary-item-date">${formatItemDate(item.createdAt)}</span>
+          <div class="summary-item-top-actions">
+            <button class="summary-expand-btn" data-id="${item.id}" title="展開/收合">${CHEVRON}</button>
+            <button class="summary-item-delete" data-id="${item.id}" title="刪除">${TRASH}</button>
+          </div>
+        </div>
+        <div class="summary-preview-text">${escapeHtml(getSummaryPreview(item.text))}</div>
+        <div class="summary-full-text hidden">${renderMarkdown(item.text)}</div>
+        ${actionBtns(item)}
+      </div>
+    `).join('');
+
+    // 展開 / 收合
+    summaryList.querySelectorAll('.summary-expand-btn, .summary-preview-text').forEach(el => {
+      el.addEventListener('click', (e) => {
+        const id = el.dataset.id || el.closest('.summary-item')?.dataset.id;
+        const itemEl = summaryList.querySelector(`.summary-item[data-id="${id}"]`);
+        if (!itemEl) return;
+        const isExpanded = itemEl.classList.toggle('expanded');
+        const fullText = itemEl.querySelector('.summary-full-text');
+        fullText.classList.toggle('hidden', !isExpanded);
+        e.stopPropagation();
+      });
+    });
+
+    // 加入長期記憶
+    summaryList.querySelectorAll('.btn-add-to-memory:not([disabled])').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const id = btn.dataset.id;
+        const sid = currentSession?.id;
+        const arr = sid ? (sessionSummaries[sid] || []) : [];
+        const item = arr.find(i => i.id === id);
+        if (!item) return;
+        await addMemory(item.text, 'summary');
+        item.addedToMemory = true;
+        await chrome.storage.local.set({ sessionSummaries });
+        renderSummaryList();
+      });
+    });
+
+    // 加入知識庫
+    summaryList.querySelectorAll('.btn-add-to-kb:not([disabled])').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const id = btn.dataset.id;
+        const sid = currentSession?.id;
+        const arr = sid ? (sessionSummaries[sid] || []) : [];
+        const item = arr.find(i => i.id === id);
+        if (!item) return;
+        const { knowledgeBase: kb = [] } = await chrome.storage.local.get(['knowledgeBase']);
+        const dateStr = formatItemDate(item.createdAt);
+        const kbEntry = {
+          id: `kb_${Date.now()}`,
+          title: `對話總結 - ${dateStr}`,
+          url: '',
+          content: item.text,
+          summary: item.text,
+          tags: ['總結'],
+          category: '',
+          source: 'summary',
+          status: 'ready',
+          createdAt: Date.now()
+        };
+        kb.push(kbEntry);
+        await chrome.storage.local.set({ knowledgeBase: kb });
+        knowledgeBase = kb;
+        item.addedToKb = true;
+        await chrome.storage.local.set({ sessionSummaries });
+        renderSummaryList();
+        setStatus('已加入知識庫', false, 2000);
+      });
+    });
+
+    // 刪除
+    summaryList.querySelectorAll('.summary-item-delete').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const id = btn.dataset.id;
+        const sid = currentSession?.id;
+        if (!sid || !sessionSummaries[sid]) return;
+        sessionSummaries[sid] = sessionSummaries[sid].filter(i => i.id !== id);
+        await chrome.storage.local.set({ sessionSummaries });
+        renderSummaryList();
+      });
+    });
+  }
+
+  // 當 Modal 開著且有 processing 項目時，輪詢 storage 更新顯示
+  function pollKbProcessing() {
+    if (knowledgeModal.classList.contains('hidden')) return;
+    if (!knowledgeBase.some(k => k.status === 'processing')) return;
+    setTimeout(async () => {
+      if (knowledgeModal.classList.contains('hidden')) return;
+      const { knowledgeBase: latest = [] } = await chrome.storage.local.get(['knowledgeBase']);
+      const changed = latest.some(item => {
+        const old = knowledgeBase.find(k => k.id === item.id);
+        return !old || old.status !== item.status || old.summary !== item.summary;
+      });
+      if (changed) {
+        knowledgeBase = latest;
+        renderKnowledgeTagFilters();
+        renderKnowledgeList();
+      }
+      pollKbProcessing(); // 繼續輪詢直到全部 ready
+    }, 2000);
+  }
+
+  function renderKnowledgeTagFilters() {
+    const allTags = [...new Set(knowledgeBase.flatMap(k => k.tags || []))].sort();
+    if (allTags.length === 0) {
+      knowledgeTagFilters.classList.add('hidden');
+      knowledgeTagFilter = '';
+      return;
+    }
+    knowledgeTagFilters.classList.remove('hidden');
+    knowledgeTagFilters.innerHTML = '';
+    // 「全部」chip
+    const allChip = document.createElement('button');
+    allChip.className = 'kb-tag-filter-chip' + (!knowledgeTagFilter ? ' active' : '');
+    allChip.textContent = '全部';
+    allChip.addEventListener('click', () => {
+      knowledgeTagFilter = '';
+      renderKnowledgeTagFilters();
+      renderKnowledgeList();
+    });
+    knowledgeTagFilters.appendChild(allChip);
+    // 各標籤
+    allTags.forEach(tag => {
+      const chip = document.createElement('button');
+      chip.className = 'kb-tag-filter-chip' + (knowledgeTagFilter === tag ? ' active' : '');
+      chip.textContent = tag;
+      chip.addEventListener('click', () => {
+        knowledgeTagFilter = knowledgeTagFilter === tag ? '' : tag;
+        renderKnowledgeTagFilters();
+        renderKnowledgeList();
+      });
+      knowledgeTagFilters.appendChild(chip);
+    });
+  }
+
+  async function renderKnowledgeList() {
+    const _v = ++_renderKbVer;
+    const cats = await getCategories('knowledge');
+    if (_v !== _renderKbVer) return; // 已有更新的 render，捨棄本次
+    knowledgeList.innerHTML = '';
+    let filtered = knowledgeCategoryFilter
+      ? knowledgeBase.filter(kb => kb.category === knowledgeCategoryFilter)
+      : [...knowledgeBase];
+    if (knowledgeTagFilter) {
+      filtered = filtered.filter(kb => (kb.tags || []).includes(knowledgeTagFilter));
+    }
+    if (filtered.length === 0) {
+      const hasFilter = knowledgeCategoryFilter || knowledgeTagFilter;
+      knowledgeList.innerHTML = hasFilter
+        ? '<p class="memory-empty">此篩選條件沒有知識庫項目。</p>'
+        : '<p class="memory-empty">尚無內容。<br>在任意頁面右鍵「加入知識庫」。</p>';
+      return;
+    }
+    const catOptions = (item) =>
+      `<option value="">${cats.length ? '無分類' : '新增分類後使用'}</option>`
+      + cats.map(c => `<option value="${escapeAttr(c)}" ${item.category === c ? 'selected' : ''}>${escapeHtml(c)}</option>`).join('');
+
+    const LINK_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>`;
+
+    filtered.slice().reverse().forEach(item => {
+      const div = document.createElement('div');
+      div.className = 'kb-item';
+      const statusLabel = item.status === 'processing' ? '分析中' : '就緒';
+      const sourceLabel = item.source === 'url' ? '網頁' : '選取';
+      const tagsHtml = (item.tags || []).map(t =>
+        `<span class="kb-item-tag${knowledgeTagFilter === t ? ' active' : ''}">${escapeHtml(t)}</span>`
+      ).join('');
+      div.innerHTML = `
+        <div class="kb-item-header">
+          <span class="kb-item-status ${item.status}">${statusLabel}</span>
+          <span class="kb-item-source ${item.source}">${sourceLabel}</span>
+          <span class="kb-item-title" title="點擊編輯">${escapeHtml(item.title)}</span>
+          ${item.url ? `<button class="kb-item-link" title="${escapeAttr(item.url)}">${LINK_SVG}</button>` : ''}
+          <button class="kb-item-delete" title="刪除">
+            <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
+          </button>
+        </div>
+        <div class="kb-item-meta">
+          <span class="kb-item-date">${formatItemDate(item.createdAt)}</span>
+          <select class="item-cat-select ${item.category ? 'has-value' : ''}" title="分類">${catOptions(item)}</select>
+        </div>
+        ${item.summary ? `<div class="kb-item-summary">${escapeHtml(item.summary)}</div>` : ''}
+        ${tagsHtml ? `<div class="kb-item-tags">${tagsHtml}</div>` : ''}
+      `;
+      // URL 連結
+      div.querySelector('.kb-item-link')?.addEventListener('click', () => {
+        if (item.url) chrome.tabs.create({ url: item.url });
+      });
+      // 標籤點擊篩選
+      div.querySelectorAll('.kb-item-tag').forEach(tagEl => {
+        tagEl.style.cursor = 'pointer';
+        tagEl.title = '點擊篩選此標籤';
+        tagEl.addEventListener('click', () => {
+          const tag = tagEl.textContent;
+          knowledgeTagFilter = knowledgeTagFilter === tag ? '' : tag;
+          renderKnowledgeTagFilters();
+          renderKnowledgeList();
+        });
+      });
+      // 編輯標題
+      const titleEl = div.querySelector('.kb-item-title');
+      titleEl.addEventListener('click', () => {
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'kb-item-title-input';
+        input.value = item.title;
+        titleEl.replaceWith(input);
+        input.focus();
+        input.select();
+        const save = async () => {
+          const newTitle = input.value.trim();
+          if (newTitle && newTitle !== item.title) {
+            const idx = knowledgeBase.findIndex(k => k.id === item.id);
+            if (idx !== -1) { knowledgeBase[idx].title = newTitle; await chrome.storage.local.set({ knowledgeBase }); }
+          }
+          renderKnowledgeList();
+        };
+        input.addEventListener('blur', save);
+        input.addEventListener('keydown', e => {
+          if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+          if (e.key === 'Escape') renderKnowledgeList();
+        });
+      });
+      // 分類選擇
+      div.querySelector('.item-cat-select').addEventListener('change', async e => {
+        const idx = knowledgeBase.findIndex(k => k.id === item.id);
+        if (idx !== -1) {
+          knowledgeBase[idx].category = e.target.value;
+          await chrome.storage.local.set({ knowledgeBase });
+          e.target.classList.toggle('has-value', !!e.target.value);
+        }
+      });
+      // 刪除
+      div.querySelector('.kb-item-delete').addEventListener('click', async () => {
+        knowledgeBase = knowledgeBase.filter(k => k.id !== item.id);
+        await chrome.storage.local.set({ knowledgeBase });
+        renderKnowledgeList();
+      });
+      knowledgeList.appendChild(div);
+    });
+  }
+
+  // ─────────────────────────────────────────────────────────
+
   function buildMemoryBlock() {
     if (memories.length === 0) return '';
     return `【使用者長期記憶】\n${memories.map(m => `- ${m.text}`).join('\n')}`;
+  }
+
+  // ── Vocabulary ───────────────────────────────────────────
+
+  async function openVocabularyModal() {
+    vocabularyModal.classList.remove('hidden');
+    await populateCategoryFilter('vocabulary', vocabularyCategoryFilterEl);
+    const { vocabulary = [] } = await chrome.storage.local.get(['vocabulary']);
+    renderVocabularyList(vocabulary);
+  }
+
+  function closeVocabularyModal() {
+    vocabularyModal.classList.add('hidden');
+    vocabularyCatManager.classList.add('hidden');
+    manageVocabularyCatBtn.classList.remove('active');
+  }
+
+  async function renderVocabularyList(vocabulary) {
+    const _v = ++_renderVocabVer;
+    const cats = await getCategories('vocabulary');
+    if (_v !== _renderVocabVer) return; // 已有更新的 render，捨棄本次
+    vocabularyList.innerHTML = '';
+    const filtered = vocabularyCategoryFilter
+      ? vocabulary.filter(v => v.category === vocabularyCategoryFilter)
+      : vocabulary;
+    if (filtered.length === 0) {
+      vocabularyList.innerHTML = vocabularyCategoryFilter
+        ? '<p class="memory-empty">此分類沒有單字。</p>'
+        : '<p class="memory-empty">尚無單字。<br>在任意網頁反白文字後右鍵「加入單字簿」。</p>';
+      return;
+    }
+    const langLabel = { en: 'EN', zh: '中', ja: '日', other: '?' };
+    const ttsLangMap = { en: 'en-US', zh: 'zh-TW', ja: 'ja-JP', other: 'zh-TW' };
+    filtered.slice().reverse().forEach(item => {
+      const div = document.createElement('div');
+      div.className = 'memory-item';
+      const ttsLang = ttsLangMap[item.lang] || 'zh-TW';
+      const catOptions = `<option value="">${cats.length ? '無分類' : '新增分類後使用'}</option>`
+        + cats.map(c => `<option value="${escapeAttr(c)}" ${item.category === c ? 'selected' : ''}>${escapeHtml(c)}</option>`).join('');
+      div.innerHTML = `
+        <span class="memory-item-badge context-menu">${langLabel[item.lang] || '?'}</span>
+        <span class="memory-item-text vocab-word editable" title="點擊編輯">${escapeHtml(item.word)}</span>
+        <span class="memory-item-date">${formatItemDate(item.createdAt)}</span>
+        <select class="item-cat-select ${item.category ? 'has-value' : ''}" title="分類">${catOptions}</select>
+        <button class="btn-vocab-tts btn-icon-xs" title="朗讀" data-text="${escapeAttr(item.word)}" data-lang="${ttsLang}">${TTS_SVG}</button>
+        <button class="btn-vocab-copy btn-icon-xs" title="複製" data-text="${escapeAttr(item.word)}">${COPY_SVG}</button>
+        <button class="btn-memory-delete" title="刪除">
+          <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
+        </button>
+      `;
+      // 分類選擇
+      div.querySelector('.item-cat-select').addEventListener('change', async e => {
+        const { vocabulary: current = [] } = await chrome.storage.local.get(['vocabulary']);
+        const idx = current.findIndex(v => v.id === item.id);
+        if (idx !== -1) {
+          current[idx].category = e.target.value;
+          await chrome.storage.local.set({ vocabulary: current });
+          e.target.classList.toggle('has-value', !!e.target.value);
+        }
+      });
+      // 點擊單字進入編輯模式
+      const wordSpan = div.querySelector('.vocab-word');
+      const ttsBtn = div.querySelector('.btn-vocab-tts');
+      const copyBtn = div.querySelector('.btn-vocab-copy');
+      wordSpan.addEventListener('click', () => {
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'memory-item-input';
+        input.value = item.word;
+        wordSpan.replaceWith(input);
+        input.focus();
+        input.select();
+        const save = async () => {
+          const newWord = input.value.trim();
+          if (newWord && newWord !== item.word) {
+            const { vocabulary: current = [] } = await chrome.storage.local.get(['vocabulary']);
+            const idx = current.findIndex(v => v.id === item.id);
+            if (idx !== -1) { current[idx].word = newWord; await chrome.storage.local.set({ vocabulary: current }); }
+          }
+          const { vocabulary: latest = [] } = await chrome.storage.local.get(['vocabulary']);
+          renderVocabularyList(latest);
+        };
+        input.addEventListener('blur', save);
+        input.addEventListener('keydown', e => {
+          if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+          if (e.key === 'Escape') { chrome.storage.local.get(['vocabulary'], r => renderVocabularyList(r.vocabulary || [])); }
+        });
+      });
+      ttsBtn.addEventListener('click', handleTTS);
+      copyBtn.addEventListener('click', handleCopy);
+      div.querySelector('.btn-memory-delete').addEventListener('click', async () => {
+        const { vocabulary: current = [] } = await chrome.storage.local.get(['vocabulary']);
+        const updated = current.filter(v => v.id !== item.id);
+        await chrome.storage.local.set({ vocabulary: updated });
+        renderVocabularyList(updated);
+      });
+      vocabularyList.appendChild(div);
+    });
   }
 
   // ── Page Context ─────────────────────────────────────────

@@ -1,14 +1,15 @@
 {
   "manifest_version": 3,
   "name": "MiniMax AI Chat",
-  "version": "1.5.9",
+  "version": "1.6.0",
   "description": "串接 MiniMax API 的 AI 對話擴充功能，點擊即可開啟側邊欄與 AI 對話",
   "permissions": [
     "storage",
     "sidePanel",
     "activeTab",
     "tabs",
-    "scripting"
+    "scripting",
+    "contextMenus"
   ],
   "host_permissions": [
     "<all_urls>",
@@ -36,5 +37,12 @@
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
   },
-  "options_page": "options/options.html"
+  "options_page": "options/options.html",
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content/translate-popup.js"],
+      "run_at": "document_idle"
+    }
+  ]
 }

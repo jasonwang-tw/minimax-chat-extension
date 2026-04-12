@@ -4,7 +4,7 @@
 
 ## 版本
 
-**v1.5.9**
+**v1.6.0** (2026-04-12)
 
 ## 功能特色
 
@@ -97,6 +97,35 @@ npm run build:css
 - **TailwindCSS + SCSS**：樣式設計
 
 ## Changelog
+
+## [1.6.0] - 2026-04-12
+### Added
+- **立即翻譯**：反白文字 → 右鍵「立即翻譯」，Shadow DOM 懸浮視窗顯示原文 / 譯文，含複製按鈕；中文 → 英文，其他語言 → 繁體中文；Esc / 點擊外部關閉
+- **右側工具列**：Chatbox 右側新增垂直工具列，包含「立即總結」與「管理總結」按鈕
+- **立即總結**：點擊後 AI 串流生成當前對話摘要（不加入對話歷史），結果在聊天區顯示並儲存至 `sessionSummaries`
+- **管理總結 Modal**：列出當前 Session 所有總結；每筆可「加入長期記憶」或刪除
+- 總結 Modal：折疊預覽（3行截斷）+ 點擊展開完整摘要，展開/折疊動畫
+- 總結 Modal：每筆總結均有「加入長期記憶」與「加入知識庫」按鈕（折疊/展開皆顯示）
+- 加入知識庫：總結直接以 `status: 'ready'` 存入，無需 AI 分析
+- Storage 新增 `sessionSummaries` 欄位（`{ [sessionId]: [{ id, text, createdAt, addedToMemory, addedToKb }] }`）
+- `storage.onChanged` 監聽 `sessionSummaries`，Modal 開著時自動同步
+- **翻譯懸浮視窗**新增 TTS 朗讀按鈕，播放目標語言語音；再次點擊停止；關閉視窗自動停止
+- **content/translate-popup.js**：新增 `content_scripts` 宣告；動態注入 fallback（`executeScript`）確保既有分頁也能顯示翻譯視窗
+### Fixed
+- 翻譯懸浮視窗定位錯誤：`getBoundingClientRect()` 已是 viewport 座標，移除多餘的 `scrollY/scrollX` offset，修復捲動後視窗跑到螢幕外的問題
+- 長期記憶 / 知識庫 / 單字簿刪除後資料重複顯示：async render 函式因 `storage.onChanged` 與 delete handler 同時觸發導致 `appendChild` 競爭；加入版本計數器 guard，stale render 直接 abort
+
+## [1.5.9] - 2026-04-11
+### Added
+- Header 新增「長期記憶」(腦圖示) 與「單字簿」(書圖示) 快速開啟按鈕
+- 右鍵選單新增四個項目：「加入長期記憶」「加入單字簿」「加入知識庫」「立即翻譯」（知識庫 / 翻譯待後續批次）
+- 長期記憶：顯示加入日期；點擊文字可 inline 編輯（Enter 儲存 / Esc 取消）
+- 單字簿 Modal：顯示語言 badge（EN / 中 / 日）、加入日期、朗讀按鈕、複製按鈕；點擊單字可 inline 編輯
+- **分類管理**：長期記憶與單字簿均可自訂分類；每個條目可指派分類；Modal 頂部支援分類篩選；分類可新增 / 刪除，刪除時自動清除條目的分類指派
+- **知識庫**：Header 新增資料庫圖示按鈕；右鍵「加入知識庫」支援選取文字或整頁擷取；背景 AI 自動生成 summary + tags（status: processing → ready）；Modal 支援標題編輯、分類管理、刪除；輸入 `@` 呼叫 @ palette 搜尋知識庫，選取後注入 `【知識庫參考】` 前置區塊至 AI 訊息；每次送出後 chips 自動清除
+- 長期記憶 badge 新增「右鍵」「總結」來源顯示
+- `contextMenus` 權限；`vocabulary` 與 `categories` storage 預設值
+- `storage.onChanged` 監聽 `memories` / `vocabulary` 變更，右鍵加入後 sidepanel 即時同步
 
 ## [1.5.9] - 2026-04-10
 ### Changed

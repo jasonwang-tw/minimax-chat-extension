@@ -27,8 +27,269 @@ chrome.runtime.onInstalled.addListener(({ reason }) => {
       customCommands: [],
       autoMemoryEnabled: false
     });
+    chrome.storage.local.set({
+      vocabulary: [],
+      categories: { memory: [], knowledge: [], vocabulary: [] }
+    });
+  }
+
+  // 建立右鍵選單（每次安裝/更新都重建，避免重複）
+  chrome.contextMenus.removeAll(() => {
+    chrome.contextMenus.create({
+      id: 'add-to-memory',
+      title: '加入長期記憶',
+      contexts: ['selection']
+    });
+    chrome.contextMenus.create({
+      id: 'add-to-vocabulary',
+      title: '加入單字簿',
+      contexts: ['selection']
+    });
+    chrome.contextMenus.create({
+      id: 'add-to-knowledge',
+      title: '加入知識庫',
+      contexts: ['selection', 'page']
+    });
+    chrome.contextMenus.create({
+      id: 'instant-translate',
+      title: '立即翻譯',
+      contexts: ['selection']
+    });
+  });
+});
+
+// 右鍵選單點擊處理
+chrome.contextMenus.onClicked.addListener(async (info, tab) => {
+  if (info.menuItemId === 'add-to-memory') {
+    const text = info.selectionText?.trim();
+    if (!text) return;
+    const { memories = [] } = await chrome.storage.local.get(['memories']);
+    if (memories.some(m => m.text === text)) return; // 防重複
+    memories.push({
+      id: `mem_${Date.now()}`,
+      text,
+      source: 'context-menu',
+      category: '',
+      createdAt: Date.now()
+    });
+    if (memories.length > 50) memories.shift(); // 上限 50 筆
+    await chrome.storage.local.set({ memories });
+  }
+
+  if (info.menuItemId === 'add-to-vocabulary') {
+    const word = info.selectionText?.trim();
+    if (!word) return;
+    const { vocabulary = [] } = await chrome.storage.local.get(['vocabulary']);
+    if (vocabulary.some(v => v.word === word)) return; // 防重複
+    // 簡易語言偵測
+    const lang = /[\u4e00-\u9fff]/.test(word) ? 'zh'
+               : /[\u3040-\u30ff]/.test(word) ? 'ja'
+               : /^[\x00-\x7F]+$/.test(word)  ? 'en'
+               : 'other';
+    vocabulary.push({
+      id: `vocab_${Date.now()}`,
+      word,
+      definition: '',
+      category: '',
+      lang,
+      createdAt: Date.now()
+    });
+    await chrome.storage.local.set({ vocabulary });
+  }
+
+  if (info.menuItemId === 'add-to-knowledge') {
+    const id = `kb_${Date.now()}`;
+    let title = tab?.title || '未命名';
+    let url = tab?.url || '';
+    let content = '';
+    let source = 'url';
+
+    if (info.selectionText?.trim()) {
+      // 選取文字模式
+      source = 'text';
+      content = info.selectionText.trim();
+      title = content.slice(0, 60) + (content.length > 60 ? '...' : '');
+      url = tab?.url || '';
+    } else {
+      // 整頁模式：抓取頁面內容
+      try {
+        const results = await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          func: () => {
+            const raw = document.body?.innerText || '';
+            return {
+              title: document.title || '',
+              url: location.href || '',
+              text: raw.length > 8000 ? raw.slice(0, 8000) + '\n...（已截斷）' : raw
+            };
+          }
+        });
+        const page = results[0].result;
+        title = page.title;
+        url = page.url;
+        content = page.text;
+      } catch (e) {
+        console.error('[知識庫] 無法讀取頁面:', e);
+        return;
+      }
+    }
+
+    // 防重複（url 模式比對 url、text 模式比對 content）
+    const { knowledgeBase = [] } = await chrome.storage.local.get(['knowledgeBase']);
+    if (source === 'url' && knowledgeBase.some(kb => kb.url === url && kb.source === 'url')) return;
+    if (source === 'text' && knowledgeBase.some(kb => kb.content === content)) return;
+
+    const item = { id, title, url, content, summary: '', tags: [], category: '', source, status: 'processing', createdAt: Date.now() };
+    knowledgeBase.push(item);
+    await chrome.storage.local.set({ knowledgeBase });
+
+    // 非同步 AI 分析（不阻塞右鍵回應）
+    analyzeKnowledgeItem(id);
+  }
+
+  if (info.menuItemId === 'instant-translate') {
+    const text = info.selectionText?.trim();
+    if (!text || !tab?.id) return;
+
+    // 偵測語言：有中文 → 譯成英文；否則 → 譯成繁中
+    const isChinese = /[\u4e00-\u9fff\u3400-\u4dbf]/.test(text);
+    const [from, to] = isChinese ? ['zh-TW', 'en'] : ['auto', 'zh-TW'];
+
+    try {
+      const translated = await translateTextGoogle(text, from, to);
+      const msgData = { type: 'SHOW_TRANSLATE_POPUP', data: { original: text, translated, from, to } };
+
+      // 永遠先動態注入（guard 防止重複執行），await 完成後 listener 已就緒
+      try {
+        await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          files: ['content/translate-popup.js']
+        });
+      } catch (injectErr) {
+        // chrome:// 等特殊頁面無法注入，靜默跳過
+        console.warn('[翻譯] 無法注入 content script:', injectErr.message);
+        return;
+      }
+
+      await chrome.tabs.sendMessage(tab.id, msgData);
+    } catch (e) {
+      console.error('[翻譯] 失敗:', e);
+    }
   }
 });
+
+// ── Google Translate（免費端點）───────────────────────────
+async function translateTextGoogle(text, from, to) {
+  const url = `https://translate.google.com/translate_a/single?client=gtx&sl=${from}&tl=${to}&dt=t&q=${encodeURIComponent(text)}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const data = await res.json();
+  return (data[0] || []).map(s => s?.[0] || '').join('');
+}
+
+// ── 知識庫 AI 分析 ──────────────────────────────────────
+async function analyzeKnowledgeItem(itemId) {
+  try {
+    const { knowledgeBase = [] } = await chrome.storage.local.get(['knowledgeBase']);
+    const item = knowledgeBase.find(kb => kb.id === itemId);
+    if (!item) return;
+
+    const { apiKey } = await chrome.storage.sync.get(['apiKey']);
+    if (!apiKey) {
+      // 無 API Key 仍標記為 ready（無摘要）
+      const { knowledgeBase: kb = [] } = await chrome.storage.local.get(['knowledgeBase']);
+      const idx = kb.findIndex(k => k.id === itemId);
+      if (idx !== -1) { kb[idx].status = 'ready'; await chrome.storage.local.set({ knowledgeBase: kb }); }
+      return;
+    }
+
+    const snippet = item.content.slice(0, 3000);
+
+    const resp = await fetch(MINIMAX_API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model: MODEL_NAME,
+        messages: [
+          {
+            role: 'system',
+            content: '你是一個內容摘要助手。使用者會提供文章或網頁內容，你必須回覆且只能回覆一個 JSON 物件，格式為 {"summary":"摘要文字","tags":["標籤1","標籤2"]}，不得包含任何其他說明文字或 Markdown 標記。'
+          },
+          {
+            role: 'user',
+            content: `請分析以下內容並回覆 JSON：\n\n${snippet}`
+          }
+        ],
+        max_tokens: 500
+      })
+    });
+    const data = await resp.json();
+    const text = (data.choices?.[0]?.message?.content || '').trim();
+
+    // 多層次 JSON 解析：direct → 精確 regex → 欄位萃取
+    const parsed = extractKbJson(text);
+
+    const { knowledgeBase: kb2 = [] } = await chrome.storage.local.get(['knowledgeBase']);
+    const idx = kb2.findIndex(k => k.id === itemId);
+    if (idx === -1) return;
+
+    if (parsed) {
+      kb2[idx].summary = typeof parsed.summary === 'string' ? parsed.summary : '';
+      kb2[idx].tags = Array.isArray(parsed.tags) ? parsed.tags.slice(0, 5) : [];
+    }
+    kb2[idx].status = 'ready';
+    await chrome.storage.local.set({ knowledgeBase: kb2 });
+  } catch (e) {
+    console.error('[知識庫] analyzeKnowledgeItem error:', e);
+    // 確保不永遠停在 processing
+    try {
+      const { knowledgeBase: kb = [] } = await chrome.storage.local.get(['knowledgeBase']);
+      const idx = kb.findIndex(k => k.id === itemId);
+      if (idx !== -1) { kb[idx].status = 'ready'; await chrome.storage.local.set({ knowledgeBase: kb }); }
+    } catch {}
+  }
+}
+
+// 從 AI 回應中穩健地萃取 JSON
+function extractKbJson(text) {
+  // 1. 去除 markdown code fences（```json ... ``` 或 ``` ... ```）
+  const stripped = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '').trim();
+
+  // 2. 直接 parse 整段
+  try { return JSON.parse(stripped); } catch {}
+
+  // 3. 找第一個 { 到最後一個 }（但先縮小範圍至含 "summary" 的段落）
+  const summaryIdx = stripped.indexOf('"summary"');
+  if (summaryIdx !== -1) {
+    const start = stripped.lastIndexOf('{', summaryIdx);
+    const end = stripped.indexOf('}', summaryIdx);
+    if (start !== -1 && end !== -1) {
+      // 找配對的右括號（處理巢狀）
+      let depth = 0, closeIdx = -1;
+      for (let i = start; i < stripped.length; i++) {
+        if (stripped[i] === '{') depth++;
+        else if (stripped[i] === '}') { depth--; if (depth === 0) { closeIdx = i; break; } }
+      }
+      if (closeIdx !== -1) {
+        try { return JSON.parse(stripped.slice(start, closeIdx + 1)); } catch {}
+      }
+    }
+  }
+
+  // 4. 正則萃取欄位（最後手段）
+  const summaryMatch = stripped.match(/"summary"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+  const tagsMatch = stripped.match(/"tags"\s*:\s*\[([^\]]*)\]/);
+  if (summaryMatch) {
+    const tags = [];
+    if (tagsMatch) {
+      const tagArr = tagsMatch[1].match(/"((?:[^"\\]|\\.)*)"/g) || [];
+      tags.push(...tagArr.map(t => t.replace(/^"|"$/g, '')));
+    }
+    return { summary: summaryMatch[1], tags };
+  }
+
+  return null;
+}
 
 // 監聽工具列圖示點擊，開啟側邊欄
 // 使用 windowId 而非 tabId，避免跨頁面切換時出現錯誤
