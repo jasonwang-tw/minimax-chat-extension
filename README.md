@@ -4,7 +4,7 @@
 
 ## 版本
 
-**v1.6.0** (2026-04-12)
+**v1.6.1** (2026-04-12)
 
 ## 功能特色
 
@@ -97,6 +97,13 @@ npm run build:css
 - **TailwindCSS + SCSS**：樣式設計
 
 ## Changelog
+
+## [1.6.1] - 2026-04-12
+### Changed
+- **長期記憶跨裝置同步**：`memories` 改存 `chrome.storage.sync`，登入相同 Google 帳號即可跨裝置同步；長期記憶上限從 50 筆調整為 30 筆（符合 sync 8KB/key 限制）
+- **分類跨裝置同步**：`categories`（長期記憶 / 知識庫 / 單字簿三資料庫的分類）改存 `chrome.storage.sync`
+- **storage.onChanged 加入 area 篩選**：sync area 處理長期記憶與設定，local area 處理知識庫、單字簿、總結，避免跨 area 誤觸發
+- 首次啟動自動遷移：原本存於 `local` 的 `memories` / `categories` 自動搬至 `sync` 並清除 `local` 舊資料
 
 ## [1.6.0] - 2026-04-12
 ### Added

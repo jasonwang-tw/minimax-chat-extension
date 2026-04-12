@@ -302,7 +302,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   async function refreshMemoryCount() {
-    const { memories } = await chrome.storage.local.get(['memories']);
+    const { memories } = await chrome.storage.sync.get(['memories']);
     const count = (memories || []).length;
     if (memoryCountDisplay) {
       memoryCountDisplay.textContent = `目前有 ${count} 筆長期記憶`;
@@ -323,7 +323,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   clearMemoryBtn?.addEventListener("click", async () => {
     if (confirm('確定要清除所有長期記憶？')) {
-      await chrome.storage.local.set({ memories: [] });
+      await chrome.storage.sync.set({ memories: [] });
       await refreshMemoryCount();
       if (!memoryInlineList.classList.contains('hidden')) {
         await renderInlineMemoryList();
@@ -333,7 +333,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   });
 
   async function renderInlineMemoryList() {
-    const { memories } = await chrome.storage.local.get(['memories']);
+    const { memories } = await chrome.storage.sync.get(['memories']);
     const list = memories || [];
     memoryInlineList.innerHTML = '';
     if (list.length === 0) {
@@ -353,9 +353,9 @@ document.addEventListener("DOMContentLoaded", async () => {
       `;
       div.querySelector('.btn-mode-delete').addEventListener('click', async (e) => {
         const id = e.currentTarget.dataset.id;
-        const { memories: cur } = await chrome.storage.local.get(['memories']);
+        const { memories: cur } = await chrome.storage.sync.get(['memories']);
         const updated = (cur || []).filter(m => m.id !== id);
-        await chrome.storage.local.set({ memories: updated });
+        await chrome.storage.sync.set({ memories: updated });
         await refreshMemoryCount();
         await renderInlineMemoryList();
       });

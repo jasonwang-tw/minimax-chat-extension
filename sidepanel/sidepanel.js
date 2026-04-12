@@ -178,6 +178,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   // 載入回覆模式、記憶、自訂指令、知識庫
   await loadReplyModes();
   await loadMemories();
+  await migrateCategoriesIfNeeded();
   await loadCustomCommands();
   const { knowledgeBase: initKb = [] } = await chrome.storage.local.get(['knowledgeBase']);
   knowledgeBase = initKb;
@@ -187,39 +188,46 @@ document.addEventListener('DOMContentLoaded', async () => {
   // 檢查 API Key
   await checkApiKey();
 
-  chrome.storage.onChanged.addListener((changes) => {
-    if (changes.geminiApiKey || changes.apiKey) {
-      checkApiKey();
-    }
-    if (changes.replyModes) {
-      loadReplyModes();
-    }
-    if (changes.customCommands) {
-      loadCustomCommands();
-    }
-    // 右鍵選單從 background 直接寫入 storage，sidepanel 透過此監聽同步
-    if (changes.memories) {
-      memories = changes.memories.newValue || [];
-      if (memoryModal && !memoryModal.classList.contains('hidden')) {
-        renderMemoryList();
+  chrome.storage.onChanged.addListener((changes, area) => {
+    // sync area：API Key、設定、長期記憶、分類（跨裝置同步的資料）
+    if (area === 'sync') {
+      if (changes.geminiApiKey || changes.apiKey) {
+        checkApiKey();
+      }
+      if (changes.replyModes) {
+        loadReplyModes();
+      }
+      if (changes.customCommands) {
+        loadCustomCommands();
+      }
+      // 右鍵選單從 background 寫入 sync，sidepanel 透過此監聽同步
+      if (changes.memories) {
+        memories = changes.memories.newValue || [];
+        if (memoryModal && !memoryModal.classList.contains('hidden')) {
+          renderMemoryList();
+        }
       }
     }
-    if (changes.vocabulary) {
-      if (vocabularyModal && !vocabularyModal.classList.contains('hidden')) {
-        renderVocabularyList(changes.vocabulary.newValue || []);
+
+    // local area：大型資料（知識庫、單字簿、sessions、總結）
+    if (area === 'local') {
+      if (changes.vocabulary) {
+        if (vocabularyModal && !vocabularyModal.classList.contains('hidden')) {
+          renderVocabularyList(changes.vocabulary.newValue || []);
+        }
       }
-    }
-    if (changes.knowledgeBase) {
-      knowledgeBase = changes.knowledgeBase.newValue || [];
-      if (knowledgeModal && !knowledgeModal.classList.contains('hidden')) {
-        renderKnowledgeTagFilters();
-        renderKnowledgeList();
+      if (changes.knowledgeBase) {
+        knowledgeBase = changes.knowledgeBase.newValue || [];
+        if (knowledgeModal && !knowledgeModal.classList.contains('hidden')) {
+          renderKnowledgeTagFilters();
+          renderKnowledgeList();
+        }
       }
-    }
-    if (changes.sessionSummaries) {
-      sessionSummaries = changes.sessionSummaries.newValue || {};
-      if (summaryModal && !summaryModal.classList.contains('hidden')) {
-        renderSummaryList();
+      if (changes.sessionSummaries) {
+        sessionSummaries = changes.sessionSummaries.newValue || {};
+        if (summaryModal && !summaryModal.classList.contains('hidden')) {
+          renderSummaryList();
+        }
       }
     }
   });
@@ -1933,12 +1941,32 @@ document.addEventListener('DOMContentLoaded', async () => {
   // ── Memory ──────────────────────────────────────────────
 
   async function loadMemories() {
-    const result = await chrome.storage.local.get(['memories']);
-    memories = result.memories || [];
+    const syncResult = await chrome.storage.sync.get(['memories']);
+    if (syncResult.memories !== undefined) {
+      memories = syncResult.memories;
+    } else {
+      // 一次性遷移：從 local 搬到 sync
+      const localResult = await chrome.storage.local.get(['memories']);
+      memories = (localResult.memories || []).slice(-30);
+      if (memories.length > 0) {
+        await chrome.storage.sync.set({ memories });
+        await chrome.storage.local.remove(['memories']);
+      }
+    }
   }
 
   async function saveMemories() {
-    await chrome.storage.local.set({ memories });
+    await chrome.storage.sync.set({ memories });
+  }
+
+  async function migrateCategoriesIfNeeded() {
+    const syncResult = await chrome.storage.sync.get(['categories']);
+    if (syncResult.categories !== undefined) return; // 已在 sync，不需遷移
+    const localResult = await chrome.storage.local.get(['categories']);
+    if (localResult.categories) {
+      await chrome.storage.sync.set({ categories: localResult.categories });
+      await chrome.storage.local.remove(['categories']);
+    }
   }
 
   async function addMemory(text, source) {
@@ -1950,8 +1978,8 @@ document.addEventListener('DOMContentLoaded', async () => {
       return;
     }
     memories.push({ id: `mem_${Date.now()}`, text: trimmed, source, createdAt: Date.now() });
-    // 上限 50 筆
-    if (memories.length > 50) memories.shift();
+    // 上限 30 筆（sync 容量限制）
+    if (memories.length > 30) memories.shift();
     await saveMemories();
     setStatus(`✓ 已記住：${trimmed.slice(0, 30)}${trimmed.length > 30 ? '...' : ''}`, false, 3000);
   }
@@ -2051,14 +2079,14 @@ document.addEventListener('DOMContentLoaded', async () => {
   // ── Category Management Helpers ──────────────────────────
 
   async function getCategories(type) {
-    const { categories = {} } = await chrome.storage.local.get(['categories']);
+    const { categories = {} } = await chrome.storage.sync.get(['categories']);
     return Array.isArray(categories[type]) ? categories[type] : [];
   }
 
   async function saveCategories(type, list) {
-    const { categories = {} } = await chrome.storage.local.get(['categories']);
+    const { categories = {} } = await chrome.storage.sync.get(['categories']);
     categories[type] = list;
-    await chrome.storage.local.set({ categories });
+    await chrome.storage.sync.set({ categories });
   }
 
   async function populateCategoryFilter(type, selectEl) {

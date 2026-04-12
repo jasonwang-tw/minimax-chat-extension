@@ -63,7 +63,7 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   if (info.menuItemId === 'add-to-memory') {
     const text = info.selectionText?.trim();
     if (!text) return;
-    const { memories = [] } = await chrome.storage.local.get(['memories']);
+    const { memories = [] } = await chrome.storage.sync.get(['memories']);
     if (memories.some(m => m.text === text)) return; // 防重複
     memories.push({
       id: `mem_${Date.now()}`,
@@ -72,8 +72,8 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
       category: '',
       createdAt: Date.now()
     });
-    if (memories.length > 50) memories.shift(); // 上限 50 筆
-    await chrome.storage.local.set({ memories });
+    if (memories.length > 30) memories.shift(); // 上限 30 筆（sync 容量限制）
+    await chrome.storage.sync.set({ memories });
   }
 
   if (info.menuItemId === 'add-to-vocabulary') {
