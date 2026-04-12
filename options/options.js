@@ -10,6 +10,10 @@ document.addEventListener("DOMContentLoaded", async () => {
   const toggleKeyBtn = document.getElementById("toggleKey");
   const geminiApiKeyInput = document.getElementById("geminiApiKey");
   const toggleGeminiKeyBtn = document.getElementById("toggleGeminiKey");
+  const braveApiKeyInput = document.getElementById("braveApiKey");
+  const toggleBraveKeyBtn = document.getElementById("toggleBraveKey");
+  const exaApiKeyInput = document.getElementById("exaApiKey");
+  const toggleExaKeyBtn = document.getElementById("toggleExaKey");
   const saveBtn = document.getElementById("saveBtn");
   const testBtn = document.getElementById("testBtn");
   const testGeminiBtn = document.getElementById("testGeminiBtn");
@@ -63,17 +67,37 @@ document.addEventListener("DOMContentLoaded", async () => {
       : '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>';
   });
 
+  // 切換 Brave 密碼可見性
+  toggleBraveKeyBtn?.addEventListener("click", () => {
+    const isPassword = braveApiKeyInput.type === "password";
+    braveApiKeyInput.type = isPassword ? "text" : "password";
+    toggleBraveKeyBtn.innerHTML = isPassword
+      ? '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/><line x1="2" x2="22" y1="2" y2="22"/></svg>'
+      : '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>';
+  });
+
+  // 切換 Exa 密碼可見性
+  toggleExaKeyBtn?.addEventListener("click", () => {
+    const isPassword = exaApiKeyInput.type === "password";
+    exaApiKeyInput.type = isPassword ? "text" : "password";
+    toggleExaKeyBtn.innerHTML = isPassword
+      ? '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/><line x1="2" x2="22" y1="2" y2="22"/></svg>'
+      : '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>';
+  });
+
   // 儲存 API 設定
   saveBtn.addEventListener("click", async () => {
     const apiKey = apiKeyInput.value.trim();
     const geminiApiKey = geminiApiKeyInput.value.trim();
+    const braveApiKey = braveApiKeyInput.value.trim();
+    const exaApiKey = exaApiKeyInput.value.trim();
 
     if (!apiKey) {
       showMessage("請輸入 MiniMax API Key", "error");
       return;
     }
 
-    await chrome.storage.sync.set({ apiKey, geminiApiKey });
+    await chrome.storage.sync.set({ apiKey, geminiApiKey, braveApiKey, exaApiKey });
     showMessage("API 設定已儲存", "success");
   });
 
@@ -200,11 +224,13 @@ document.addEventListener("DOMContentLoaded", async () => {
   });
 
   async function loadSettings() {
-    const { apiKey, geminiApiKey, settings } = await chrome.storage.sync.get([
-      "apiKey", "geminiApiKey", "settings"
+    const { apiKey, geminiApiKey, braveApiKey, exaApiKey, settings } = await chrome.storage.sync.get([
+      "apiKey", "geminiApiKey", "braveApiKey", "exaApiKey", "settings"
     ]);
     if (apiKey) apiKeyInput.value = apiKey;
     if (geminiApiKey) geminiApiKeyInput.value = geminiApiKey;
+    if (braveApiKey) braveApiKeyInput.value = braveApiKey;
+    if (exaApiKey) exaApiKeyInput.value = exaApiKey;
     if (settings?.maxHistory) maxHistorySelect.value = settings.maxHistory;
     if (settings?.defaultModel) defaultModelSelect.value = settings.defaultModel;
   }

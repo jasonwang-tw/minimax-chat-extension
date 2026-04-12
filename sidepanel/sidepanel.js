@@ -28,6 +28,9 @@ let cmdPaletteIndex = -1;     // 指令選單鍵盤選取游標
 document.addEventListener('DOMContentLoaded', async () => {
   const messageInput = document.getElementById('messageInput');
   const sendBtn = document.getElementById('sendBtn');
+  const sendIcon = document.getElementById('sendIcon');
+  const stopIcon = document.getElementById('stopIcon');
+  let currentPort = null; // 追蹤目前串流 port，供停止按鈕使用
   const chatMessages = document.getElementById('chatMessages');
   const emptyState = document.getElementById('emptyState');
   const typingIndicator = document.getElementById('typingIndicator');
@@ -268,8 +271,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     handleKbPaletteInput();
   });
 
-  // 發送訊息
-  sendBtn.addEventListener('click', handleSend);
+  // 發送 / 停止
+  sendBtn.addEventListener('click', () => {
+    if (isLoading && currentPort) {
+      // 停止串流
+      currentPort.disconnect();
+      currentPort = null;
+    } else {
+      handleSend();
+    }
+  });
   messageInput.addEventListener('keydown', (e) => {
     // 指令選單鍵盤導航
     if (!commandPalette.classList.contains('hidden')) {
@@ -1108,7 +1119,21 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   function updateSendButton() {
     const hasContent = messageInput.value.trim() || currentImages.length > 0 || pageContext;
-    sendBtn.disabled = !hasContent || isLoading;
+    sendBtn.disabled = !hasContent && !isLoading;
+  }
+
+  function setStreamingMode(streaming) {
+    if (streaming) {
+      sendBtn.disabled = false;
+      sendBtn.title = '停止生成';
+      sendIcon.classList.add('hidden');
+      stopIcon.classList.remove('hidden');
+    } else {
+      sendBtn.title = '送出';
+      sendIcon.classList.remove('hidden');
+      stopIcon.classList.add('hidden');
+      updateSendButton();
+    }
   }
 
   async function checkApiKey() {
@@ -1463,14 +1488,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     const liveDiv = createLiveMessageDiv();
 
     const port = chrome.runtime.connect({ name: 'chat-stream' });
+    currentPort = port;
+    setStreamingMode(true);
     let rawContent = '';
 
     function resetLoading() {
       isLoading = false;
-      sendBtn.disabled = false;
+      currentPort = null;
+      setStreamingMode(false);
       messageInput.disabled = false;
       messageInput.focus();
-      updateSendButton();
     }
 
     port.onMessage.addListener(async (msg) => {
@@ -1515,12 +1542,22 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
     });
 
-    port.onDisconnect.addListener(() => {
+    port.onDisconnect.addListener(async () => {
       if (!isLoading) return;
-      liveDiv.remove();
-      const errMsg = chrome.runtime.lastError?.message || '連線中斷，請重試';
-      addMessage(`錯誤: ${errMsg}`, 'error');
       clearStatus();
+      if (rawContent) {
+        // 使用者手動停止：保留已生成的內容
+        const partial = rawContent.trimEnd();
+        currentSession.messages.push({ role: 'assistant', content: partial });
+        finalizeLiveMessage(liveDiv, partial, partial, replyLang);
+        await saveCurrentSession();
+        await loadHistory();
+      } else {
+        // 連線錯誤（無任何內容）
+        liveDiv.remove();
+        const errMsg = chrome.runtime.lastError?.message;
+        if (errMsg) addMessage(`錯誤: ${errMsg}`, 'error');
+      }
       resetLoading();
     });
 
@@ -1800,16 +1837,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   // ── Commands ─────────────────────────────────────────────
 
   const BUILTIN_COMMANDS = [
-    { trigger: '/screenshot', name: '全頁截圖',    type: 'action', icon: '📷' },
-    { trigger: '/region',     name: '區域截圖',    type: 'action', icon: '✂️' },
-    { trigger: '/ocr',        name: 'OCR 文字辨識', type: 'action', icon: '🔍' },
-    { trigger: '/page',       name: '讀取當前頁面', type: 'action', icon: '📄' },
-    { trigger: '/new',        name: '新對話',      type: 'action', icon: '➕' },
-    { trigger: '/clear',      name: '清空對話',    type: 'action', icon: '🗑️' },
-    { trigger: '/remember',   name: '記住某件事',  type: 'action', icon: '🧠', argHint: '/remember <內容>' },
-    { trigger: '/forget',     name: '管理記憶',    type: 'action', icon: '📋' },
-    { trigger: '/mode',       name: '切換回覆模式', type: 'action', icon: '🔄', argHint: '/mode <模式名稱>' },
-    { trigger: '/summarize',  name: '摘要此段文字', type: 'template', icon: '📝', template: '請用條列式摘要以下內容：\n\n{input}' },
+    { trigger: '/page',     name: '讀取當前頁面', type: 'action', icon: '📄' },
+    { trigger: '/clear',    name: '清空對話',    type: 'action', icon: '🗑️' },
+    { trigger: '/new',      name: '新對話',      type: 'action', icon: '➕' },
+    { trigger: '/remember', name: '記住某件事',  type: 'action', icon: '🧠', argHint: '/remember <內容>' },
+    { trigger: '/search',   name: 'Web 搜尋',    type: 'action', icon: '🔍', argHint: '/search <關鍵字>' },
   ];
 
   async function loadCustomCommands() {
@@ -1887,15 +1919,6 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   function executeAction(trigger, args) {
     switch (trigger) {
-      case '/screenshot':
-        screenshotBtn.click();
-        break;
-      case '/region':
-        regionScreenshotBtn.click();
-        break;
-      case '/ocr':
-        ocrPicker.classList.toggle('hidden');
-        break;
       case '/page':
         fetchPageContext();
         break;
@@ -1915,27 +1938,127 @@ document.addEventListener('DOMContentLoaded', async () => {
           setStatus('用法：/remember <要記住的內容>', false, 3000);
         }
         break;
-      case '/forget':
-        openMemoryModal();
-        break;
-      case '/mode':
+      case '/search':
         if (args) {
-          const target = replyModes.find(m => m.name.includes(args) || m.id.includes(args));
-          if (target) {
-            currentReplyModeId = target.id;
-            replyModeSelect.value = target.id;
-            setStatus(`已切換至：${target.name}`, false, 2000);
-          } else {
-            setStatus(`找不到模式「${args}」`, false, 3000);
-          }
+          handleWebSearch(args);
         } else {
-          openMemoryModal();
+          setStatus('用法：/search <關鍵字>', false, 3000);
         }
         break;
       default:
         break;
     }
     messageInput.focus();
+  }
+
+  async function handleWebSearch(query) {
+    if (!currentSession) startNewSession();
+    isLoading = true;
+    setStreamingMode(true);
+    messageInput.disabled = true;
+    typingIndicator.classList.add('hidden');
+    emptyState.classList.add('hidden');
+    setStatus(`搜尋中：${query}`);
+
+    const userMsg = { role: 'user', content: `🔍 /search ${query}` };
+    currentSession.messages.push(userMsg);
+    addMessage(`🔍 搜尋：${query}`, 'user');
+
+    const result = await chrome.runtime.sendMessage({ type: 'WEB_SEARCH', data: { query } });
+
+    if (!result.success) {
+      currentSession.messages.pop();
+      chatMessages.lastElementChild?.remove();
+      isLoading = false;
+      setStreamingMode(false);
+      messageInput.disabled = false;
+      updateSendButton();
+      if (result.error === 'NO_KEY') {
+        setStatus('請先至設定頁填入 Brave Search API Key', true, 4000);
+      } else {
+        setStatus(`搜尋失敗：${result.error}`, true, 3000);
+      }
+      messageInput.focus();
+      return;
+    }
+
+    // 組成 context 交給 AI 分析
+    const snippets = result.results.map((r, i) =>
+      `[${i + 1}] ${r.title}\n${r.snippet}\n來源：${r.url}`
+    ).join('\n\n');
+
+    const searchContext = `以下是針對「${query}」的網路搜尋結果，請根據這些資料回答問題：\n\n${snippets}\n\n請綜合以上資料，提供準確、有條理的回覆，並標注資料來源編號。`;
+
+    clearStatus();
+    const liveDiv = createLiveMessageDiv();
+    const port = chrome.runtime.connect({ name: 'chat-stream' });
+    currentPort = port;
+    let rawContent = '';
+
+    const replyLang = translateEnabled ? targetLangSelect.value : sourceLangSelect.value;
+    const activeMode = replyModes.find(m => m.id === currentReplyModeId);
+    const systemPrompt = activeMode?.prompt || '';
+    const memoryContext = buildMemoryBlock();
+
+    function resetWebSearch() {
+      isLoading = false;
+      currentPort = null;
+      setStreamingMode(false);
+      messageInput.disabled = false;
+      messageInput.focus();
+    }
+
+    port.onMessage.addListener(async (msg) => {
+      if (msg.type === 'chunk') {
+        rawContent = msg.full;
+        updateLiveMessageContent(liveDiv, rawContent);
+        scrollToBottom();
+        return;
+      }
+      if (msg.type === 'done') {
+        const reply = msg.reply;
+        currentSession.messages.push({ role: 'assistant', content: reply });
+        finalizeLiveMessage(liveDiv, rawContent, reply, replyLang);
+        port.disconnect();
+        resetWebSearch();
+        await saveCurrentSession();
+        await loadHistory();
+        return;
+      }
+      if (msg.type === 'error') {
+        liveDiv.remove();
+        addMessage(`錯誤：${msg.message}`, 'error');
+        port.disconnect();
+        resetWebSearch();
+      }
+    });
+
+    port.onDisconnect.addListener(async () => {
+      if (!isLoading) return;
+      if (rawContent) {
+        const partial = rawContent.trimEnd();
+        currentSession.messages.push({ role: 'assistant', content: partial });
+        finalizeLiveMessage(liveDiv, partial, partial, replyLang);
+        await saveCurrentSession();
+        await loadHistory();
+      } else {
+        liveDiv.remove();
+      }
+      resetWebSearch();
+    });
+
+    port.postMessage({
+      type: 'STREAM_MESSAGE',
+      data: {
+        message: searchContext,
+        history: currentSession.messages.slice(0, -1).map(m => ({ role: m.role, content: m.content })),
+        images: [],
+        translateConfig: null,
+        model: currentModel,
+        systemPrompt,
+        memoryContext
+      }
+    });
   }
 
   // ── Memory ──────────────────────────────────────────────

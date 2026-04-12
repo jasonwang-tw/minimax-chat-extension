@@ -389,6 +389,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message.type === 'WEB_SEARCH') {
+    webSearch(message.data.query)
+      .then(result => sendResponse(result))
+      .catch(error => sendResponse({ success: false, error: error.message }));
+    return true;
+  }
+
   if (message.type === 'EXTRACT_MEMORY') {
     extractMemories(message.data.userMessage, message.data.aiReply)
       .then(items => sendResponse({ success: true, items }))
@@ -1090,4 +1097,65 @@ function splitTextChunks(text, maxLen) {
     start = splitAt;
   }
   return chunks;
+}
+
+// ── Web 搜尋（Brave 優先，Exa 備用）──────────────────────────
+async function webSearch(query) {
+  const { braveApiKey, exaApiKey } = await chrome.storage.sync.get(['braveApiKey', 'exaApiKey']);
+
+  if (!braveApiKey && !exaApiKey) {
+    return { success: false, error: 'NO_KEY' };
+  }
+
+  // Brave Search 優先
+  if (braveApiKey) {
+    try {
+      const url = `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&count=5&text_decorations=false`;
+      const res = await fetch(url, {
+        headers: {
+          'Accept': 'application/json',
+          'X-Subscription-Token': braveApiKey
+        }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const results = (data.web?.results || []).slice(0, 5).map(r => ({
+          title: r.title,
+          url: r.url,
+          snippet: r.description || ''
+        }));
+        return { success: true, results, provider: 'Brave' };
+      }
+    } catch {}
+  }
+
+  // Exa 備用
+  if (exaApiKey) {
+    try {
+      const res = await fetch('https://api.exa.ai/search', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': exaApiKey
+        },
+        body: JSON.stringify({
+          query,
+          numResults: 5,
+          useAutoprompt: true,
+          contents: { text: { maxCharacters: 300 } }
+        })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const results = (data.results || []).slice(0, 5).map(r => ({
+          title: r.title || r.url,
+          url: r.url,
+          snippet: r.text || ''
+        }));
+        return { success: true, results, provider: 'Exa' };
+      }
+    } catch {}
+  }
+
+  return { success: false, error: '搜尋服務暫時無法使用' };
 }

@@ -75,6 +75,31 @@
               Studio</a></p>
         </div>
         <button id="testGeminiBtn" class="btn-secondary">測試 Gemini 連線</button>
+
+        <div class="divider"></div>
+
+        <div class="form-group">
+          <label for="braveApiKey">Brave Search API Key（/search 指令用）</label>
+          <div class="input-wrapper">
+            <input type="password" id="braveApiKey" placeholder="輸入 Brave Search API Key（選填）">
+            <button id="toggleBraveKey" class="btn-icon" type="button">
+              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+            </button>
+          </div>
+          <p class="hint">免費申請 <a href="https://brave.com/search/api/" target="_blank">Brave Search API</a>（免費方案 2,000 次/月）。有此 Key 時優先使用。</p>
+        </div>
+
+        <div class="form-group">
+          <label for="exaApiKey">Exa Search API Key（/search 指令用）</label>
+          <div class="input-wrapper">
+            <input type="password" id="exaApiKey" placeholder="輸入 Exa API Key（選填）">
+            <button id="toggleExaKey" class="btn-icon" type="button">
+              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+            </button>
+          </div>
+          <p class="hint">免費申請 <a href="https://exa.ai/" target="_blank">Exa Search API</a>（免費方案含每月額度）。無 Brave Key 時備用。</p>
+        </div>
+
         <div class="divider"></div>
         <button id="saveBtn" class="btn-primary">儲存設定</button>
       </section>

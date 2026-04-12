@@ -4,7 +4,7 @@
 
 ## 版本
 
-**v1.6.2** (2026-04-12)
+**v1.6.3** (2026-04-12)
 
 ## 功能特色
 
@@ -97,6 +97,15 @@ npm run build:css
 - **TailwindCSS + SCSS**：樣式設計
 
 ## Changelog
+
+## [1.6.3] - 2026-04-12
+### Added
+- **停止按鈕**：串流回覆中 Send 按鈕變為停止按鈕（■），點擊可中止生成；已輸出的內容保留為完整訊息存入歷史
+- **Web 搜尋 `/search`**：輸入 `/search 關鍵字` 即時搜尋網路並由 AI 整合分析回覆；Brave Search 優先，Exa 備用
+- 設定頁新增 Brave Search API Key 與 Exa Search API Key 欄位
+- manifest host_permissions 新增 `api.search.brave.com` 與 `api.exa.ai`
+### Changed
+- 預設 `/` 指令精簡為 `/page`、`/clear`、`/new`、`/remember`、`/search`，移除 `/screenshot`、`/region`、`/ocr`、`/forget`、`/mode`、`/summarize`
 
 ## [1.6.2] - 2026-04-12
 ### Changed
