@@ -1126,12 +1126,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (streaming) {
       sendBtn.disabled = false;
       sendBtn.title = '停止生成';
-      sendIcon.classList.add('hidden');
-      stopIcon.classList.remove('hidden');
+      sendIcon.style.display = 'none';
+      stopIcon.style.display = '';
     } else {
       sendBtn.title = '送出';
-      sendIcon.classList.remove('hidden');
-      stopIcon.classList.add('hidden');
+      sendIcon.style.display = '';
+      stopIcon.style.display = 'none';
       updateSendButton();
     }
   }
@@ -1421,6 +1421,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // ── 發送訊息 ────────────────────────────────────────────
   async function handleSend() {
+    if (isLoading) return; // 串流中不重複送出
     const message = messageInput.value.trim();
     if (!message && !currentImages.length && !pageContext) return;
 
@@ -1429,7 +1430,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     isLoading = true;
-    sendBtn.disabled = true;
     messageInput.disabled = true;
     typingIndicator.classList.remove('hidden');
     emptyState.classList.add('hidden');

@@ -4,7 +4,7 @@
 
 ## 版本
 
-**v1.6.3** (2026-04-12)
+**v1.6.4** (2026-04-12)
 
 ## 功能特色
 
@@ -97,6 +97,12 @@ npm run build:css
 - **TailwindCSS + SCSS**：樣式設計
 
 ## Changelog
+
+## [1.6.4] - 2026-04-12
+### Fixed
+- 停止按鈕圖示錯亂：SVG 使用 CSS `.hidden` class 無效（sidepanel 未定義全域規則），改用 `style.display` 控制顯示/隱藏
+- 停止按鈕無法點擊：`handleSend` 開頭設了 `sendBtn.disabled = true`，在 `setStreamingMode(true)` 之前就鎖住按鈕，移除該行改由 `setStreamingMode` 統一管理
+- 新增 `if (isLoading) return` guard 防止串流中重複送出
 
 ## [1.6.3] - 2026-04-12
 ### Added
