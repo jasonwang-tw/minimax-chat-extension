@@ -4,7 +4,7 @@
 
 ## 版本
 
-**v1.11.0** (2026-04-13)
+**v1.11.4** (2026-04-13)
 
 ## 功能特色
 
@@ -97,6 +97,19 @@ npm run build:css
 - **TailwindCSS + SCSS**：樣式設計
 
 ## Changelog
+
+## [1.11.4] - 2026-04-13
+### Fixed
+- **TTS 語音前段被截斷**：改用共用 `AudioContext`（`sharedAudioCtx`），播放前確保狀態為 `running`（`resume()` await），避免每次重建硬體初始化延遲
+
+## [1.11.3] - 2026-04-13
+### Fixed
+- **TTS 語音前段被截斷**：改用 Web Audio API（`decodeAudioData` + `BufferSource.start(0)`）取代 HTML Audio 元素
+
+## [1.11.2] - 2026-04-13
+### Fixed
+- **TTS 語言錯亂**：翻譯模式下 AI 回覆的 TTS 語言固定取 `targetLangSelect` 值，導致中文回覆用英文語音播放；改為用 `detectLang()` 偵測實際內容語言
+- **TTS 語音前段被截斷**（部分修復）：改用 Blob URL 取代 data URI，搭配 `canplaythrough` 事件
 
 ## [1.11.0] - 2026-04-13
 ### Changed

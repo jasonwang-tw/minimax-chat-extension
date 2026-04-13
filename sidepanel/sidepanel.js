@@ -162,8 +162,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   let translateEnabled = false;
   let batchSelectMode = false;
   let selectedIds = new Set();
-  let currentAudio = null;    // 目前播放中的 Audio 物件
-  let currentTTSBtn = null;   // 目前播放中的按鈕
+  let currentAudio = null;     // 目前播放中的 Audio 物件（fallback 用）
+  let currentTTSBtn = null;    // 目前播放中的按鈕
+  let currentAudioCtx = null;  // Web Audio API context
+  let currentAudioSrc = null;  // Web Audio API BufferSource
 
   // Region screenshot state
   let regionStartX = 0, regionStartY = 0;
@@ -297,7 +299,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         const stopThinkMatch = !translateEnabled && rawContent.match(/<think>([\s\S]*?)(?:<\/think>|$)/i);
         const stopThinkContent = stopThinkMatch ? stopThinkMatch[1].trim() : undefined;
         if (currentSession) currentSession.messages.push({ role: 'assistant', content: partial, ...(stopThinkContent && { thinkContent: stopThinkContent }) });
-        finalizeLiveMessage(liveDiv, partial, partial, translateEnabled ? targetLangSelect.value : sourceLangSelect.value);
+        finalizeLiveMessage(liveDiv, partial, partial, translateEnabled ? null : sourceLangSelect.value);
         await saveCurrentSession();
         await loadHistory();
       } else {
@@ -1582,7 +1584,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const activeMode = replyModes.find(m => m.id === currentReplyModeId);
     const systemPrompt = activeMode?.prompt || '';
     const memoryContext = buildMemoryBlock();
-    const replyLang = translateEnabled ? targetLangSelect.value : sourceLangSelect.value;
+    const replyLang = translateEnabled ? null : sourceLangSelect.value;
 
     // ── 自動搜尋（有 Search API Key 且純文字訊息時觸發）──────
     let augmentedMessage = textMessage;
@@ -1914,7 +1916,24 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   // ── TTS ─────────────────────────────────────────────────
+  // 共用 AudioContext（避免每次重建造成硬體初始化延遲）
+  let sharedAudioCtx = null;
+
+  function getAudioCtx() {
+    if (!sharedAudioCtx || sharedAudioCtx.state === 'closed') {
+      sharedAudioCtx = new AudioContext();
+    }
+    return sharedAudioCtx;
+  }
+
   function stopCurrentAudio() {
+    // Web Audio API 停止（不 close context，保持暖機狀態）
+    if (currentAudioSrc) {
+      try { currentAudioSrc.stop(); } catch (e) {}
+      currentAudioSrc = null;
+    }
+    currentAudioCtx = null;
+    // HTML Audio fallback 停止
     if (currentAudio) {
       currentAudio.pause();
       currentAudio.src = '';
@@ -1924,6 +1943,13 @@ document.addEventListener('DOMContentLoaded', async () => {
       currentTTSBtn.classList.remove('speaking');
       currentTTSBtn = null;
     }
+  }
+
+  function base64ToArrayBuffer(base64) {
+    const byteChars = atob(base64);
+    const byteArray = new Uint8Array(byteChars.length);
+    for (let i = 0; i < byteChars.length; i++) byteArray[i] = byteChars.charCodeAt(i);
+    return byteArray.buffer;
   }
 
   async function handleTTS(e) {
@@ -1953,18 +1979,23 @@ document.addEventListener('DOMContentLoaded', async () => {
 
       if (!response.success) throw new Error(response.error);
 
-      // 用 Audio API 播放 MP3
-      const audio = new Audio(`data:audio/mpeg;base64,${response.base64}`);
-      currentAudio = audio;
+      // 取得共用 AudioContext 並確保已在 running 狀態
+      const audioCtx = getAudioCtx();
+      currentAudioCtx = audioCtx;
+      if (audioCtx.state === 'suspended') await audioCtx.resume();
 
-      audio.onended = () => {
-        if (currentTTSBtn === btn) stopCurrentAudio();
-      };
-      audio.onerror = () => {
-        if (currentTTSBtn === btn) stopCurrentAudio();
-      };
+      // 完整解碼 MP3 → PCM buffer，start(0) 無啟動延遲
+      const arrayBuffer = base64ToArrayBuffer(response.base64);
+      const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+      if (currentTTSBtn !== btn) return;
 
-      await audio.play();
+      const source = audioCtx.createBufferSource();
+      source.buffer = audioBuffer;
+      source.connect(audioCtx.destination);
+      currentAudioSrc = source;
+
+      source.onended = () => { if (currentTTSBtn === btn) stopCurrentAudio(); };
+      source.start(0);
     } catch (err) {
       console.warn('Google TTS 失敗，改用系統語音:', err.message);
       // Fallback：Web Speech API
@@ -2160,7 +2191,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     currentPort = port;
     let rawContent = '';
 
-    const replyLang = translateEnabled ? targetLangSelect.value : sourceLangSelect.value;
+    const replyLang = translateEnabled ? null : sourceLangSelect.value;
     const activeMode = replyModes.find(m => m.id === currentReplyModeId);
     const systemPrompt = activeMode?.prompt || '';
     const memoryContext = buildMemoryBlock();
