@@ -1897,6 +1897,14 @@ mark {
   /* background: rgba(255, 255, 255, 0.07); */
 }
 
+.btn-vocab-zh {
+  font-size: 10px;
+  font-weight: 700;
+  height: 18px;
+  color: var(--primary);
+  cursor: default;
+}
+
 .btn-icon-xs.speaking {
   color: var(--primary);
 }

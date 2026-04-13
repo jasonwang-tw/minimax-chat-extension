@@ -389,8 +389,22 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message.type === 'TRANSLATE_WORD') {
+    translateTextGoogle(message.data.text, message.data.from || 'auto', message.data.to || 'zh-TW')
+      .then(result => sendResponse({ success: true, translated: result }))
+      .catch(error => sendResponse({ success: false, error: error.message }));
+    return true;
+  }
+
   if (message.type === 'WEB_SEARCH') {
-    webSearch(message.data.query)
+    braveSearch(message.data.query)
+      .then(result => sendResponse(result))
+      .catch(error => sendResponse({ success: false, error: error.message }));
+    return true;
+  }
+
+  if (message.type === 'DEEP_SEARCH') {
+    exaSearch(message.data.query)
       .then(result => sendResponse(result))
       .catch(error => sendResponse({ success: false, error: error.message }));
     return true;
@@ -1146,7 +1160,7 @@ async function autoSearch(userMessage) {
   if (SEARCH_TRIGGERS.test(userMessage.trim())) {
     const rawQuery = userMessage.trim().replace(SEARCH_TRIGGERS, '').trim() || userMessage.trim();
     const query = await refineQuery(rawQuery, apiKey, userMessage);
-    const searchResult = await webSearch(query);
+    const searchResult = await braveSearch(query);
     if (!searchResult.success) return { needed: false };
     return { needed: true, rawQuery, query, results: searchResult.results, provider: searchResult.provider };
   }
@@ -1180,7 +1194,7 @@ async function autoSearch(userMessage) {
 
     // rawText 是 AI 萃取的關鍵字，再進一步精修後搜尋
     const query = await refineQuery(rawText, apiKey, userMessage);
-    const searchResult = await webSearch(query);
+    const searchResult = await braveSearch(query);
     if (!searchResult.success) return { needed: false };
     return { needed: true, rawQuery: rawText, query, results: searchResult.results, provider: searchResult.provider };
   } catch {
@@ -1188,81 +1202,59 @@ async function autoSearch(userMessage) {
   }
 }
 
-// ── Web 搜尋（Brave 優先，Exa 備用）──────────────────────────
-async function webSearch(query) {
-  const { braveApiKey, exaApiKey } = await chrome.storage.sync.get(['braveApiKey', 'exaApiKey']);
+// ── Brave Search（一般搜尋）──────────────────────────────────
+async function braveSearch(query) {
+  const { braveApiKey } = await chrome.storage.sync.get(['braveApiKey']);
+  if (!braveApiKey) return { success: false, error: 'NO_KEY' };
 
-  if (!braveApiKey && !exaApiKey) {
-    return { success: false, error: 'NO_KEY' };
-  }
-
-  // Brave Search 優先
-  if (braveApiKey) {
-    try {
-      const url = `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&count=5&text_decorations=false`;
-      const res = await fetch(url, {
-        headers: {
-          'Accept': 'application/json',
-          'X-Subscription-Token': braveApiKey
-        }
-      });
-      if (res.ok) {
-        const data = await res.json();
-        const results = (data.web?.results || []).slice(0, 5).map(r => ({
-          title: r.title,
-          url: r.url,
-          snippet: r.description || ''
-        }));
-        if (results.length > 0) return { success: true, results, provider: 'Brave' };
-        // Brave 成功但無結果，繼續嘗試 Exa
-      } else {
-        // 捕捉 HTTP 錯誤碼，如果沒有 Exa 備援就回報
-        const status = res.status;
-        if (!exaApiKey) {
-          if (status === 401 || status === 403) return { success: false, error: `Brave API Key 無效（HTTP ${status}）` };
-          if (status === 429) return { success: false, error: 'Brave API 已達用量上限（429）' };
-          return { success: false, error: `Brave 搜尋失敗（HTTP ${status}）` };
-        }
-        // 有 Exa 備援，繼續
-      }
-    } catch (e) {
-      if (!exaApiKey) return { success: false, error: `Brave 搜尋例外：${e.message}` };
+  try {
+    const url = `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&count=5&text_decorations=false`;
+    const res = await fetch(url, {
+      headers: { 'Accept': 'application/json', 'X-Subscription-Token': braveApiKey }
+    });
+    if (res.ok) {
+      const data = await res.json();
+      const results = (data.web?.results || []).slice(0, 5).map(r => ({
+        title: r.title, url: r.url, snippet: r.description || ''
+      }));
+      if (results.length > 0) return { success: true, results, provider: 'Brave' };
+      return { success: false, error: '搜尋無結果，請更換關鍵字' };
     }
+    const status = res.status;
+    if (status === 401 || status === 403) return { success: false, error: `Brave API Key 無效（HTTP ${status}）` };
+    if (status === 429) return { success: false, error: 'Brave API 已達用量上限（429）' };
+    return { success: false, error: `Brave 搜尋失敗（HTTP ${status}）` };
+  } catch (e) {
+    return { success: false, error: `Brave 搜尋例外：${e.message}` };
   }
+}
 
-  // Exa 備用
-  if (exaApiKey) {
-    try {
-      const res = await fetch('https://api.exa.ai/search', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': exaApiKey
-        },
-        body: JSON.stringify({
-          query,
-          numResults: 5,
-          useAutoprompt: true,
-          contents: { text: { maxCharacters: 300 } }
-        })
-      });
-      if (res.ok) {
-        const data = await res.json();
-        const results = (data.results || []).slice(0, 5).map(r => ({
-          title: r.title || r.url,
-          url: r.url,
-          snippet: r.text || ''
-        }));
-        if (results.length > 0) return { success: true, results, provider: 'Exa' };
-      } else {
-        const status = res.status;
-        if (status === 401 || status === 403) return { success: false, error: `Exa API Key 無效（HTTP ${status}）` };
-        return { success: false, error: `Exa 搜尋失敗（HTTP ${status}）` };
-      }
-    } catch (e) {
-      return { success: false, error: `Exa 搜尋例外：${e.message}` };
+// ── Exa Search（深度搜尋）────────────────────────────────────
+async function exaSearch(query) {
+  const { exaApiKey } = await chrome.storage.sync.get(['exaApiKey']);
+  if (!exaApiKey) return { success: false, error: 'NO_KEY' };
+
+  try {
+    const res = await fetch('https://api.exa.ai/search', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': exaApiKey },
+      body: JSON.stringify({
+        query, numResults: 5, useAutoprompt: true,
+        contents: { text: { maxCharacters: 300 } }
+      })
+    });
+    if (res.ok) {
+      const data = await res.json();
+      const results = (data.results || []).slice(0, 5).map(r => ({
+        title: r.title || r.url, url: r.url, snippet: r.text || ''
+      }));
+      if (results.length > 0) return { success: true, results, provider: 'Exa' };
+      return { success: false, error: '搜尋無結果，請更換關鍵字' };
     }
+    const status = res.status;
+    if (status === 401 || status === 403) return { success: false, error: `Exa API Key 無效（HTTP ${status}）` };
+    return { success: false, error: `Exa 搜尋失敗（HTTP ${status}）` };
+  } catch (e) {
+    return { success: false, error: `Exa 搜尋例外：${e.message}` };
   }
-
-  return { success: false, error: '搜尋無結果，請更換關鍵字' };
 }

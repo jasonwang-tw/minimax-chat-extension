@@ -4,7 +4,7 @@
 
 ## 版本
 
-**v1.8.1** (2026-04-13)
+**v1.11.0** (2026-04-13)
 
 ## 功能特色
 
@@ -97,6 +97,24 @@ npm run build:css
 - **TailwindCSS + SCSS**：樣式設計
 
 ## Changelog
+
+## [1.11.0] - 2026-04-13
+### Changed
+- **搜尋指令分離**：`/search` 使用 Brave Search API（一般搜尋）；新增 `/deep-search` 使用 Exa Search API（深度搜尋）
+- `webSearch()` 拆為獨立的 `braveSearch()` 和 `exaSearch()`，不再互為 fallback
+- 自動搜尋（AUTO_SEARCH）改用 Brave Search
+
+## [1.10.1] - 2026-04-13
+### Fixed
+- **翻譯模式 TTS 語言錯誤**：修正翻譯模式下 TTS 語言反轉問題（英文訊息用中文口音、中文訊息用英文口音）。翻譯模式現在用 `detectLang()` 依訊息內容自動偵測語言
+
+## [1.10.0] - 2026-04-13
+### Added
+- **單字簿中文翻譯**：非中文單字旁顯示「中」icon，hover 時透過 Google Translate 取得中文翻譯並快取至 storage，下次直接顯示
+
+## [1.9.0] - 2026-04-13
+### Added
+- **輸入歷史**：方向鍵 ↑/↓ 瀏覽最近 10 則輸入，方便重送失敗的訊息；重複輸入自動去重；多行文字時僅在首行/末行觸發
 
 ## [1.8.1] - 2026-04-13
 ### Fixed

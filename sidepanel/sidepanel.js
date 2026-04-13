@@ -17,6 +17,9 @@ let knowledgeCategoryFilter = '';  // 知識庫分類篩選
 let knowledgeTagFilter = '';       // 知識庫標籤篩選
 let sessionSummaries = {};         // { [sessionId]: [{ id, text, createdAt, addedToMemory }] }
 let isSummarizing = false;         // 防止重複總結
+let inputHistory = [];             // 輸入歷史（最多 10 則）
+let inputHistoryIndex = -1;        // 當前瀏覽的歷史索引（-1 = 非瀏覽狀態）
+let inputHistorySaved = '';        // 暫存使用者正在輸入的文字
 // Render 版本計數器：防止 async render 競爭導致資料重複
 let _renderMemoryVer = 0;
 let _renderVocabVer = 0;
@@ -360,6 +363,44 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (active) { e.preventDefault(); active.click(); return; }
       }
       if (e.key === 'Escape') { hideKbPalette(); return; }
+    }
+    // 輸入歷史：方向鍵 Up/Down 瀏覽
+    if (e.key === 'ArrowUp' && inputHistory.length > 0) {
+      // 只在游標位於第一行時觸發（單行或多行首行）
+      const cursorPos = messageInput.selectionStart;
+      const textBefore = messageInput.value.slice(0, cursorPos);
+      if (!textBefore.includes('\n')) {
+        e.preventDefault();
+        if (inputHistoryIndex === -1) {
+          inputHistorySaved = messageInput.value;
+          inputHistoryIndex = inputHistory.length - 1;
+        } else if (inputHistoryIndex > 0) {
+          inputHistoryIndex--;
+        }
+        messageInput.value = inputHistory[inputHistoryIndex];
+        messageInput.style.height = 'auto';
+        messageInput.style.height = Math.min(messageInput.scrollHeight, 120) + 'px';
+        updateSendButton();
+        return;
+      }
+    }
+    if (e.key === 'ArrowDown' && inputHistoryIndex !== -1) {
+      const cursorPos = messageInput.selectionStart;
+      const textAfter = messageInput.value.slice(cursorPos);
+      if (!textAfter.includes('\n')) {
+        e.preventDefault();
+        if (inputHistoryIndex < inputHistory.length - 1) {
+          inputHistoryIndex++;
+          messageInput.value = inputHistory[inputHistoryIndex];
+        } else {
+          messageInput.value = inputHistorySaved;
+          inputHistoryIndex = -1;
+        }
+        messageInput.style.height = 'auto';
+        messageInput.style.height = Math.min(messageInput.scrollHeight, 120) + 'px';
+        updateSendButton();
+        return;
+      }
     }
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
       e.preventDefault();
@@ -1462,6 +1503,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     const message = messageInput.value.trim();
     if (!message && !currentImages.length && !pageContext) return;
 
+    // 存入輸入歷史（去重、上限 10 則）
+    if (message) {
+      inputHistory = inputHistory.filter(h => h !== message);
+      inputHistory.push(message);
+      if (inputHistory.length > 10) inputHistory.shift();
+    }
+    inputHistoryIndex = -1;
+    inputHistorySaved = '';
+
     // 指令路由：若訊息以已知指令開頭，交給 executeAction 處理
     if (message.startsWith('/')) {
       const allCmds = getAllCommands();
@@ -1709,7 +1759,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (translateEnabled) {
       div.querySelector('.think-box')?.classList.add('hidden');
     }
-    const actionsHtml = buildMessageActions(cleanReply, resolveTTSLang('assistant', lang), 'assistant');
+    const actionsHtml = buildMessageActions(cleanReply, resolveTTSLang('assistant', lang, cleanReply), 'assistant');
     div.querySelector('.message-content').insertAdjacentHTML('afterend', actionsHtml);
     div.querySelector('.btn-tts')?.addEventListener('click', handleTTS);
     div.querySelector('.btn-copy')?.addEventListener('click', handleCopy);
@@ -1745,9 +1795,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   // ── 訊息渲染 ────────────────────────────────────────────
-  // ttsLang：明確指定語言；未傳入時用 sourceLang（user）或 targetLang（assistant）
-  function resolveTTSLang(role, ttsLang) {
+  // ttsLang：明確指定語言；翻譯模式用內容偵測，一般模式用 source/target 設定
+  function resolveTTSLang(role, ttsLang, content) {
     if (ttsLang) return ttsLang;
+    if (translateEnabled && content) return detectLang(content);
     return role === 'user'
       ? (sourceLangSelect?.value || 'zh-TW')
       : (targetLangSelect?.value || 'zh-TW');
@@ -1764,7 +1815,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   function addMessage(content, role, ttsLang, thinkContent = '') {
-    const lang = resolveTTSLang(role, ttsLang);
+    const lang = resolveTTSLang(role, ttsLang, content);
     const div = document.createElement('div');
     div.className = `message message-${role === 'user' ? 'user' : role === 'error' ? 'error' : 'assistant'}`;
     const contentHtml = (role === 'assistant')
@@ -1795,7 +1846,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   function addMessageWithImages(content, role, files, ttsLang) {
-    const lang = resolveTTSLang(role, ttsLang);
+    const lang = resolveTTSLang(role, ttsLang, content);
     const div = document.createElement('div');
     div.className = `message message-${role === 'user' ? 'user' : 'assistant'}`;
     let html = `<div class="message-content">`;
@@ -1934,7 +1985,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     { trigger: '/clear',    name: '清空對話',    type: 'action', icon: '🗑️' },
     { trigger: '/new',      name: '新對話',      type: 'action', icon: '➕' },
     { trigger: '/remember', name: '記住某件事',  type: 'action', icon: '🧠', argHint: '/remember <內容>' },
-    { trigger: '/search',   name: 'Web 搜尋',    type: 'action', icon: '🔍', argHint: '/search <關鍵字>' },
+    { trigger: '/search',      name: '一般搜尋（Brave）', type: 'action', icon: '🔍', argHint: '/search <關鍵字>' },
+    { trigger: '/deep-search', name: '深度搜尋（Exa）',   type: 'action', icon: '🔎', argHint: '/deep-search <關鍵字>' },
   ];
 
   async function loadCustomCommands() {
@@ -2042,9 +2094,16 @@ document.addEventListener('DOMContentLoaded', async () => {
         break;
       case '/search':
         if (args) {
-          handleWebSearch(args);
+          handleWebSearch(args, 'WEB_SEARCH');
         } else {
           setStatus('用法：/search <關鍵字>', false, 3000);
+        }
+        break;
+      case '/deep-search':
+        if (args) {
+          handleWebSearch(args, 'DEEP_SEARCH');
+        } else {
+          setStatus('用法：/deep-search <關鍵字>', false, 3000);
         }
         break;
       default:
@@ -2053,20 +2112,23 @@ document.addEventListener('DOMContentLoaded', async () => {
     messageInput.focus();
   }
 
-  async function handleWebSearch(query) {
+  async function handleWebSearch(query, searchType = 'WEB_SEARCH') {
+    const isDeep = searchType === 'DEEP_SEARCH';
+    const label = isDeep ? '深度搜尋' : '搜尋';
+    const icon = isDeep ? '🔎' : '🔍';
     if (!currentSession) startNewSession();
     isLoading = true;
     setStreamingMode(true);
     messageInput.disabled = true;
     typingIndicator.classList.add('hidden');
     emptyState.classList.add('hidden');
-    setStatus(`搜尋中：${query}`);
+    setStatus(`${label}中：${query}`);
 
-    const userMsg = { role: 'user', content: `🔍 /search ${query}` };
+    const userMsg = { role: 'user', content: `${icon} /${isDeep ? 'deep-search' : 'search'} ${query}` };
     currentSession.messages.push(userMsg);
-    addMessage(`🔍 搜尋：${query}`, 'user');
+    addMessage(`${icon} ${label}：${query}`, 'user');
 
-    const result = await chrome.runtime.sendMessage({ type: 'WEB_SEARCH', data: { query } });
+    const result = await chrome.runtime.sendMessage({ type: searchType, data: { query } });
 
     if (!result.success) {
       currentSession.messages.pop();
@@ -2076,7 +2138,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       messageInput.disabled = false;
       updateSendButton();
       if (result.error === 'NO_KEY') {
-        setStatus('請先至設定頁填入 Brave / Exa Search API Key', true, 4000);
+        setStatus(`請先至設定頁填入 ${isDeep ? 'Exa' : 'Brave'} Search API Key`, true, 4000);
       } else {
         setStatus(`🔍 ${result.error}`, true, 5000);
       }
@@ -3008,11 +3070,15 @@ document.addEventListener('DOMContentLoaded', async () => {
       const ttsLang = ttsLangMap[item.lang] || 'zh-TW';
       const catOptions = `<option value="">${cats.length ? '無分類' : '新增分類後使用'}</option>`
         + cats.map(c => `<option value="${escapeAttr(c)}" ${item.category === c ? 'selected' : ''}>${escapeHtml(c)}</option>`).join('');
+      const zhBtnHtml = item.lang !== 'zh'
+        ? `<span class="btn-vocab-zh btn-icon-xs" title="${item.zhTranslation ? escapeAttr(item.zhTranslation) : '載入中...'}" data-word="${escapeAttr(item.word)}" data-id="${item.id}">中</span>`
+        : '';
       div.innerHTML = `
         <span class="memory-item-badge context-menu">${langLabel[item.lang] || '?'}</span>
         <span class="memory-item-text vocab-word editable" title="點擊編輯">${escapeHtml(item.word)}</span>
         <span class="memory-item-date">${formatItemDate(item.createdAt)}</span>
         <select class="item-cat-select ${item.category ? 'has-value' : ''}" title="分類">${catOptions}</select>
+        ${zhBtnHtml}
         <button class="btn-vocab-tts btn-icon-xs" title="朗讀" data-text="${escapeAttr(item.word)}" data-lang="${ttsLang}">${TTS_SVG}</button>
         <button class="btn-vocab-copy btn-icon-xs" title="複製" data-text="${escapeAttr(item.word)}">${COPY_SVG}</button>
         <button class="btn-memory-delete" title="刪除">
@@ -3059,6 +3125,23 @@ document.addEventListener('DOMContentLoaded', async () => {
       });
       ttsBtn.addEventListener('click', handleTTS);
       copyBtn.addEventListener('click', handleCopy);
+      // 中文翻譯 hover
+      const zhBtn = div.querySelector('.btn-vocab-zh');
+      if (zhBtn && !item.zhTranslation) {
+        zhBtn.addEventListener('mouseenter', async () => {
+          if (zhBtn.dataset.loaded) return;
+          zhBtn.dataset.loaded = '1';
+          const res = await chrome.runtime.sendMessage({ type: 'TRANSLATE_WORD', data: { text: item.word } });
+          if (res.success) {
+            zhBtn.title = res.translated;
+            const { vocabulary: current = [] } = await chrome.storage.local.get(['vocabulary']);
+            const idx = current.findIndex(v => v.id === item.id);
+            if (idx !== -1) { current[idx].zhTranslation = res.translated; await chrome.storage.local.set({ vocabulary: current }); }
+          } else {
+            zhBtn.title = '翻譯失敗';
+          }
+        }, { once: true });
+      }
       div.querySelector('.btn-memory-delete').addEventListener('click', async () => {
         const { vocabulary: current = [] } = await chrome.storage.local.get(['vocabulary']);
         const updated = current.filter(v => v.id !== item.id);
