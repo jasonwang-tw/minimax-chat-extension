@@ -2049,15 +2049,16 @@ document.addEventListener('DOMContentLoaded', async () => {
       messageInput.disabled = false;
       updateSendButton();
       if (result.error === 'NO_KEY') {
-        setStatus('請先至設定頁填入 Brave Search API Key', true, 4000);
+        setStatus('請先至設定頁填入 Brave / Exa Search API Key', true, 4000);
       } else {
-        setStatus(`搜尋失敗：${result.error}`, true, 3000);
+        setStatus(`🔍 ${result.error}`, true, 5000);
       }
       messageInput.focus();
       return;
     }
 
     // 組成 context 交給 AI 分析
+    setStatus(`🔍 ${result.provider} 找到 ${result.results.length} 筆結果，分析中...`);
     const snippets = result.results.map((r, i) =>
       `[${i + 1}] ${r.title}\n${r.snippet}\n來源：${r.url}`
     ).join('\n\n');

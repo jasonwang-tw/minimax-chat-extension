@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "MiniMax AI Chat",
-  "version": "1.7.2",
+  "version": "1.7.3",
   "description": "串接 MiniMax API 的 AI 對話擴充功能，點擊即可開啟側邊欄與 AI 對話",
   "permissions": [
     "storage",

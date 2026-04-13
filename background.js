@@ -1213,9 +1213,21 @@ async function webSearch(query) {
           url: r.url,
           snippet: r.description || ''
         }));
-        return { success: true, results, provider: 'Brave' };
+        if (results.length > 0) return { success: true, results, provider: 'Brave' };
+        // Brave 成功但無結果，繼續嘗試 Exa
+      } else {
+        // 捕捉 HTTP 錯誤碼，如果沒有 Exa 備援就回報
+        const status = res.status;
+        if (!exaApiKey) {
+          if (status === 401 || status === 403) return { success: false, error: `Brave API Key 無效（HTTP ${status}）` };
+          if (status === 429) return { success: false, error: 'Brave API 已達用量上限（429）' };
+          return { success: false, error: `Brave 搜尋失敗（HTTP ${status}）` };
+        }
+        // 有 Exa 備援，繼續
       }
-    } catch {}
+    } catch (e) {
+      if (!exaApiKey) return { success: false, error: `Brave 搜尋例外：${e.message}` };
+    }
   }
 
   // Exa 備用
@@ -1241,10 +1253,16 @@ async function webSearch(query) {
           url: r.url,
           snippet: r.text || ''
         }));
-        return { success: true, results, provider: 'Exa' };
+        if (results.length > 0) return { success: true, results, provider: 'Exa' };
+      } else {
+        const status = res.status;
+        if (status === 401 || status === 403) return { success: false, error: `Exa API Key 無效（HTTP ${status}）` };
+        return { success: false, error: `Exa 搜尋失敗（HTTP ${status}）` };
       }
-    } catch {}
+    } catch (e) {
+      return { success: false, error: `Exa 搜尋例外：${e.message}` };
+    }
   }
 
-  return { success: false, error: '搜尋服務暫時無法使用' };
+  return { success: false, error: '搜尋無結果，請更換關鍵字' };
 }
