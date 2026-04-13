@@ -291,7 +291,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       clearStatus();
       if (rawContent) {
         const partial = rawContent.trimEnd();
-        const stopThinkMatch = rawContent.match(/<think>([\s\S]*?)(?:<\/think>|$)/i);
+        const stopThinkMatch = !translateEnabled && rawContent.match(/<think>([\s\S]*?)(?:<\/think>|$)/i);
         const stopThinkContent = stopThinkMatch ? stopThinkMatch[1].trim() : undefined;
         if (currentSession) currentSession.messages.push({ role: 'assistant', content: partial, ...(stopThinkContent && { thinkContent: stopThinkContent }) });
         finalizeLiveMessage(liveDiv, partial, partial, translateEnabled ? targetLangSelect.value : sourceLangSelect.value);
@@ -560,6 +560,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     translateEnabled = !translateEnabled;
     translateBtn.classList.toggle('active', translateEnabled);
     translatePanel.classList.toggle('hidden', !translateEnabled);
+    if (chatMessages.children.length === 0) return; // 空對話不插入
+    const divider = document.createElement('div');
+    divider.className = 'mode-divider';
+    divider.textContent = translateEnabled ? '啟動翻譯模式' : '關閉翻譯模式';
+    chatMessages.appendChild(divider);
+    divider.scrollIntoView({ behavior: 'smooth', block: 'end' });
   });
 
   // ── Lightbox ──────────────────────────────────────────
@@ -1456,6 +1462,20 @@ document.addEventListener('DOMContentLoaded', async () => {
     const message = messageInput.value.trim();
     if (!message && !currentImages.length && !pageContext) return;
 
+    // 指令路由：若訊息以已知指令開頭，交給 executeAction 處理
+    if (message.startsWith('/')) {
+      const allCmds = getAllCommands();
+      const matchedCmd = allCmds.find(c => message === c.trigger || message.startsWith(c.trigger + ' '));
+      if (matchedCmd) {
+        const args = message.slice(matchedCmd.trigger.length).trim();
+        messageInput.value = '';
+        messageInput.style.height = 'auto';
+        updateSendButton();
+        executeAction(matchedCmd.trigger, args);
+        return;
+      }
+    }
+
     if (!currentSession) {
       startNewSession();
     }
@@ -1516,7 +1536,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // ── 自動搜尋（有 Search API Key 且純文字訊息時觸發）──────
     let augmentedMessage = textMessage;
-    if (message && !snapshotImages.length) {
+    if (message && !snapshotImages.length && !translateEnabled) {
       const { braveApiKey, exaApiKey } = await chrome.storage.sync.get(['braveApiKey', 'exaApiKey']);
       if (braveApiKey || exaApiKey) {
         setStatus('🔍 分析問題...');
@@ -1571,7 +1591,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
       if (msg.type === 'done') {
         const reply = msg.reply;
-        const doneThinkMatch = rawContent.match(/<think>([\s\S]*?)<\/think>/i);
+        const doneThinkMatch = !translateEnabled && rawContent.match(/<think>([\s\S]*?)<\/think>/i);
         const thinkContent = doneThinkMatch ? doneThinkMatch[1].trim() : undefined;
         currentSession.messages.push({ role: 'assistant', content: reply, ...(thinkContent && { thinkContent }) });
         finalizeLiveMessage(liveDiv, rawContent, reply, replyLang);
@@ -1657,7 +1677,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const replyLive = div.querySelector('.reply-live');
     if (!replyLive) return;
 
-    const thinkMatch = raw.match(/<think>([\s\S]*?)(<\/think>|$)/i);
+    const thinkMatch = !translateEnabled && raw.match(/<think>([\s\S]*?)(<\/think>|$)/i);
     if (thinkMatch) {
       thinkBox.classList.remove('hidden');
       thinkBody.textContent = thinkMatch[1];
@@ -1669,7 +1689,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         ? escapeHtml(replyText).replace(/\n/g, '<br>') + '<span class="cursor-blink">▋</span>'
         : '<span class="cursor-blink">▋</span>';
     } else {
-      const replyText = raw.replace(/<result>|<\/result>/gi, '').trim();
+      const replyText = raw
+        .replace(/<think>[\s\S]*?<\/think>/gi, '')
+        .replace(/<think>[\s\S]*/gi, '')
+        .replace(/<result>|<\/result>/gi, '').trim();
       replyLive.innerHTML = replyText
         ? escapeHtml(replyText).replace(/\n/g, '<br>') + '<span class="cursor-blink">▋</span>'
         : '<span class="cursor-blink">▋</span>';
@@ -1681,6 +1704,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (replyLive) {
       replyLive.className = '';
       replyLive.innerHTML = renderMarkdown(cleanReply);
+    }
+    // 翻譯模式下強制隱藏思考過程區塊
+    if (translateEnabled) {
+      div.querySelector('.think-box')?.classList.add('hidden');
     }
     const actionsHtml = buildMessageActions(cleanReply, resolveTTSLang('assistant', lang), 'assistant');
     div.querySelector('.message-content').insertAdjacentHTML('afterend', actionsHtml);

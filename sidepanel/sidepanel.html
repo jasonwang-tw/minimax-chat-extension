@@ -150,17 +150,7 @@
         </button>
       </div>
 
-      <!-- 對話選項列：模型選擇 + 回覆模式 -->
-      <div class="chat-options-bar">
-        <select id="modelSelect" class="chat-select" title="選擇模型">
-          <option value="MiniMax-M2.7-highspeed">⚡ 快速 (M2.7-highspeed)</option>
-          <option value="MiniMax-M2.7" selected>🔵 一般 (MiniMax-M2.7)</option>
-          <option value="MiniMax-M2.5">💻 程式碼 (MiniMax-M2.5)</option>
-        </select>
-        <select id="replyModeSelect" class="chat-select" title="回覆模式">
-          <!-- 動態載入 -->
-        </select>
-      </div>
+      
 
       <!-- 知識庫 Chips（已選取） -->
       <div id="knowledgeChips" class="knowledge-chips hidden"></div>
@@ -215,10 +205,24 @@
             </button>
             <input type="file" id="imageInput" accept="image/*,.pdf,.txt,.md,.csv,.json,.js,.ts,.py,.html,.css,.xml,.yaml,.yml,.sh,.sql,.jsx,.tsx" multiple hidden>
           </div>
+<div class="chat-options-bar-wrapper">
+<!-- 對話選項列：模型選擇 + 回覆模式 -->
+<div class="chat-options-bar">
+  <select id="modelSelect" class="chat-select" title="選擇模型">
+    <option value="MiniMax-M2.7-highspeed">⚡ 快速 (M2.7-highspeed)</option>
+    <option value="MiniMax-M2.7" selected>🔵 一般 (MiniMax-M2.7)</option>
+    <option value="MiniMax-M2.5">💻 程式碼 (MiniMax-M2.5)</option>
+  </select>
+  <select id="replyModeSelect" class="chat-select" title="回覆模式">
+    <!-- 動態載入 -->
+  </select>
+</div>
+
           <button id="sendBtn" class="btn-send" disabled>
             <svg id="sendIcon" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>
             <svg id="stopIcon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="display:none"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
           </button>
+          </div>
         </div>
       </div>
     </footer>
