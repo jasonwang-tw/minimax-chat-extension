@@ -1,5 +1,34 @@
 # MiniMax AI Chat Extension
 
+## Latest Sync Update
+
+This branch adds a WordPress-based fallback sync path for settings backup and restore.
+
+What is included:
+- WordPress fallback provider for extension sync
+- External WordPress login flow using `chrome.identity.launchWebAuthFlow`
+- Manual `backup settings` and `restore settings` actions in the sync settings page
+- Deployable WordPress plugin scaffold under `wordpress/minimax-sync/`
+
+MVP scope:
+- Backs up lightweight settings stored in `chrome.storage.sync`
+- Does not back up chat history, knowledge base, vocabulary, attachments, or OCR payloads
+- Keeps Google Drive OAuth UI in place as an alternative path
+
+Main files:
+- `sync/sync-service.js`
+- `sync/providers/wordpress-provider.js`
+- `sync/settings-backup.js`
+- `wordpress/minimax-sync/minimax-sync.php`
+- `options/options.html`
+- `options/options.js`
+
+Quick deployment notes:
+1. Copy `wordpress/minimax-sync` into `wp-content/plugins/`
+2. Activate `MiniMax Sync Bridge` in WordPress
+3. Enable WordPress user registration if self-service signup is needed
+4. Reload the Chrome extension and test login from the `同步` page
+
 串接 MiniMax + Gemini Vision API 的 Chrome 擴充功能，支援側邊欄對話、區域截圖、OCR 文字辨識、翻譯、TTS 語音輸出、歷史紀錄管理。
 
 ## 版本

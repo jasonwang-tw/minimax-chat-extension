@@ -496,6 +496,34 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       .catch(error => sendResponse({ success: false, error: error.message }));
     return true;
   }
+
+  if (message.type === 'WORDPRESS_CONNECT') {
+    syncService.connectWordPress()
+      .then(data => sendResponse({ success: true, data }))
+      .catch(error => sendResponse({ success: false, error: error.message }));
+    return true;
+  }
+
+  if (message.type === 'WORDPRESS_DISCONNECT') {
+    syncService.disconnectWordPress()
+      .then(data => sendResponse({ success: true, data }))
+      .catch(error => sendResponse({ success: false, error: error.message }));
+    return true;
+  }
+
+  if (message.type === 'WORDPRESS_BACKUP_SETTINGS') {
+    syncService.backupWordPressSettings()
+      .then(data => sendResponse({ success: true, data }))
+      .catch(error => sendResponse({ success: false, error: error.message }));
+    return true;
+  }
+
+  if (message.type === 'WORDPRESS_RESTORE_SETTINGS') {
+    syncService.restoreWordPressSettings()
+      .then(data => sendResponse({ success: true, data }))
+      .catch(error => sendResponse({ success: false, error: error.message }));
+    return true;
+  }
 });
 
 // ── Streaming（Port 長連線）─────────────────────────────

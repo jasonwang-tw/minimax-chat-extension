@@ -16,4 +16,12 @@ export class BaseProvider {
   async getStatus() {
     throw new Error(`[${this.name}] getStatus() not implemented`);
   }
+
+  async backupSettings() {
+    throw new Error(`[${this.name}] backupSettings() not implemented`);
+  }
+
+  async restoreSettings() {
+    throw new Error(`[${this.name}] restoreSettings() not implemented`);
+  }
 }

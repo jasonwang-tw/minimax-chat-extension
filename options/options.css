@@ -185,6 +185,12 @@ select option {
   cursor: not-allowed;
 }
 
+.divider {
+  height: 1px;
+  background: rgba(255,255,255,0.06);
+  margin: 20px 0;
+}
+
 .about-info {
   font-size: 14px;
   color: var(--text-secondary);
@@ -360,5 +366,24 @@ select option {
 /* 錨點捲動時留出 TOC 高度的 offset */
 .section {
   scroll-margin-top: 56px;
+}
+
+.sync-provider-card {
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 14px;
+  padding: 16px;
+  margin-bottom: 16px;
+}
+
+.sync-provider-card h3 {
+  font-size: 15px;
+  margin-bottom: 6px;
+}
+
+.sync-action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 

@@ -25,7 +25,6 @@
       </div>
     </header>
 
-    <!-- TOC 快速導覽 -->
     <nav class="toc">
       <a href="#sec-api">API 設定</a>
       <a href="#sec-chat">對話設定</a>
@@ -43,7 +42,7 @@
         <div class="form-group">
           <label for="apiKey">MiniMax API Key</label>
           <div class="input-wrapper">
-            <input type="password" id="apiKey" placeholder="輸入您的 API Key">
+            <input type="password" id="apiKey" placeholder="輸入您的 MiniMax API Key">
             <button id="toggleKey" class="btn-icon" type="button">
               <svg id="eyeIcon" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24"
                 fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -53,8 +52,8 @@
             </button>
           </div>
           <p class="hint">用於一般對話與文生圖，請至 <a
-              href="https://platform.minimax.io/user-center/basic-information/interface-key" target="_blank">MiniMax
-              Token Plan</a> 取得</p>
+              href="https://platform.minimax.io/user-center/basic-information/interface-key"
+              target="_blank">MiniMax Token Plan</a> 取得。</p>
         </div>
         <button id="testBtn" class="btn-secondary">測試 MiniMax 連線</button>
 
@@ -73,7 +72,7 @@
             </button>
           </div>
           <p class="hint">用於截圖與圖片分析，免費申請 <a href="https://aistudio.google.com/app/apikey" target="_blank">Google AI
-              Studio</a></p>
+              Studio</a>。</p>
         </div>
         <button id="testGeminiBtn" class="btn-secondary">測試 Gemini 連線</button>
 
@@ -84,10 +83,15 @@
           <div class="input-wrapper">
             <input type="password" id="braveApiKey" placeholder="輸入 Brave Search API Key（選填）">
             <button id="toggleBraveKey" class="btn-icon" type="button">
-              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none"
+                stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" />
+                <circle cx="12" cy="12" r="3" />
+              </svg>
             </button>
           </div>
-          <p class="hint">免費申請 <a href="https://brave.com/search/api/" target="_blank">Brave Search API</a>（免費方案 2,000 次/月）。有此 Key 時優先使用。</p>
+          <p class="hint">免費申請 <a href="https://brave.com/search/api/" target="_blank">Brave Search API</a>。有此 Key
+            時優先使用。</p>
         </div>
 
         <div class="form-group">
@@ -95,10 +99,14 @@
           <div class="input-wrapper">
             <input type="password" id="exaApiKey" placeholder="輸入 Exa API Key（選填）">
             <button id="toggleExaKey" class="btn-icon" type="button">
-              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none"
+                stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" />
+                <circle cx="12" cy="12" r="3" />
+              </svg>
             </button>
           </div>
-          <p class="hint">免費申請 <a href="https://exa.ai/" target="_blank">Exa Search API</a>（免費方案含每月額度）。無 Brave Key 時備用。</p>
+          <p class="hint">免費申請 <a href="https://exa.ai/" target="_blank">Exa Search API</a>。無 Brave Key 時作為備援。</p>
         </div>
 
         <div class="divider"></div>
@@ -108,7 +116,7 @@
       <section class="section" id="sec-chat">
         <h2>對話設定</h2>
         <div class="form-group">
-          <label for="maxHistory">最大歷史紀錄數</label>
+          <label for="maxHistory">保留歷史上限</label>
           <select id="maxHistory">
             <option value="20">20 筆</option>
             <option value="50" selected>50 筆</option>
@@ -118,103 +126,137 @@
         <div class="form-group">
           <label for="defaultModel">預設模型</label>
           <select id="defaultModel">
-            <option value="MiniMax-M2.7-highspeed">⚡ 快速 (MiniMax-M2.7-highspeed)</option>
-            <option value="MiniMax-M2.7" selected>🔵 一般 (MiniMax-M2.7)</option>
-            <option value="MiniMax-M2.5">💻 程式碼 (MiniMax-M2.5)</option>
+            <option value="MiniMax-M2.7-highspeed">快速（MiniMax-M2.7-highspeed）</option>
+            <option value="MiniMax-M2.7" selected>一般（MiniMax-M2.7）</option>
+            <option value="MiniMax-M2.5">程式碼（MiniMax-M2.5）</option>
           </select>
-          <p class="hint">新對話的預設模型，可在對話視窗中即時切換</p>
+          <p class="hint">設定預設模型後，側欄聊天會優先使用此選擇。</p>
         </div>
         <button id="saveConversationBtn" class="btn-primary">儲存對話設定</button>
       </section>
 
       <section class="section" id="sec-prompts">
-        <h2>預設提示詞</h2>
-        <p class="section-desc">設定各模式的預設 System Prompt，留空則使用內建提示詞</p>
+        <h2>提示詞</h2>
+        <p class="section-desc">你可以在這裡設定全域與各工具的系統提示詞。</p>
         <div class="form-group">
-          <label for="globalPrompt">全局提示詞</label>
-          <textarea id="globalPrompt" class="prompt-textarea" rows="3" placeholder="例：請使用繁體中文回答，語氣保持專業簡潔。"></textarea>
-          <p class="hint">無論使用何種模式，此提示詞都會最優先套用</p>
+          <label for="globalPrompt">全域系統提示詞</label>
+          <textarea id="globalPrompt" class="prompt-textarea" rows="3"
+            placeholder="輸入所有回覆都會共用的系統提示詞。"></textarea>
         </div>
         <div class="divider"></div>
         <div class="form-group">
-          <label for="promptChat">一般問答提示詞</label>
-          <textarea id="promptChat" class="prompt-textarea" rows="3" placeholder="例：你是一個專業助理，請給出清晰、準確的回答。"></textarea>
+          <label for="promptChat">一般聊天提示詞</label>
+          <textarea id="promptChat" class="prompt-textarea" rows="3"
+            placeholder="聊天模式下要加上的系統提示詞。"></textarea>
         </div>
         <div class="form-group">
-          <label for="promptImageAnalysis">圖像分析（Gemini 指令）</label>
-          <textarea id="promptImageAnalysis" class="prompt-textarea" rows="3" placeholder="例：請詳細分析這張圖片的所有內容，包含視覺元素、文字、佈局與重要細節。"></textarea>
+          <label for="promptImageAnalysis">圖片分析提示詞</label>
+          <textarea id="promptImageAnalysis" class="prompt-textarea" rows="3"
+            placeholder="Gemini 圖片分析時使用的提示詞。"></textarea>
         </div>
         <div class="form-group">
-          <label for="promptOcr">OCR 文字辨識（Gemini 指令）</label>
-          <textarea id="promptOcr" class="prompt-textarea" rows="3" placeholder="例：請仔細辨識並提取這張圖片中的所有文字內容，保持原始排版結構，不要遺漏任何文字。"></textarea>
+          <label for="promptOcr">OCR 提示詞</label>
+          <textarea id="promptOcr" class="prompt-textarea" rows="3"
+            placeholder="Gemini OCR 時使用的提示詞。"></textarea>
         </div>
         <button id="savePromptsBtn" class="btn-primary">儲存提示詞</button>
       </section>
 
       <section class="section" id="sec-modes">
         <h2>回覆模式</h2>
-        <p class="section-desc">自訂對話模式，每個模式可設定不同的回覆風格指令</p>
+        <p class="section-desc">自訂不同的回覆模式，讓聊天切換更快。</p>
         <div id="replyModesList" class="reply-modes-list"></div>
-        <button id="addModeBtn" class="btn-secondary btn-add-mode">＋ 新增模式</button>
+        <button id="addModeBtn" class="btn-secondary btn-add-mode">新增回覆模式</button>
         <button id="saveModesBtn" class="btn-primary" style="margin-top:8px">儲存回覆模式</button>
       </section>
 
       <section class="section" id="sec-commands">
         <h2>自訂指令</h2>
-        <p class="section-desc">💡 指令用於<strong>一次性訊息操作</strong>（套用模板後立即送出）。若要長期切換對話風格，請改用「回覆模式」。</p>
-        <p class="section-desc">在對話框輸入 <code>/觸發詞</code> 即可快速使用。模板中的 <code>{input}</code> 會被替換為 / 後輸入的文字。</p>
+        <p class="section-desc">使用 `/指令` 的方式快速插入模板或觸發行為，模板可使用 <code>{input}</code> 佔位。</p>
         <div id="customCommandsList" class="reply-modes-list"></div>
-        <button id="addCommandBtn" class="btn-secondary btn-add-mode">＋ 新增指令</button>
+        <button id="addCommandBtn" class="btn-secondary btn-add-mode">新增自訂指令</button>
         <button id="saveCommandsBtn" class="btn-primary" style="margin-top:8px">儲存自訂指令</button>
       </section>
 
       <section class="section" id="sec-memory">
         <h2>長期記憶</h2>
-        <p class="section-desc">AI 在每次對話時都會記住這些資訊。在對話框使用 <code>/remember 內容</code> 來新增，或透過側邊欄的記憶管理進行編輯。</p>
+        <p class="section-desc">AI 可以根據對話自動萃取值得保存的內容，也可以用 <code>/remember</code> 手動新增。</p>
         <div class="form-group">
           <label>
             <input type="checkbox" id="autoMemoryEnabled" style="margin-right:6px">
-            AI 自動萃取記憶
+            啟用 AI 自動記憶
           </label>
-          <p class="hint">⚠️ 開啟後，每次對話結束會多消耗一次 API 請求，用於分析是否有值得記住的內容。</p>
+          <p class="hint">開啟後，每次對話結束會額外執行一次記憶萃取。</p>
         </div>
       </section>
 
       <section class="section" id="sec-sync">
         <h2>跨裝置同步（Phase 1）</h2>
-        <p class="section-desc">目前提供 Google Drive OAuth 連線（彈出授權視窗）。本階段先完成帳號連線與狀態檢查，資料同步引擎將在後續階段啟用。</p>
+        <p class="section-desc">Google Drive OAuth 仍保留在此處做驗證；另外新增 WordPress 備援同步，供 Google 授權受阻時改用站外登入與雲端設定備份。</p>
         <div class="form-group">
           <label for="syncProvider">同步供應商</label>
           <select id="syncProvider">
             <option value="none">不啟用</option>
             <option value="googleDrive">Google Drive</option>
+            <option value="wordpress">WordPress 備援</option>
           </select>
-        </div>
-        <div class="form-group">
-          <label for="googleDriveClientId">Google OAuth Client ID</label>
-          <input type="text" id="googleDriveClientId" placeholder="輸入 Google OAuth Client ID（Chrome App / Web）">
-          <p class="hint">請先在 Google Cloud Console 建立 OAuth Client，並將 redirect URI 設為：<code id="googleRedirectUri">（載入中）</code></p>
         </div>
         <div class="form-group">
           <label>
             <input type="checkbox" id="syncAutoEnabled" style="margin-right:6px">
             啟用自動同步（預留）
           </label>
-          <p class="hint">Phase 1 先保留開關與設定，後續階段會接上實際增量同步排程。</p>
+          <p class="hint">MVP 先保留開關與設定，後續再接上背景排程與衝突處理。</p>
         </div>
+
+        <div class="sync-provider-card">
+          <h3>Google Drive OAuth</h3>
+          <p class="hint">延續既有 OAuth 驗證流程，適合已完成 Google Cloud 設定的情境。</p>
+          <div class="form-group">
+            <label for="googleDriveClientId">Google OAuth Client ID</label>
+            <div class="input-wrapper">
+              <input type="text" id="googleDriveClientId" placeholder="輸入 Google OAuth Client ID（Chrome App / Web）">
+            </div>
+            <p class="hint">請先在 Google Cloud Console 建立 OAuth Client，並將 redirect URI 設為：<code
+                id="googleRedirectUri">（載入中）</code></p>
+          </div>
+          <div class="sync-action-row">
+            <button id="connectGoogleDriveBtn" class="btn-secondary">連線 Google Drive</button>
+            <button id="disconnectGoogleDriveBtn" class="btn-secondary">中斷連線</button>
+          </div>
+          <p id="googleDriveStatusText" class="hint" style="margin-top:12px">Google Drive：未連線</p>
+        </div>
+
+        <div class="sync-provider-card">
+          <h3>WordPress 備援同步</h3>
+          <p class="hint">Google 授權失敗時可改用 WordPress 網站登入，僅同步設定快照，不含對話歷史與知識庫。</p>
+          <div class="form-group">
+            <label for="wpBaseUrl">WordPress 站點網址</label>
+            <div class="input-wrapper">
+              <input type="text" id="wpBaseUrl" placeholder="https://jasonsbase.com">
+            </div>
+            <p class="hint">站外登入會開啟 WordPress 授權頁，完成登入後把短效授權碼帶回 extension。</p>
+          </div>
+          <div class="sync-action-row">
+            <button id="connectWordPressBtn" class="btn-secondary">使用 WordPress 登入</button>
+            <button id="backupWordPressBtn" class="btn-secondary">立即備份設定</button>
+            <button id="restoreWordPressBtn" class="btn-secondary">從雲端還原</button>
+            <button id="disconnectWordPressBtn" class="btn-secondary">登出 WordPress</button>
+          </div>
+          <p id="wordpressStatusText" class="hint" style="margin-top:12px">WordPress：未登入</p>
+        </div>
+
         <button id="saveSyncSettingsBtn" class="btn-primary">儲存同步設定</button>
-        <button id="connectGoogleDriveBtn" class="btn-secondary">連線 Google Drive</button>
-        <button id="disconnectGoogleDriveBtn" class="btn-secondary">中斷連線</button>
-        <p id="syncStatusText" class="hint" style="margin-top:12px">尚未連線</p>
+        <p id="syncStatusText" class="hint" style="margin-top:12px">目前尚未啟用同步。</p>
       </section>
 
       <section class="section" id="sec-about">
         <h2>關於</h2>
         <div class="about-info">
-          <p><strong>版本:</strong> 1.5.0</p>
-          <p><strong>對話模型:</strong> MiniMax-M2.7 / M2.7-highspeed / M2.5</p>
+          <p><strong>版本:</strong> 1.11.4</p>
+          <p><strong>對話模型:</strong> MiniMax-M2.7 / MiniMax-M2.7-highspeed / MiniMax-M2.5</p>
           <p><strong>圖片模型:</strong> Gemini 2.5 Flash-lite</p>
-          <p>串接 MiniMax API 的 Chrome 擴充功能</p>
+          <p>MiniMax AI Chat Chrome Extension 設定頁。</p>
         </div>
       </section>
 
