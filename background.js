@@ -3,7 +3,7 @@
 import { SyncService, DEFAULT_SYNC_SETTINGS } from './sync/sync-service.js';
 
 const MINIMAX_API_URL = 'https://api.minimax.io/v1/chat/completions';
-const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash-lite:generateContent';
+const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1/models/gemini-2.0-flash-lite:generateContent';
 const MODEL_NAME = 'MiniMax-M2.7';
 const MAX_HISTORY = 50;
 
