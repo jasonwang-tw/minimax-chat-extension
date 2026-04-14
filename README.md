@@ -2,19 +2,22 @@
 
 ## Latest Sync Update
 
-This branch adds a WordPress-based fallback sync path for settings backup and restore.
+This branch delivers the WordPress-based sync flow with expanded backup scope and admin/debug hardening.
 
 What is included:
 - WordPress fallback provider for extension sync
 - External WordPress login flow using `chrome.identity.launchWebAuthFlow`
 - Manual `backup settings` and `restore settings` actions in the sync settings page
+- Daily auto-backup schedule (`auto backup time`)
+- Backup scope expanded to settings + memories + knowledge base + vocabulary + chat sessions
+- Settings page navigation changed to sticky left sidebar
 - Deployable WordPress plugin scaffold under `wordpress/minimax-sync/`
 - Plugin-side debug log file for sync troubleshooting: `wp-content/plugins/minimax-sync/minimax-sync-debug.log`
 
 MVP scope:
-- Backs up lightweight settings stored in `chrome.storage.sync`
-- Does not back up chat history, knowledge base, vocabulary, attachments, or OCR payloads
-- Keeps Google Drive OAuth UI in place as an alternative path
+- Uses WordPress sync as the primary active path
+- Backs up settings + `memories` + `knowledgeBase` + `vocabulary` + `chatSessions` + `sessionSummaries`
+- Google Drive sync UI is currently hidden in settings
 
 Main files:
 - `sync/sync-service.js`
@@ -34,7 +37,7 @@ Quick deployment notes:
 
 ## 版本
 
-**v1.11.4** (2026-04-13)
+**v1.12.0** (2026-04-14)
 
 ## 功能特色
 
@@ -127,6 +130,16 @@ npm run build:css
 - **TailwindCSS + SCSS**：樣式設計
 
 ## Changelog
+
+## [1.12.0] - 2026-04-14
+### Added
+- **WordPress 自動備份時間**：同步設定新增每日自動備份與時間欄位，背景以 alarm 排程執行
+- **備份範圍擴大**：納入長期記憶（memories）、知識庫（knowledgeBase）、單字簿（vocabulary）、Session（chatSessions / sessionSummaries）
+- **外掛除錯強化**：外掛後台新增「顯示日誌」彈窗，並支援 log fallback 到 uploads 目錄
+
+### Changed
+- **設定頁導覽改版**：頂部導覽改為左側 Sidebar，並支援固定置頂與長內容獨立滾動
+- **同步入口調整**：Google Drive 同步 UI 暫時隱藏，WordPress 作為主要同步路徑
 
 ## [1.11.4] - 2026-04-13
 ### Fixed

@@ -1,26 +1,34 @@
 # WordPress Sync TODO
 
-## Ready For Validation
+## Done
 
-- Install `wordpress/minimax-sync` on `https://jasonsbase.com`
-- Activate the `MiniMax Sync Bridge` plugin
-- Confirm WordPress registration is enabled for self-service signup
-- Reload the Chrome extension on branch `codex/plan-synchronization-for-settings-and-data`
-- Open `設定 > 同步`
-- Test `使用 WordPress 登入`
-- Test `立即備份設定`
-- Change a few settings locally, then test `從雲端還原`
-- Verify admin page `Settings > MiniMax Sync` shows:
+- Installed `wordpress/minimax-sync` on `https://jasonsbase.com`
+- Activated the `MiniMax Sync Bridge` plugin
+- Confirmed WordPress registration flow for self-service signup
+- Reloaded Chrome extension on branch `codex/plan-synchronization-for-settings-and-data`
+- Verified `設定 > 同步` WordPress login flow (`使用 WordPress 登入`)
+- Verified manual backup flow (`立即備份設定`)
+- Verified restore flow (`從雲端還原`) after local settings changes
+- Verified admin page `Settings > MiniMax Sync`:
   - recent backups
   - active tokens
   - revoke action
+- Completed hardening/fixes during validation:
+  - token header fallback support (`Authorization` + `X-Minimax-Token`)
+  - fallback backup method (`POST` with `PUT` fallback)
+  - plugin-local debug log (`wp-content/plugins/minimax-sync/minimax-sync-debug.log`)
+  - WordPress compatibility fix (remove dependency on `WP_REST_Request::set_attribute`)
+  - admin time display in `Asia/Taipei`
+  - token management cleanup UI (`Delete` revoked token / bulk cleanup revoked tokens)
 
-## Still Pending After MVP
+## Next Phase
 
-- End-to-end runtime validation against the real WordPress site
-- PHP lint/test in a machine with `php` installed
-- Better user-facing copy for sync section and plugin pages
-- Optional token expiration / rotation policy
-- Optional encrypted payload support
+- Final E2E regression pass on production-like setup (login -> backup -> restore -> token cleanup)
+- PHP lint/test on machine with `php` installed
+- Improve user-facing copy in extension sync section and plugin admin pages
+- Define token lifecycle policy:
+  - expiration / rotation
+  - retention cleanup rules
+- Optional encrypted payload support for settings backup
 - Optional auto-sync background scheduling
 - Optional backup version history

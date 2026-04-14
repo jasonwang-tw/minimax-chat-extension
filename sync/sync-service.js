@@ -5,6 +5,8 @@ import { WordPressProvider, DEFAULT_WORDPRESS_BASE_URL } from './providers/wordp
 const DEFAULT_SYNC_SETTINGS = {
   provider: 'none',
   autoSync: false,
+  autoBackupEnabled: false,
+  autoBackupTime: '03:00',
   googleDriveClientId: '',
   wpBaseUrl: DEFAULT_WORDPRESS_BASE_URL
 };
@@ -129,6 +131,8 @@ export class SyncService {
     return {
       provider: settings.provider,
       autoSync: !!settings.autoSync,
+      autoBackupEnabled: !!settings.autoBackupEnabled,
+      autoBackupTime: settings.autoBackupTime || '03:00',
       googleDriveClientIdConfigured: !!settings.googleDriveClientId,
       wpBaseUrl: settings.wpBaseUrl,
       googleDrive: await this.providers.googleDrive.getStatus(googleDriveAuth),

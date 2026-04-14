@@ -1,4 +1,4 @@
-const SETTINGS_BACKUP_KEYS = [
+const SYNC_BACKUP_KEYS = [
   'apiKey',
   'geminiApiKey',
   'braveApiKey',
@@ -9,30 +9,48 @@ const SETTINGS_BACKUP_KEYS = [
   'replyModes',
   'customCommands',
   'autoMemoryEnabled',
-  'syncSettings'
+  'syncSettings',
+  'memories',
+  'categories'
+];
+
+const LOCAL_BACKUP_KEYS = [
+  'knowledgeBase',
+  'vocabulary',
+  'chatSessions',
+  'sessionSummaries'
 ];
 
 export const SETTINGS_BACKUP_SCHEMA_VERSION = 1;
 
 export async function collectSettingsBackupPayload() {
-  const data = await chrome.storage.sync.get(SETTINGS_BACKUP_KEYS);
+  const [syncData, localData] = await Promise.all([
+    chrome.storage.sync.get(SYNC_BACKUP_KEYS),
+    chrome.storage.local.get(LOCAL_BACKUP_KEYS)
+  ]);
 
   return {
     schemaVersion: SETTINGS_BACKUP_SCHEMA_VERSION,
     kind: 'minimax-settings-backup',
     exportedAt: new Date().toISOString(),
     settings: {
-      apiKey: data.apiKey || '',
-      geminiApiKey: data.geminiApiKey || '',
-      braveApiKey: data.braveApiKey || '',
-      exaApiKey: data.exaApiKey || '',
-      settings: data.settings || {},
-      globalPrompt: data.globalPrompt || '',
-      defaultPrompts: data.defaultPrompts || {},
-      replyModes: Array.isArray(data.replyModes) ? data.replyModes : [],
-      customCommands: Array.isArray(data.customCommands) ? data.customCommands : [],
-      autoMemoryEnabled: !!data.autoMemoryEnabled,
-      syncSettings: sanitizeSyncSettingsForBackup(data.syncSettings || {})
+      apiKey: syncData.apiKey || '',
+      geminiApiKey: syncData.geminiApiKey || '',
+      braveApiKey: syncData.braveApiKey || '',
+      exaApiKey: syncData.exaApiKey || '',
+      settings: isPlainObject(syncData.settings) ? syncData.settings : {},
+      globalPrompt: syncData.globalPrompt || '',
+      defaultPrompts: isPlainObject(syncData.defaultPrompts) ? syncData.defaultPrompts : {},
+      replyModes: Array.isArray(syncData.replyModes) ? syncData.replyModes : [],
+      customCommands: Array.isArray(syncData.customCommands) ? syncData.customCommands : [],
+      autoMemoryEnabled: !!syncData.autoMemoryEnabled,
+      syncSettings: sanitizeSyncSettingsForBackup(syncData.syncSettings || {}),
+      memories: Array.isArray(syncData.memories) ? syncData.memories : [],
+      categories: isPlainObject(syncData.categories) ? syncData.categories : { memory: [], knowledge: [], vocabulary: [] },
+      knowledgeBase: Array.isArray(localData.knowledgeBase) ? localData.knowledgeBase : [],
+      vocabulary: Array.isArray(localData.vocabulary) ? localData.vocabulary : [],
+      chatSessions: Array.isArray(localData.chatSessions) ? localData.chatSessions : [],
+      sessionSummaries: isPlainObject(localData.sessionSummaries) ? localData.sessionSummaries : {}
     }
   };
 }
@@ -47,7 +65,7 @@ export async function restoreSettingsBackupPayload(payload) {
     throw new Error('Backup payload does not contain settings');
   }
 
-  const nextSettings = {
+  const nextSyncSettings = {
     apiKey: typeof settings.apiKey === 'string' ? settings.apiKey : '',
     geminiApiKey: typeof settings.geminiApiKey === 'string' ? settings.geminiApiKey : '',
     braveApiKey: typeof settings.braveApiKey === 'string' ? settings.braveApiKey : '',
@@ -58,17 +76,33 @@ export async function restoreSettingsBackupPayload(payload) {
     replyModes: Array.isArray(settings.replyModes) ? settings.replyModes : [],
     customCommands: Array.isArray(settings.customCommands) ? settings.customCommands : [],
     autoMemoryEnabled: !!settings.autoMemoryEnabled,
-    syncSettings: sanitizeSyncSettingsForBackup(settings.syncSettings || {})
+    syncSettings: sanitizeSyncSettingsForBackup(settings.syncSettings || {}),
+    memories: Array.isArray(settings.memories) ? settings.memories : [],
+    categories: isPlainObject(settings.categories) ? settings.categories : { memory: [], knowledge: [], vocabulary: [] }
   };
 
-  await chrome.storage.sync.set(nextSettings);
-  return nextSettings;
+  const nextLocalSettings = {
+    knowledgeBase: Array.isArray(settings.knowledgeBase) ? settings.knowledgeBase : [],
+    vocabulary: Array.isArray(settings.vocabulary) ? settings.vocabulary : [],
+    chatSessions: Array.isArray(settings.chatSessions) ? settings.chatSessions : [],
+    sessionSummaries: isPlainObject(settings.sessionSummaries) ? settings.sessionSummaries : {}
+  };
+
+  await Promise.all([
+    chrome.storage.sync.set(nextSyncSettings),
+    chrome.storage.local.set(nextLocalSettings)
+  ]);
+
+  return { sync: nextSyncSettings, local: nextLocalSettings };
 }
 
 export function sanitizeSyncSettingsForBackup(syncSettings = {}) {
+  const autoBackupTime = typeof syncSettings.autoBackupTime === 'string' ? syncSettings.autoBackupTime : '03:00';
   return {
     provider: normalizeProvider(syncSettings.provider),
     autoSync: !!syncSettings.autoSync,
+    autoBackupEnabled: !!syncSettings.autoBackupEnabled || !!syncSettings.autoSync,
+    autoBackupTime: /^\d{2}:\d{2}$/.test(autoBackupTime) ? autoBackupTime : '03:00',
     googleDriveClientId: typeof syncSettings.googleDriveClientId === 'string' ? syncSettings.googleDriveClientId : '',
     wpBaseUrl: typeof syncSettings.wpBaseUrl === 'string' ? syncSettings.wpBaseUrl : 'https://jasonsbase.com'
   };

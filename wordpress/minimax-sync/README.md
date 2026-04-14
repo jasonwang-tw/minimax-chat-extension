@@ -15,6 +15,7 @@ WordPress plugin for the MiniMax AI Chat extension fallback sync flow.
   - `POST /wp-json/minimax-sync/v1/auth/logout`
 - Admin page under `Settings > MiniMax Sync`
 - Plugin-local debug log file (`minimax-sync-debug.log`)
+- Admin `顯示日誌` button with modal for recent debug logs
 
 ## Install
 
@@ -44,6 +45,19 @@ WordPress plugin for the MiniMax AI Chat extension fallback sync flow.
   3. Check the latest lines for `rest_put_backup`, `rest_get_backup`, or `require_token`
 
 ## Changelog
+
+### 0.1.6
+
+- Ensure `payload too large` and validation failures are written into debug log
+- Add debug log write fallback path to uploads directory (`wp-content/uploads/minimax-sync/`)
+- Log modal now shows all checked log paths and active source path
+- Increase backup payload size limit from 256KB to 5MB
+
+### 0.1.5
+
+- Add `顯示日誌` button in plugin admin page
+- Add modal viewer for recent `minimax-sync-debug.log` entries
+- Improve debugging flow for backup failures such as `Backup payload is too large`
 
 ### 0.1.4
 

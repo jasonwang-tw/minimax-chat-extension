@@ -3,7 +3,7 @@
  * Plugin Name: MiniMax Sync Bridge
  * Plugin URI: https://jasonsbase.com/
  * Description: Provides WordPress-backed login and settings backup endpoints for the MiniMax AI Chat extension.
- * Version: 0.1.4
+ * Version: 0.1.6
  * Author: Jason Wang
  * License: GPLv2 or later
  */
@@ -20,6 +20,7 @@ final class Minimax_Sync_Bridge {
     private const CODE_TTL_SECONDS = 600;
     private const TOKEN_PREFIX = 'mms_';
     private const DEBUG_LOG_FILE = 'minimax-sync-debug.log';
+    private const MAX_BACKUP_BYTES = 5242880;
 
     public static function init(): void {
         register_activation_hook(__FILE__, [self::class, 'activate']);
@@ -225,11 +226,26 @@ final class Minimax_Sync_Bridge {
             $payload = $request->get_json_params();
 
             if (!is_array($payload) || !isset($payload['settings']) || !is_array($payload['settings'])) {
+                self::debug_log('rest_put_backup invalid_payload', [
+                    'has_settings' => is_array($payload) ? isset($payload['settings']) : false,
+                    'settings_is_array' => is_array($payload) && isset($payload['settings']) ? is_array($payload['settings']) : false,
+                ]);
                 return new WP_Error('minimax_sync_invalid_payload', 'Backup payload must contain a settings object.', ['status' => 400]);
             }
 
             $json = wp_json_encode($payload);
-            if (!$json || strlen($json) > 262144) {
+            if (!$json) {
+                self::debug_log('rest_put_backup encode_failed', ['user_id' => (int) $auth['user_id']]);
+                return new WP_Error('minimax_sync_payload_encode_failed', 'Backup payload encoding failed.', ['status' => 400]);
+            }
+
+            $size = strlen($json);
+            if ($size > self::MAX_BACKUP_BYTES) {
+                self::debug_log('rest_put_backup payload_too_large', [
+                    'user_id' => (int) $auth['user_id'],
+                    'bytes' => $size,
+                    'limit' => self::MAX_BACKUP_BYTES,
+                ]);
                 return new WP_Error('minimax_sync_payload_too_large', 'Backup payload is too large.', ['status' => 413]);
             }
 
@@ -298,6 +314,7 @@ final class Minimax_Sync_Bridge {
              ORDER BY b.updated_at DESC
              LIMIT 20"
         );
+        $log_info = self::read_recent_debug_logs();
         ?>
         <div class="wrap">
             <h1>MiniMax Sync</h1>
@@ -336,6 +353,10 @@ final class Minimax_Sync_Bridge {
             </table>
 
             <h2 style="margin-top: 24px;">Token 管理</h2>
+            <p style="margin: 8px 0 12px;">
+                <button type="button" class="button" id="minimax-sync-show-log-btn">顯示日誌</button>
+                <span style="margin-left:8px;color:#666;">可查看最近錯誤紀錄（含 Backup payload is too large）</span>
+            </p>
             <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" style="margin-bottom: 12px;">
                 <?php wp_nonce_field('minimax_sync_cleanup_tokens'); ?>
                 <input type="hidden" name="action" value="minimax_sync_cleanup_tokens">
@@ -375,7 +396,52 @@ final class Minimax_Sync_Bridge {
                 <?php endif; ?>
                 </tbody>
             </table>
+
+            <div id="minimax-sync-log-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:99999;">
+                <div style="max-width:920px;margin:40px auto;background:#fff;border-radius:8px;box-shadow:0 10px 30px rgba(0,0,0,0.35);overflow:hidden;">
+                    <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid #e5e5e5;">
+                        <strong>MiniMax Sync 最近 Debug Log</strong>
+                        <div>
+                            <button type="button" class="button" id="minimax-sync-log-refresh-btn">重新整理</button>
+                            <button type="button" class="button" id="minimax-sync-log-close-btn">關閉</button>
+                        </div>
+                    </div>
+                    <div style="padding:12px 16px;border-bottom:1px solid #f0f0f0;color:#666;font-size:12px;">
+                        目前來源：<code><?php echo esc_html($log_info['path']); ?></code><br>
+                        檢查路徑：
+                        <?php foreach (($log_info['paths'] ?? []) as $idx => $path_item): ?>
+                            <?php if ($idx > 0): ?>、<?php endif; ?>
+                            <code><?php echo esc_html($path_item); ?></code>
+                        <?php endforeach; ?>
+                    </div>
+                    <div style="padding:16px;max-height:70vh;overflow:auto;background:#111827;color:#e5e7eb;">
+                        <?php if (!$log_info['exists']): ?>
+                            <p style="margin:0;">尚未找到 log 檔案。請先重試一次備份，再重新整理此視窗。</p>
+                            <p style="margin:8px 0 0 0;color:#9ca3af;">若外掛目錄不可寫，系統會改寫到 uploads/minimax-sync 目錄。</p>
+                        <?php elseif (empty($log_info['lines'])): ?>
+                            <p style="margin:0;">目前 log 無內容。</p>
+                        <?php else: ?>
+                            <pre style="margin:0;white-space:pre-wrap;word-break:break-word;line-height:1.45;"><?php echo esc_html(implode("\n", $log_info['lines'])); ?></pre>
+                        <?php endif; ?>
+                    </div>
+                </div>
+            </div>
         </div>
+        <script>
+        (function () {
+          const showBtn = document.getElementById('minimax-sync-show-log-btn');
+          const closeBtn = document.getElementById('minimax-sync-log-close-btn');
+          const refreshBtn = document.getElementById('minimax-sync-log-refresh-btn');
+          const modal = document.getElementById('minimax-sync-log-modal');
+          if (!showBtn || !modal) return;
+          showBtn.addEventListener('click', () => { modal.style.display = 'block'; });
+          closeBtn?.addEventListener('click', () => { modal.style.display = 'none'; });
+          modal.addEventListener('click', (e) => {
+            if (e.target === modal) modal.style.display = 'none';
+          });
+          refreshBtn?.addEventListener('click', () => { window.location.reload(); });
+        })();
+        </script>
         <?php
     }
 
@@ -710,11 +776,16 @@ final class Minimax_Sync_Bridge {
         }
 
         $line .= PHP_EOL;
-        $path = trailingslashit(plugin_dir_path(__FILE__)) . self::DEBUG_LOG_FILE;
-        $written = @file_put_contents($path, $line, FILE_APPEND | LOCK_EX);
-        if ($written === false) {
-            error_log('[MiniMax Sync] failed writing plugin debug log: ' . $message);
+        $paths = self::get_debug_log_paths();
+        foreach ($paths as $path) {
+            self::ensure_log_parent_dir($path);
+            $written = @file_put_contents($path, $line, FILE_APPEND | LOCK_EX);
+            if ($written !== false) {
+                return;
+            }
         }
+
+        error_log('[MiniMax Sync] failed writing plugin debug log: ' . $message);
     }
 
     private static function format_admin_datetime_taipei(string $value): string {
@@ -730,6 +801,86 @@ final class Minimax_Sync_Bridge {
             self::debug_log('format_admin_datetime_taipei failed', ['error' => $e->getMessage(), 'value' => $value]);
             return $value;
         }
+    }
+
+    private static function read_recent_debug_logs(int $max_lines = 120, int $tail_bytes = 262144): array {
+        $paths = self::get_debug_log_paths();
+        $existing_paths = [];
+        $lines = [];
+        $active_path = $paths[0];
+
+        foreach ($paths as $path) {
+            if (!file_exists($path)) {
+                continue;
+            }
+            $existing_paths[] = $path;
+            $active_path = $path;
+
+            $content = self::read_log_tail($path, $tail_bytes);
+            if ($content === '') {
+                continue;
+            }
+
+            $current_lines = preg_split('/\r\n|\r|\n/', trim($content));
+            if (!is_array($current_lines)) {
+                $current_lines = [];
+            }
+            if (!empty($current_lines)) {
+                $lines = array_merge($lines, $current_lines);
+            }
+        }
+
+        if (count($lines) > $max_lines) {
+            $lines = array_slice($lines, -$max_lines);
+        }
+
+        return [
+            'path' => $active_path,
+            'paths' => $paths,
+            'existing_paths' => $existing_paths,
+            'exists' => !empty($existing_paths),
+            'lines' => $lines,
+        ];
+    }
+
+    private static function get_debug_log_paths(): array {
+        $paths = [];
+        $plugin_path = trailingslashit(plugin_dir_path(__FILE__)) . self::DEBUG_LOG_FILE;
+        $paths[] = $plugin_path;
+
+        $uploads = wp_upload_dir();
+        if (!empty($uploads['basedir']) && is_string($uploads['basedir'])) {
+            $paths[] = trailingslashit($uploads['basedir']) . 'minimax-sync/' . self::DEBUG_LOG_FILE;
+        }
+
+        return array_values(array_unique($paths));
+    }
+
+    private static function ensure_log_parent_dir(string $path): void {
+        $dir = dirname($path);
+        if (is_dir($dir)) {
+            return;
+        }
+        wp_mkdir_p($dir);
+    }
+
+    private static function read_log_tail(string $path, int $tail_bytes): string {
+        $content = '';
+        $fh = @fopen($path, 'rb');
+        if (!$fh) {
+            return '';
+        }
+
+        $size = filesize($path);
+        if ($size > 0) {
+            $offset = max(0, $size - $tail_bytes);
+            if ($offset > 0) {
+                fseek($fh, $offset);
+            }
+            $content = (string) stream_get_contents($fh);
+        }
+        fclose($fh);
+        return $content;
     }
 }
 

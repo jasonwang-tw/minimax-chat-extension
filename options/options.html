@@ -25,18 +25,21 @@
       </div>
     </header>
 
-    <nav class="toc">
-      <a href="#sec-api">API 設定</a>
-      <a href="#sec-chat">對話設定</a>
-      <a href="#sec-prompts">提示詞</a>
-      <a href="#sec-modes">回覆模式</a>
-      <a href="#sec-commands">自訂指令</a>
-      <a href="#sec-memory">長期記憶</a>
-      <a href="#sec-sync">同步</a>
-      <a href="#sec-about">關於</a>
-    </nav>
+    <div class="settings-layout">
+      <aside class="toc-sidebar">
+        <nav class="toc">
+          <a href="#sec-api">API 設定</a>
+          <a href="#sec-chat">對話設定</a>
+          <a href="#sec-prompts">提示詞</a>
+          <a href="#sec-modes">回覆模式</a>
+          <a href="#sec-commands">自訂指令</a>
+          <a href="#sec-memory">長期記憶</a>
+          <a href="#sec-sync">同步</a>
+          <a href="#sec-about">關於</a>
+        </nav>
+      </aside>
 
-    <main class="main">
+      <main class="main">
       <section class="section" id="sec-api">
         <h2>API 設定</h2>
         <div class="form-group">
@@ -192,24 +195,30 @@
 
       <section class="section" id="sec-sync">
         <h2>跨裝置同步（Phase 1）</h2>
-        <p class="section-desc">Google Drive OAuth 仍保留在此處做驗證；另外新增 WordPress 備援同步，供 Google 授權受阻時改用站外登入與雲端設定備份。</p>
+        <p class="section-desc">目前以 WordPress 備援同步為主，支援手動/自動備份與還原。備份範圍包含設定、長期記憶、知識庫、單字簿與 Session 內容。</p>
         <div class="form-group">
           <label for="syncProvider">同步供應商</label>
           <select id="syncProvider">
             <option value="none">不啟用</option>
-            <option value="googleDrive">Google Drive</option>
+            <option value="googleDrive" hidden>Google Drive（暫停）</option>
             <option value="wordpress">WordPress 備援</option>
           </select>
         </div>
         <div class="form-group">
           <label>
             <input type="checkbox" id="syncAutoEnabled" style="margin-right:6px">
-            啟用自動同步（預留）
+            啟用每日自動備份
           </label>
-          <p class="hint">MVP 先保留開關與設定，後續再接上背景排程與衝突處理。</p>
+          <p class="hint">啟用後會在指定時間自動執行 WordPress 備份。</p>
+        </div>
+        <div class="form-group">
+          <label for="autoBackupTime">自動備份時間（台灣時間）</label>
+          <div class="input-wrapper">
+            <input type="time" id="autoBackupTime" value="03:00">
+          </div>
         </div>
 
-        <div class="sync-provider-card">
+        <div class="sync-provider-card feature-hidden">
           <h3>Google Drive OAuth</h3>
           <p class="hint">延續既有 OAuth 驗證流程，適合已完成 Google Cloud 設定的情境。</p>
           <div class="form-group">
@@ -253,7 +262,7 @@
       <section class="section" id="sec-about">
         <h2>關於</h2>
         <div class="about-info">
-          <p><strong>版本:</strong> 1.11.4</p>
+          <p><strong>版本:</strong> 1.12.0</p>
           <p><strong>對話模型:</strong> MiniMax-M2.7 / MiniMax-M2.7-highspeed / MiniMax-M2.5</p>
           <p><strong>圖片模型:</strong> Gemini 2.5 Flash-lite</p>
           <p>MiniMax AI Chat Chrome Extension 設定頁。</p>
@@ -261,7 +270,8 @@
       </section>
 
       <div id="message" class="message hidden"></div>
-    </main>
+      </main>
+    </div>
   </div>
 
   <script src="options.js"></script>
