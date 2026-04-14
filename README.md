@@ -9,6 +9,7 @@ What is included:
 - External WordPress login flow using `chrome.identity.launchWebAuthFlow`
 - Manual `backup settings` and `restore settings` actions in the sync settings page
 - Deployable WordPress plugin scaffold under `wordpress/minimax-sync/`
+- Plugin-side debug log file for sync troubleshooting: `wp-content/plugins/minimax-sync/minimax-sync-debug.log`
 
 MVP scope:
 - Backs up lightweight settings stored in `chrome.storage.sync`

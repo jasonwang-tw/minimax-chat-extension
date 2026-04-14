@@ -3,7 +3,7 @@
  * Plugin Name: MiniMax Sync Bridge
  * Plugin URI: https://jasonsbase.com/
  * Description: Provides WordPress-backed login and settings backup endpoints for the MiniMax AI Chat extension.
- * Version: 0.1.0
+ * Version: 0.1.4
  * Author: Jason Wang
  * License: GPLv2 or later
  */
@@ -19,6 +19,7 @@ final class Minimax_Sync_Bridge {
     private const TABLE_TOKENS = 'minimax_sync_tokens';
     private const CODE_TTL_SECONDS = 600;
     private const TOKEN_PREFIX = 'mms_';
+    private const DEBUG_LOG_FILE = 'minimax-sync-debug.log';
 
     public static function init(): void {
         register_activation_hook(__FILE__, [self::class, 'activate']);
@@ -27,6 +28,8 @@ final class Minimax_Sync_Bridge {
         add_action('admin_menu', [self::class, 'register_admin_page']);
         add_action('admin_post_minimax_sync_save_settings', [self::class, 'handle_admin_save']);
         add_action('admin_post_minimax_sync_revoke_token', [self::class, 'handle_admin_revoke_token']);
+        add_action('admin_post_minimax_sync_delete_token', [self::class, 'handle_admin_delete_token']);
+        add_action('admin_post_minimax_sync_cleanup_tokens', [self::class, 'handle_admin_cleanup_tokens']);
     }
 
     public static function activate(): void {
@@ -149,34 +152,44 @@ final class Minimax_Sync_Bridge {
     }
 
     public static function rest_exchange_code(WP_REST_Request $request) {
-        if (!self::is_enabled()) {
-            return new WP_Error('minimax_sync_disabled', 'Sync bridge is disabled.', ['status' => 403]);
+        try {
+            if (!self::is_enabled()) {
+                return new WP_Error('minimax_sync_disabled', 'Sync bridge is disabled.', ['status' => 403]);
+            }
+
+            $code = sanitize_text_field((string) $request->get_param('code'));
+            $redirect_uri = esc_url_raw((string) $request->get_param('redirectUri'));
+
+            if (empty($code) || empty($redirect_uri)) {
+                return new WP_Error('minimax_sync_bad_request', 'Missing code or redirectUri.', ['status' => 400]);
+            }
+
+            $record = self::consume_auth_code($code, $redirect_uri);
+            if (!$record) {
+                self::debug_log('rest_exchange_code invalid_or_expired', ['redirect_uri' => $redirect_uri]);
+                return new WP_Error('minimax_sync_invalid_code', 'Authorization code is invalid or expired.', ['status' => 403]);
+            }
+
+            $raw_token = self::generate_secret(32);
+            self::store_token((int) $record->user_id, $raw_token);
+
+            $user = get_userdata((int) $record->user_id);
+            return new WP_REST_Response([
+                'token' => self::TOKEN_PREFIX . $raw_token,
+                'account' => self::format_user($user),
+            ]);
+        } catch (Throwable $e) {
+            self::debug_log('rest_exchange_code fatal', ['error' => $e->getMessage()]);
+            return new WP_Error('minimax_sync_rest_exchange_failed', 'Exchange failed: ' . $e->getMessage(), ['status' => 500]);
         }
-
-        $code = sanitize_text_field((string) $request->get_param('code'));
-        $redirect_uri = esc_url_raw((string) $request->get_param('redirectUri'));
-
-        if (empty($code) || empty($redirect_uri)) {
-            return new WP_Error('minimax_sync_bad_request', 'Missing code or redirectUri.', ['status' => 400]);
-        }
-
-        $record = self::consume_auth_code($code, $redirect_uri);
-        if (!$record) {
-            return new WP_Error('minimax_sync_invalid_code', 'Authorization code is invalid or expired.', ['status' => 403]);
-        }
-
-        $raw_token = self::generate_secret(32);
-        self::store_token((int) $record->user_id, $raw_token);
-
-        $user = get_userdata((int) $record->user_id);
-        return new WP_REST_Response([
-            'token' => self::TOKEN_PREFIX . $raw_token,
-            'account' => self::format_user($user),
-        ]);
     }
 
     public static function rest_status(WP_REST_Request $request) {
-        $auth = $request->get_attribute('minimax_sync_auth');
+        $auth = self::authenticate_request($request);
+        if (is_wp_error($auth)) {
+            return $auth;
+        }
+
         $last_backup = self::get_last_backup_at((int) $auth['user_id']);
 
         return new WP_REST_Response([
@@ -186,70 +199,72 @@ final class Minimax_Sync_Bridge {
     }
 
     public static function rest_get_backup(WP_REST_Request $request) {
-        $auth = $request->get_attribute('minimax_sync_auth');
-        $payload = self::get_backup_payload((int) $auth['user_id']);
+        try {
+            $auth = self::authenticate_request($request);
+            if (is_wp_error($auth)) {
+                return $auth;
+            }
+            $payload = self::get_backup_payload((int) $auth['user_id']);
 
-        return new WP_REST_Response([
-            'payload' => $payload,
-            'updatedAt' => self::get_last_backup_at((int) $auth['user_id']),
-        ]);
+            return new WP_REST_Response([
+                'payload' => $payload,
+                'updatedAt' => self::get_last_backup_at((int) $auth['user_id']),
+            ]);
+        } catch (Throwable $e) {
+            self::debug_log('rest_get_backup failed', ['error' => $e->getMessage()]);
+            return new WP_Error('minimax_sync_rest_get_backup_failed', 'Backup read failed: ' . $e->getMessage(), ['status' => 500]);
+        }
     }
 
     public static function rest_put_backup(WP_REST_Request $request) {
-        $auth = $request->get_attribute('minimax_sync_auth');
-        $payload = $request->get_json_params();
+        try {
+            $auth = self::authenticate_request($request);
+            if (is_wp_error($auth)) {
+                return $auth;
+            }
+            $payload = $request->get_json_params();
 
-        if (!is_array($payload) || !isset($payload['settings']) || !is_array($payload['settings'])) {
-            return new WP_Error('minimax_sync_invalid_payload', 'Backup payload must contain a settings object.', ['status' => 400]);
+            if (!is_array($payload) || !isset($payload['settings']) || !is_array($payload['settings'])) {
+                return new WP_Error('minimax_sync_invalid_payload', 'Backup payload must contain a settings object.', ['status' => 400]);
+            }
+
+            $json = wp_json_encode($payload);
+            if (!$json || strlen($json) > 262144) {
+                return new WP_Error('minimax_sync_payload_too_large', 'Backup payload is too large.', ['status' => 413]);
+            }
+
+            self::store_backup_payload((int) $auth['user_id'], $json);
+
+            return new WP_REST_Response([
+                'updatedAt' => gmdate('c'),
+            ]);
+        } catch (Throwable $e) {
+            self::debug_log('rest_put_backup failed', ['error' => $e->getMessage()]);
+            return new WP_Error('minimax_sync_rest_put_backup_failed', 'Backup write failed: ' . $e->getMessage(), ['status' => 500]);
         }
-
-        $json = wp_json_encode($payload);
-        if (!$json || strlen($json) > 262144) {
-            return new WP_Error('minimax_sync_payload_too_large', 'Backup payload is too large.', ['status' => 413]);
-        }
-
-        self::store_backup_payload((int) $auth['user_id'], $json);
-
-        return new WP_REST_Response([
-            'updatedAt' => gmdate('c'),
-        ]);
     }
 
     public static function rest_logout(WP_REST_Request $request) {
-        $auth = $request->get_attribute('minimax_sync_auth');
+        $auth = self::authenticate_request($request);
+        if (is_wp_error($auth)) {
+            return $auth;
+        }
         self::revoke_token_by_id((int) $auth['token_id']);
 
         return new WP_REST_Response(['success' => true]);
     }
 
     public static function require_token(WP_REST_Request $request) {
-        if (!self::is_enabled()) {
-            return new WP_Error('minimax_sync_disabled', 'Sync bridge is disabled.', ['status' => 403]);
+        try {
+            $auth = self::authenticate_request($request);
+            if (is_wp_error($auth)) {
+                return $auth;
+            }
+            return true;
+        } catch (Throwable $e) {
+            self::debug_log('require_token fatal', ['error' => $e->getMessage(), 'path' => $request->get_route()]);
+            return new WP_Error('minimax_sync_require_token_failed', 'Token validation failed: ' . $e->getMessage(), ['status' => 500]);
         }
-
-        $raw_header = $request->get_header('authorization');
-        if (!preg_match('/Bearer\s+(.+)/i', (string) $raw_header, $matches)) {
-            return new WP_Error('minimax_sync_missing_token', 'Missing bearer token.', ['status' => 401]);
-        }
-
-        $token = trim($matches[1]);
-        if (strpos($token, self::TOKEN_PREFIX) === 0) {
-            $token = substr($token, strlen(self::TOKEN_PREFIX));
-        }
-
-        $record = self::find_token($token);
-        if (!$record) {
-            return new WP_Error('minimax_sync_invalid_token', 'Token is invalid or revoked.', ['status' => 401]);
-        }
-
-        self::touch_token((int) $record->id);
-
-        $request->set_attribute('minimax_sync_auth', [
-            'token_id' => (int) $record->id,
-            'user_id' => (int) $record->user_id,
-        ]);
-
-        return true;
     }
 
     public static function register_admin_page(): void {
@@ -305,13 +320,13 @@ final class Minimax_Sync_Bridge {
 
             <h2>最近備份</h2>
             <table class="widefat striped">
-                <thead><tr><th>User</th><th>Email</th><th>Updated At (UTC)</th></tr></thead>
+                <thead><tr><th>User</th><th>Email</th><th>Updated At (Asia/Taipei)</th></tr></thead>
                 <tbody>
                 <?php foreach ($backups as $backup): ?>
                     <tr>
                         <td><?php echo esc_html($backup->user_login ?: $backup->user_id); ?></td>
                         <td><?php echo esc_html($backup->user_email ?: ''); ?></td>
-                        <td><?php echo esc_html($backup->updated_at); ?></td>
+                        <td><?php echo esc_html(self::format_admin_datetime_taipei($backup->updated_at)); ?></td>
                     </tr>
                 <?php endforeach; ?>
                 <?php if (empty($backups)): ?>
@@ -321,15 +336,20 @@ final class Minimax_Sync_Bridge {
             </table>
 
             <h2 style="margin-top: 24px;">Token 管理</h2>
+            <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" style="margin-bottom: 12px;">
+                <?php wp_nonce_field('minimax_sync_cleanup_tokens'); ?>
+                <input type="hidden" name="action" value="minimax_sync_cleanup_tokens">
+                <?php submit_button('清理全部 Revoked Token', 'secondary', '', false); ?>
+            </form>
             <table class="widefat striped">
-                <thead><tr><th>User</th><th>Email</th><th>Created</th><th>Last Used</th><th>Status</th><th>Action</th></tr></thead>
+                <thead><tr><th>User</th><th>Email</th><th>Created (Asia/Taipei)</th><th>Last Used (Asia/Taipei)</th><th>Status</th><th>Action</th></tr></thead>
                 <tbody>
                 <?php foreach ($tokens as $token): ?>
                     <tr>
                         <td><?php echo esc_html($token->user_login ?: $token->user_id); ?></td>
                         <td><?php echo esc_html($token->user_email ?: ''); ?></td>
-                        <td><?php echo esc_html($token->created_at); ?></td>
-                        <td><?php echo esc_html($token->last_used_at ?: ''); ?></td>
+                        <td><?php echo esc_html(self::format_admin_datetime_taipei($token->created_at)); ?></td>
+                        <td><?php echo esc_html(self::format_admin_datetime_taipei($token->last_used_at ?: '')); ?></td>
                         <td><?php echo esc_html($token->revoked_at ? 'Revoked' : 'Active'); ?></td>
                         <td>
                             <?php if (!$token->revoked_at): ?>
@@ -338,6 +358,13 @@ final class Minimax_Sync_Bridge {
                                     <input type="hidden" name="action" value="minimax_sync_revoke_token">
                                     <input type="hidden" name="token_id" value="<?php echo esc_attr($token->id); ?>">
                                     <?php submit_button('Revoke', 'secondary small', '', false); ?>
+                                </form>
+                            <?php else: ?>
+                                <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
+                                    <?php wp_nonce_field('minimax_sync_delete_token'); ?>
+                                    <input type="hidden" name="action" value="minimax_sync_delete_token">
+                                    <input type="hidden" name="token_id" value="<?php echo esc_attr($token->id); ?>">
+                                    <?php submit_button('Delete', 'delete small', '', false); ?>
                                 </form>
                             <?php endif; ?>
                         </td>
@@ -371,6 +398,28 @@ final class Minimax_Sync_Bridge {
         check_admin_referer('minimax_sync_revoke_token');
         self::revoke_token_by_id((int) ($_POST['token_id'] ?? 0));
         wp_safe_redirect(add_query_arg(['page' => 'minimax-sync', 'revoked' => '1'], admin_url('options-general.php')));
+        exit;
+    }
+
+    public static function handle_admin_delete_token(): void {
+        if (!current_user_can('manage_options')) {
+            wp_die('Insufficient permissions.');
+        }
+
+        check_admin_referer('minimax_sync_delete_token');
+        self::delete_token_by_id((int) ($_POST['token_id'] ?? 0));
+        wp_safe_redirect(add_query_arg(['page' => 'minimax-sync', 'deleted' => '1'], admin_url('options-general.php')));
+        exit;
+    }
+
+    public static function handle_admin_cleanup_tokens(): void {
+        if (!current_user_can('manage_options')) {
+            wp_die('Insufficient permissions.');
+        }
+
+        check_admin_referer('minimax_sync_cleanup_tokens');
+        self::delete_all_revoked_tokens();
+        wp_safe_redirect(add_query_arg(['page' => 'minimax-sync', 'cleanup' => '1'], admin_url('options-general.php')));
         exit;
     }
 
@@ -511,6 +560,21 @@ final class Minimax_Sync_Bridge {
         ]);
     }
 
+    private static function delete_token_by_id(int $token_id): void {
+        if ($token_id <= 0) {
+            return;
+        }
+
+        global $wpdb;
+        $wpdb->delete(self::table(self::TABLE_TOKENS), ['id' => $token_id], ['%d']);
+    }
+
+    private static function delete_all_revoked_tokens(): void {
+        global $wpdb;
+        $table = self::table(self::TABLE_TOKENS);
+        $wpdb->query("DELETE FROM {$table} WHERE revoked_at IS NOT NULL");
+    }
+
     private static function store_backup_payload(int $user_id, string $json): void {
         global $wpdb;
         $wpdb->replace(self::table(self::TABLE_BACKUPS), [
@@ -593,6 +657,79 @@ final class Minimax_Sync_Bridge {
 
     private static function generate_secret(int $bytes): string {
         return rtrim(strtr(base64_encode(random_bytes($bytes)), '+/', '-_'), '=');
+    }
+
+    private static function authenticate_request(WP_REST_Request $request) {
+        if (!self::is_enabled()) {
+            return new WP_Error('minimax_sync_disabled', 'Sync bridge is disabled.', ['status' => 403]);
+        }
+
+        $token = '';
+        $raw_header = $request->get_header('authorization');
+        if (preg_match('/Bearer\s+(.+)/i', (string) $raw_header, $matches)) {
+            $token = trim($matches[1]);
+        }
+
+        if (empty($token)) {
+            $token = sanitize_text_field((string) $request->get_header('x_minimax_token'));
+        }
+
+        if (empty($token)) {
+            $token = sanitize_text_field((string) $request->get_param('token'));
+        }
+
+        if (empty($token)) {
+            self::debug_log('require_token missing_token', ['path' => $request->get_route()]);
+            return new WP_Error('minimax_sync_missing_token', 'Missing bearer token.', ['status' => 401]);
+        }
+
+        if (strpos($token, self::TOKEN_PREFIX) === 0) {
+            $token = substr($token, strlen(self::TOKEN_PREFIX));
+        }
+
+        $record = self::find_token($token);
+        if (!$record) {
+            self::debug_log('require_token invalid_token', ['path' => $request->get_route()]);
+            return new WP_Error('minimax_sync_invalid_token', 'Token is invalid or revoked.', ['status' => 401]);
+        }
+
+        self::touch_token((int) $record->id);
+        return [
+            'token_id' => (int) $record->id,
+            'user_id' => (int) $record->user_id,
+        ];
+    }
+
+    private static function debug_log(string $message, array $context = []): void {
+        $line = '[' . gmdate('c') . '] ' . $message;
+        if (!empty($context)) {
+            $encoded = wp_json_encode($context);
+            if ($encoded) {
+                $line .= ' ' . $encoded;
+            }
+        }
+
+        $line .= PHP_EOL;
+        $path = trailingslashit(plugin_dir_path(__FILE__)) . self::DEBUG_LOG_FILE;
+        $written = @file_put_contents($path, $line, FILE_APPEND | LOCK_EX);
+        if ($written === false) {
+            error_log('[MiniMax Sync] failed writing plugin debug log: ' . $message);
+        }
+    }
+
+    private static function format_admin_datetime_taipei(string $value): string {
+        if (empty($value)) {
+            return '';
+        }
+
+        try {
+            $dt = new DateTime($value, new DateTimeZone('UTC'));
+            $dt->setTimezone(new DateTimeZone('Asia/Taipei'));
+            return $dt->format('Y-m-d H:i:s');
+        } catch (Throwable $e) {
+            self::debug_log('format_admin_datetime_taipei failed', ['error' => $e->getMessage(), 'value' => $value]);
+            return $value;
+        }
     }
 }
 

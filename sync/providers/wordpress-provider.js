@@ -72,6 +72,7 @@ export class WordPressProvider extends BaseProvider {
     if (!auth?.apiToken || !auth?.baseUrl) {
       return {
         connected: false,
+        authorized: false,
         baseUrl: auth?.baseUrl || DEFAULT_WORDPRESS_BASE_URL
       };
     }
@@ -84,14 +85,17 @@ export class WordPressProvider extends BaseProvider {
 
       return {
         connected: true,
+        authorized: true,
         baseUrl: normalizeBaseUrl(auth.baseUrl),
-        account: response.account || null,
+        account: response.account || auth.account || null,
         lastBackupAt: response.lastBackupAt || null
       };
     } catch (error) {
       return {
         connected: false,
+        authorized: true,
         baseUrl: normalizeBaseUrl(auth.baseUrl),
+        account: auth.account || null,
         reason: error.message || 'AUTH_INVALID'
       };
     }
@@ -99,12 +103,22 @@ export class WordPressProvider extends BaseProvider {
 
   async backupSettings(auth, payload) {
     ensureAuthorized(auth);
+    const endpoint = `${normalizeBaseUrl(auth.baseUrl)}${WORDPRESS_NAMESPACE}/backup/settings`;
 
-    return fetchJson(`${normalizeBaseUrl(auth.baseUrl)}${WORDPRESS_NAMESPACE}/backup/settings`, {
-      method: 'PUT',
-      token: auth.apiToken,
-      body: payload
-    });
+    try {
+      return await fetchJson(endpoint, {
+        method: 'POST',
+        token: auth.apiToken,
+        body: payload
+      });
+    } catch (error) {
+      // Fallback for hosts/plugins that only allow PUT/PATCH on editable routes.
+      return fetchJson(endpoint, {
+        method: 'PUT',
+        token: auth.apiToken,
+        body: payload
+      });
+    }
   }
 
   async restoreSettings(auth) {
@@ -141,6 +155,7 @@ async function fetchJson(url, { method = 'GET', token, body } = {}) {
 
   if (token) {
     headers.Authorization = `Bearer ${token}`;
+    headers['X-Minimax-Token'] = token;
   }
 
   const response = await fetch(url, {
@@ -159,9 +174,26 @@ async function fetchJson(url, { method = 'GET', token, body } = {}) {
   }
 
   if (!response.ok) {
-    const message = data?.message || data?.error || `HTTP ${response.status}`;
+    const message = extractErrorMessage(text, data, response.status);
     throw new Error(message);
   }
 
   return data || {};
+}
+
+function extractErrorMessage(text, data, status) {
+  const structured = data?.message || data?.error;
+  if (structured && typeof structured === 'string') {
+    return structured;
+  }
+
+  const textValue = typeof text === 'string' ? text : '';
+  if (textValue.trim()) {
+    return textValue
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  return `HTTP ${status}`;
 }

@@ -442,20 +442,26 @@ document.addEventListener('DOMContentLoaded', async () => {
     const status = resp.data;
     const googleDrive = status.googleDrive || { connected: false };
     const wordpress = status.wordpress || { connected: false };
+    const wordpressAuthorized = !!(wordpress.authorized || wordpress.connected);
+    const wordpressDisplayName = wordpress.account?.email || wordpress.account?.displayName || wordpress.account?.username || '已授權';
 
     googleDriveStatusText.textContent = googleDrive.connected
       ? `Google Drive：已連線（${googleDrive.account?.email || googleDrive.account?.name || '已授權'}）`
       : 'Google Drive：未連線';
 
-    wordpressStatusText.textContent = wordpress.connected
-      ? `WordPress：已登入（${wordpress.account?.email || wordpress.account?.displayName || wordpress.account?.username || '已登入'}，最近備份：${wordpress.lastBackupAt ? new Date(wordpress.lastBackupAt).toLocaleString() : '尚未備份'}）`
-      : `WordPress：未登入${wordpress.baseUrl ? `（${wordpress.baseUrl}）` : ''}`;
+    if (wordpress.connected) {
+      wordpressStatusText.textContent = `WordPress：已登入（${wordpressDisplayName}，最近備份：${wordpress.lastBackupAt ? new Date(wordpress.lastBackupAt).toLocaleString() : '尚未備份'}）`;
+    } else if (wordpressAuthorized) {
+      wordpressStatusText.textContent = `WordPress：已授權（${wordpressDisplayName}，狀態檢查失敗：${wordpress.reason || '未知錯誤'}）`;
+    } else {
+      wordpressStatusText.textContent = `WordPress：未登入${wordpress.baseUrl ? `（${wordpress.baseUrl}）` : ''}`;
+    }
 
-    syncStatusText.textContent = `目前供應商：${status.provider || 'none'}｜Google Drive：${googleDrive.connected ? '已連線' : '未連線'}｜WordPress：${wordpress.connected ? '已登入' : '未登入'}`;
+    syncStatusText.textContent = `目前供應商：${status.provider || 'none'}｜Google Drive：${googleDrive.connected ? '已連線' : '未連線'}｜WordPress：${wordpressAuthorized ? (wordpress.connected ? '已登入' : '已授權（狀態檢查失敗）') : '未登入'}`;
 
-    backupWordPressBtn.disabled = !wordpress.connected;
-    restoreWordPressBtn.disabled = !wordpress.connected;
-    disconnectWordPressBtn.disabled = !wordpress.connected;
+    backupWordPressBtn.disabled = !wordpressAuthorized;
+    restoreWordPressBtn.disabled = !wordpressAuthorized;
+    disconnectWordPressBtn.disabled = !wordpressAuthorized;
   }
 
   function buildSyncSettingsPayload() {
