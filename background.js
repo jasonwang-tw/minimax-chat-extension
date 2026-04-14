@@ -1,5 +1,7 @@
 // background.js - Service Worker for MiniMax API + Gemini Vision
 
+import { SyncService, DEFAULT_SYNC_SETTINGS } from './sync/sync-service.js';
+
 const MINIMAX_API_URL = 'https://api.minimax.io/v1/chat/completions';
 const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash-lite:generateContent';
 const MODEL_NAME = 'MiniMax-M2.7';
@@ -16,6 +18,8 @@ const DEFAULT_REPLY_MODES = [
   { id: 'discuss', name: '討論模式', icon: '🔍', prompt: '請針對問題進行多角度分析，引用可靠資訊，交互比對後給出結論，並附上推理過程。' }
 ];
 
+const syncService = new SyncService();
+
 // 監聽插件安裝
 chrome.runtime.onInstalled.addListener(({ reason }) => {
   if (reason === 'install') {
@@ -25,11 +29,13 @@ chrome.runtime.onInstalled.addListener(({ reason }) => {
       defaultPrompts: DEFAULT_PROMPTS,
       replyModes: DEFAULT_REPLY_MODES,
       customCommands: [],
-      autoMemoryEnabled: false
+      autoMemoryEnabled: false,
+      syncSettings: DEFAULT_SYNC_SETTINGS
     });
     chrome.storage.local.set({
       vocabulary: [],
-      categories: { memory: [], knowledge: [], vocabulary: [] }
+      categories: { memory: [], knowledge: [], vocabulary: [] },
+      syncAuth: {}
     });
   }
 
@@ -453,6 +459,41 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({ success: false, error: err.message });
       }
     });
+    return true;
+  }
+
+  if (message.type === 'GET_SYNC_SETTINGS') {
+    syncService.getSettings()
+      .then(settings => sendResponse({ success: true, data: settings }))
+      .catch(error => sendResponse({ success: false, error: error.message }));
+    return true;
+  }
+
+  if (message.type === 'SAVE_SYNC_SETTINGS') {
+    syncService.saveSettings(message.data || {})
+      .then(settings => sendResponse({ success: true, data: settings }))
+      .catch(error => sendResponse({ success: false, error: error.message }));
+    return true;
+  }
+
+  if (message.type === 'GOOGLE_DRIVE_CONNECT') {
+    syncService.connectGoogleDrive()
+      .then(data => sendResponse({ success: true, data }))
+      .catch(error => sendResponse({ success: false, error: error.message }));
+    return true;
+  }
+
+  if (message.type === 'GOOGLE_DRIVE_DISCONNECT') {
+    syncService.disconnectGoogleDrive()
+      .then(data => sendResponse({ success: true, data }))
+      .catch(error => sendResponse({ success: false, error: error.message }));
+    return true;
+  }
+
+  if (message.type === 'GET_SYNC_STATUS') {
+    syncService.getStatus()
+      .then(data => sendResponse({ success: true, data }))
+      .catch(error => sendResponse({ success: false, error: error.message }));
     return true;
   }
 });

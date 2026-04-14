@@ -9,7 +9,8 @@
     "activeTab",
     "tabs",
     "scripting",
-    "contextMenus"
+    "contextMenus",
+    "identity"
   ],
   "host_permissions": [
     "<all_urls>",
@@ -17,7 +18,10 @@
     "https://generativelanguage.googleapis.com/*",
     "https://translate.google.com/*",
     "https://api.search.brave.com/*",
-    "https://api.exa.ai/*"
+    "https://api.exa.ai/*",
+    "https://accounts.google.com/*",
+    "https://oauth2.googleapis.com/*",
+    "https://www.googleapis.com/*"
   ],
   "background": {
     "service_worker": "background.js",

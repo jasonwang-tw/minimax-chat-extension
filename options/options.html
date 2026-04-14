@@ -33,6 +33,7 @@
       <a href="#sec-modes">回覆模式</a>
       <a href="#sec-commands">自訂指令</a>
       <a href="#sec-memory">長期記憶</a>
+      <a href="#sec-sync">同步</a>
       <a href="#sec-about">關於</a>
     </nav>
 
@@ -177,6 +178,34 @@
           </label>
           <p class="hint">⚠️ 開啟後，每次對話結束會多消耗一次 API 請求，用於分析是否有值得記住的內容。</p>
         </div>
+      </section>
+
+      <section class="section" id="sec-sync">
+        <h2>跨裝置同步（Phase 1）</h2>
+        <p class="section-desc">目前提供 Google Drive OAuth 連線（彈出授權視窗）。本階段先完成帳號連線與狀態檢查，資料同步引擎將在後續階段啟用。</p>
+        <div class="form-group">
+          <label for="syncProvider">同步供應商</label>
+          <select id="syncProvider">
+            <option value="none">不啟用</option>
+            <option value="googleDrive">Google Drive</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="googleDriveClientId">Google OAuth Client ID</label>
+          <input type="text" id="googleDriveClientId" placeholder="輸入 Google OAuth Client ID（Chrome App / Web）">
+          <p class="hint">請先在 Google Cloud Console 建立 OAuth Client，並將 redirect URI 設為：<code id="googleRedirectUri">（載入中）</code></p>
+        </div>
+        <div class="form-group">
+          <label>
+            <input type="checkbox" id="syncAutoEnabled" style="margin-right:6px">
+            啟用自動同步（預留）
+          </label>
+          <p class="hint">Phase 1 先保留開關與設定，後續階段會接上實際增量同步排程。</p>
+        </div>
+        <button id="saveSyncSettingsBtn" class="btn-primary">儲存同步設定</button>
+        <button id="connectGoogleDriveBtn" class="btn-secondary">連線 Google Drive</button>
+        <button id="disconnectGoogleDriveBtn" class="btn-secondary">中斷連線</button>
+        <p id="syncStatusText" class="hint" style="margin-top:12px">尚未連線</p>
       </section>
 
       <section class="section" id="sec-about">

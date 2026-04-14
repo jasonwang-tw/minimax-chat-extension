@@ -33,6 +33,14 @@ document.addEventListener("DOMContentLoaded", async () => {
   const addCommandBtn = document.getElementById("addCommandBtn");
   const saveCommandsBtn = document.getElementById("saveCommandsBtn");
   const autoMemoryEnabledChk = document.getElementById("autoMemoryEnabled");
+  const syncProviderSelect = document.getElementById("syncProvider");
+  const googleDriveClientIdInput = document.getElementById("googleDriveClientId");
+  const syncAutoEnabledChk = document.getElementById("syncAutoEnabled");
+  const saveSyncSettingsBtn = document.getElementById("saveSyncSettingsBtn");
+  const connectGoogleDriveBtn = document.getElementById("connectGoogleDriveBtn");
+  const disconnectGoogleDriveBtn = document.getElementById("disconnectGoogleDriveBtn");
+  const syncStatusText = document.getElementById("syncStatusText");
+  const googleRedirectUriEl = document.getElementById("googleRedirectUri");
 
   let replyModes = [];
   let customCommands = [];
@@ -48,6 +56,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   await loadReplyModes();
   await loadCustomCommands();
   await loadMemorySection();
+  await loadSyncSection();
 
   // 切換 MiniMax 密碼可見性
   toggleKeyBtn.addEventListener("click", () => {
@@ -320,6 +329,125 @@ document.addEventListener("DOMContentLoaded", async () => {
       await chrome.storage.sync.set({ autoMemoryEnabled: autoMemoryEnabledChk.checked });
     });
 
+  }
+
+  // ── 同步設定（Phase 1 / OAuth）────────────────────────────
+  async function loadSyncSection() {
+    if (googleRedirectUriEl) {
+      googleRedirectUriEl.textContent = chrome.identity.getRedirectURL("google-drive-sync");
+    }
+
+    const settingsResp = await sendRuntimeMessage({ type: 'GET_SYNC_SETTINGS' });
+    if (settingsResp.success && settingsResp.data) {
+      const settings = settingsResp.data;
+      syncProviderSelect.value = settings.provider || 'none';
+      googleDriveClientIdInput.value = settings.googleDriveClientId || '';
+      syncAutoEnabledChk.checked = !!settings.autoSync;
+    }
+
+    await refreshSyncStatus();
+  }
+
+  saveSyncSettingsBtn?.addEventListener("click", async () => {
+    const payload = {
+      provider: syncProviderSelect.value,
+      googleDriveClientId: googleDriveClientIdInput.value.trim(),
+      autoSync: !!syncAutoEnabledChk.checked
+    };
+
+    const resp = await sendRuntimeMessage({ type: 'SAVE_SYNC_SETTINGS', data: payload });
+    if (!resp.success) {
+      showMessage(`儲存同步設定失敗：${resp.error || '未知錯誤'}`, 'error');
+      return;
+    }
+
+    showMessage('同步設定已儲存', 'success');
+    await refreshSyncStatus();
+  });
+
+  connectGoogleDriveBtn?.addEventListener("click", async () => {
+    if (!googleDriveClientIdInput.value.trim()) {
+      showMessage('請先輸入 Google OAuth Client ID', 'error');
+      return;
+    }
+
+    connectGoogleDriveBtn.disabled = true;
+    connectGoogleDriveBtn.textContent = '授權中...';
+    try {
+      const saveResp = await sendRuntimeMessage({
+        type: 'SAVE_SYNC_SETTINGS',
+        data: {
+          provider: 'googleDrive',
+          googleDriveClientId: googleDriveClientIdInput.value.trim(),
+          autoSync: !!syncAutoEnabledChk.checked
+        }
+      });
+      if (!saveResp.success) {
+        showMessage(`儲存設定失敗：${saveResp.error || '未知錯誤'}`, 'error');
+        return;
+      }
+
+      const resp = await sendRuntimeMessage({ type: 'GOOGLE_DRIVE_CONNECT' });
+      if (!resp.success) {
+        showMessage(`Google Drive 授權失敗：${resp.error || '未知錯誤'}`, 'error');
+        return;
+      }
+      showMessage('Google Drive 連線成功', 'success');
+      syncProviderSelect.value = 'googleDrive';
+      await refreshSyncStatus();
+    } finally {
+      connectGoogleDriveBtn.disabled = false;
+      connectGoogleDriveBtn.textContent = '連線 Google Drive';
+    }
+  });
+
+  disconnectGoogleDriveBtn?.addEventListener("click", async () => {
+    disconnectGoogleDriveBtn.disabled = true;
+    disconnectGoogleDriveBtn.textContent = '中斷中...';
+    try {
+      const resp = await sendRuntimeMessage({ type: 'GOOGLE_DRIVE_DISCONNECT' });
+      if (!resp.success) {
+        showMessage(`中斷連線失敗：${resp.error || '未知錯誤'}`, 'error');
+        return;
+      }
+      showMessage('已中斷 Google Drive 連線', 'success');
+      syncProviderSelect.value = 'none';
+      await refreshSyncStatus();
+    } finally {
+      disconnectGoogleDriveBtn.disabled = false;
+      disconnectGoogleDriveBtn.textContent = '中斷連線';
+    }
+  });
+
+  async function refreshSyncStatus() {
+    const resp = await sendRuntimeMessage({ type: 'GET_SYNC_STATUS' });
+    if (!resp.success || !resp.data) {
+      syncStatusText.textContent = `同步狀態讀取失敗：${resp.error || '未知錯誤'}`;
+      return;
+    }
+
+    const s = resp.data;
+    const gd = s.googleDrive || { connected: false };
+    if (!gd.connected) {
+      syncStatusText.textContent = `目前供應商：${s.provider || 'none'}｜Google Drive：未連線`;
+      return;
+    }
+
+    const expires = gd.expiresAt ? new Date(gd.expiresAt).toLocaleString() : '未知';
+    const account = gd.account?.email || gd.account?.name || '已授權';
+    syncStatusText.textContent = `目前供應商：${s.provider}｜Google Drive：已連線（${account}，到期：${expires}）`;
+  }
+
+  function sendRuntimeMessage(payload) {
+    return new Promise(resolve => {
+      chrome.runtime.sendMessage(payload, (resp) => {
+        if (chrome.runtime.lastError) {
+          resolve({ success: false, error: chrome.runtime.lastError.message });
+          return;
+        }
+        resolve(resp || { success: false, error: 'EMPTY_RESPONSE' });
+      });
+    });
   }
 
   function renderReplyModes() {
