@@ -1,10 +1,43 @@
 # MiniMax AI Chat Extension
 
+## Latest Sync Update
+
+This branch delivers the WordPress-based sync flow with expanded backup scope and admin/debug hardening.
+
+What is included:
+- WordPress fallback provider for extension sync
+- External WordPress login flow using `chrome.identity.launchWebAuthFlow`
+- Manual `backup settings` and `restore settings` actions in the sync settings page
+- Daily auto-backup schedule (`auto backup time`)
+- Backup scope expanded to settings + memories + knowledge base + vocabulary + chat sessions
+- Settings page navigation changed to sticky left sidebar
+- Deployable WordPress plugin scaffold under `wordpress/minimax-sync/`
+- Plugin-side debug log file for sync troubleshooting: `wp-content/plugins/minimax-sync/minimax-sync-debug.log`
+
+MVP scope:
+- Uses WordPress sync as the primary active path
+- Backs up settings + `memories` + `knowledgeBase` + `vocabulary` + `chatSessions` + `sessionSummaries`
+- Google Drive sync UI is currently hidden in settings
+
+Main files:
+- `sync/sync-service.js`
+- `sync/providers/wordpress-provider.js`
+- `sync/settings-backup.js`
+- `wordpress/minimax-sync/minimax-sync.php`
+- `options/options.html`
+- `options/options.js`
+
+Quick deployment notes:
+1. Copy `wordpress/minimax-sync` into `wp-content/plugins/`
+2. Activate `MiniMax Sync Bridge` in WordPress
+3. Enable WordPress user registration if self-service signup is needed
+4. Reload the Chrome extension and test login from the `同步` page
+
 串接 MiniMax + Gemini Vision API 的 Chrome 擴充功能，支援側邊欄對話、區域截圖、OCR 文字辨識、翻譯、TTS 語音輸出、歷史紀錄管理。
 
 ## 版本
 
-**v1.11.4** (2026-04-13)
+**v1.12.0** (2026-04-14)
 
 ## 功能特色
 
@@ -97,6 +130,16 @@ npm run build:css
 - **TailwindCSS + SCSS**：樣式設計
 
 ## Changelog
+
+## [1.12.0] - 2026-04-14
+### Added
+- **WordPress 自動備份時間**：同步設定新增每日自動備份與時間欄位，背景以 alarm 排程執行
+- **備份範圍擴大**：納入長期記憶（memories）、知識庫（knowledgeBase）、單字簿（vocabulary）、Session（chatSessions / sessionSummaries）
+- **外掛除錯強化**：外掛後台新增「顯示日誌」彈窗，並支援 log fallback 到 uploads 目錄
+
+### Changed
+- **設定頁導覽改版**：頂部導覽改為左側 Sidebar，並支援固定置頂與長內容獨立滾動
+- **同步入口調整**：Google Drive 同步 UI 暫時隱藏，WordPress 作為主要同步路徑
 
 ## [1.11.4] - 2026-04-13
 ### Fixed

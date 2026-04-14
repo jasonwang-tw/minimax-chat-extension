@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "MiniMax AI Chat",
-  "version": "1.11.4",
+  "version": "1.12.0",
   "description": "串接 MiniMax API 的 AI 對話擴充功能，點擊即可開啟側邊欄與 AI 對話",
   "permissions": [
     "storage",
@@ -9,7 +9,9 @@
     "activeTab",
     "tabs",
     "scripting",
-    "contextMenus"
+    "contextMenus",
+    "identity",
+    "alarms"
   ],
   "host_permissions": [
     "<all_urls>",
@@ -17,7 +19,10 @@
     "https://generativelanguage.googleapis.com/*",
     "https://translate.google.com/*",
     "https://api.search.brave.com/*",
-    "https://api.exa.ai/*"
+    "https://api.exa.ai/*",
+    "https://accounts.google.com/*",
+    "https://oauth2.googleapis.com/*",
+    "https://www.googleapis.com/*"
   ],
   "background": {
     "service_worker": "background.js",

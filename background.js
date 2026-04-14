@@ -1,5 +1,7 @@
 // background.js - Service Worker for MiniMax API + Gemini Vision
 
+import { SyncService, DEFAULT_SYNC_SETTINGS } from './sync/sync-service.js';
+
 const MINIMAX_API_URL = 'https://api.minimax.io/v1/chat/completions';
 const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash-lite:generateContent';
 const MODEL_NAME = 'MiniMax-M2.7';
@@ -16,6 +18,9 @@ const DEFAULT_REPLY_MODES = [
   { id: 'discuss', name: '討論模式', icon: '🔍', prompt: '請針對問題進行多角度分析，引用可靠資訊，交互比對後給出結論，並附上推理過程。' }
 ];
 
+const syncService = new SyncService();
+const WORDPRESS_AUTO_BACKUP_ALARM = 'wordpress-auto-backup';
+
 // 監聽插件安裝
 chrome.runtime.onInstalled.addListener(({ reason }) => {
   if (reason === 'install') {
@@ -25,11 +30,13 @@ chrome.runtime.onInstalled.addListener(({ reason }) => {
       defaultPrompts: DEFAULT_PROMPTS,
       replyModes: DEFAULT_REPLY_MODES,
       customCommands: [],
-      autoMemoryEnabled: false
+      autoMemoryEnabled: false,
+      syncSettings: DEFAULT_SYNC_SETTINGS
     });
     chrome.storage.local.set({
       vocabulary: [],
-      categories: { memory: [], knowledge: [], vocabulary: [] }
+      categories: { memory: [], knowledge: [], vocabulary: [] },
+      syncAuth: {}
     });
   }
 
@@ -56,6 +63,29 @@ chrome.runtime.onInstalled.addListener(({ reason }) => {
       contexts: ['selection']
     });
   });
+
+  refreshWordPressAutoBackupAlarm().catch((error) => {
+    console.warn('[Sync] Failed to refresh backup alarm on install/update:', error?.message || error);
+  });
+});
+
+chrome.runtime.onStartup.addListener(() => {
+  refreshWordPressAutoBackupAlarm().catch((error) => {
+    console.warn('[Sync] Failed to refresh backup alarm on startup:', error?.message || error);
+  });
+});
+
+chrome.alarms.onAlarm.addListener(async (alarm) => {
+  if (alarm.name !== WORDPRESS_AUTO_BACKUP_ALARM) return;
+
+  try {
+    const settings = await syncService.getSettings();
+    if (settings.provider !== 'wordpress' || !settings.autoBackupEnabled) return;
+
+    await syncService.backupWordPressSettings();
+  } catch (error) {
+    console.warn('[Sync] Auto backup failed:', error?.message || error);
+  }
 });
 
 // 右鍵選單點擊處理
@@ -455,7 +485,113 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     });
     return true;
   }
+
+  if (message.type === 'GET_SYNC_SETTINGS') {
+    syncService.getSettings()
+      .then(settings => sendResponse({ success: true, data: settings }))
+      .catch(error => sendResponse({ success: false, error: error.message }));
+    return true;
+  }
+
+  if (message.type === 'SAVE_SYNC_SETTINGS') {
+    syncService.saveSettings(message.data || {})
+      .then(async (settings) => {
+        await refreshWordPressAutoBackupAlarm();
+        sendResponse({ success: true, data: settings });
+      })
+      .catch(error => sendResponse({ success: false, error: error.message }));
+    return true;
+  }
+
+  if (message.type === 'GOOGLE_DRIVE_CONNECT') {
+    syncService.connectGoogleDrive()
+      .then(data => sendResponse({ success: true, data }))
+      .catch(error => sendResponse({ success: false, error: error.message }));
+    return true;
+  }
+
+  if (message.type === 'GOOGLE_DRIVE_DISCONNECT') {
+    syncService.disconnectGoogleDrive()
+      .then(data => sendResponse({ success: true, data }))
+      .catch(error => sendResponse({ success: false, error: error.message }));
+    return true;
+  }
+
+  if (message.type === 'GET_SYNC_STATUS') {
+    syncService.getStatus()
+      .then(data => sendResponse({ success: true, data }))
+      .catch(error => sendResponse({ success: false, error: error.message }));
+    return true;
+  }
+
+  if (message.type === 'WORDPRESS_CONNECT') {
+    syncService.connectWordPress()
+      .then(async (data) => {
+        await refreshWordPressAutoBackupAlarm();
+        sendResponse({ success: true, data });
+      })
+      .catch(error => sendResponse({ success: false, error: error.message }));
+    return true;
+  }
+
+  if (message.type === 'WORDPRESS_DISCONNECT') {
+    syncService.disconnectWordPress()
+      .then(async (data) => {
+        await refreshWordPressAutoBackupAlarm();
+        sendResponse({ success: true, data });
+      })
+      .catch(error => sendResponse({ success: false, error: error.message }));
+    return true;
+  }
+
+  if (message.type === 'WORDPRESS_BACKUP_SETTINGS') {
+    syncService.backupWordPressSettings()
+      .then(data => sendResponse({ success: true, data }))
+      .catch(error => sendResponse({ success: false, error: error.message }));
+    return true;
+  }
+
+  if (message.type === 'WORDPRESS_RESTORE_SETTINGS') {
+    syncService.restoreWordPressSettings()
+      .then(data => sendResponse({ success: true, data }))
+      .catch(error => sendResponse({ success: false, error: error.message }));
+    return true;
+  }
 });
+
+async function refreshWordPressAutoBackupAlarm() {
+  const settings = await syncService.getSettings();
+  const enabled = settings.provider === 'wordpress' && settings.autoBackupEnabled;
+
+  if (!enabled) {
+    await chrome.alarms.clear(WORDPRESS_AUTO_BACKUP_ALARM);
+    return;
+  }
+
+  const when = getNextAlarmTimestamp(settings.autoBackupTime || '03:00');
+  await chrome.alarms.create(WORDPRESS_AUTO_BACKUP_ALARM, {
+    when,
+    periodInMinutes: 24 * 60
+  });
+}
+
+function getNextAlarmTimestamp(timeText) {
+  const [hourRaw, minuteRaw] = String(timeText || '03:00').split(':');
+  const hour = Number.parseInt(hourRaw, 10);
+  const minute = Number.parseInt(minuteRaw, 10);
+
+  const validHour = Number.isFinite(hour) && hour >= 0 && hour <= 23 ? hour : 3;
+  const validMinute = Number.isFinite(minute) && minute >= 0 && minute <= 59 ? minute : 0;
+
+  const now = new Date();
+  const next = new Date(now);
+  next.setHours(validHour, validMinute, 0, 0);
+  if (next.getTime() <= now.getTime()) {
+    next.setDate(next.getDate() + 1);
+  }
+
+  return next.getTime();
+}
 
 // ── Streaming（Port 長連線）─────────────────────────────
 chrome.runtime.onConnect.addListener(port => {
