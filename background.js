@@ -281,6 +281,19 @@ async function analyzeKnowledgeItem(itemId) {
 }
 
 // 從 AI 回應中穩健地萃取 JSON
+async function reanalyzeKnowledgeItem(itemId) {
+  const { knowledgeBase = [] } = await chrome.storage.local.get(['knowledgeBase']);
+  const idx = knowledgeBase.findIndex(k => k.id === itemId);
+  if (idx === -1) throw new Error('Knowledge item not found');
+
+  knowledgeBase[idx].status = 'processing';
+  await chrome.storage.local.set({ knowledgeBase });
+
+  analyzeKnowledgeItem(itemId).catch((error) => {
+    console.error('[知識庫] reanalyzeKnowledgeItem error:', error);
+  });
+}
+
 function extractKbJson(text) {
   // 1. 去除 markdown code fences（```json ... ``` 或 ``` ... ```）
   const stripped = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '').trim();
@@ -483,6 +496,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({ success: false, error: err.message });
       }
     });
+    return true;
+  }
+
+  if (message.type === 'REANALYZE_KNOWLEDGE') {
+    reanalyzeKnowledgeItem(message.data.itemId)
+      .then(() => sendResponse({ success: true }))
+      .catch(error => sendResponse({ success: false, error: error.message }));
     return true;
   }
 

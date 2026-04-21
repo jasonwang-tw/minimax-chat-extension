@@ -2973,6 +2973,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       + cats.map(c => `<option value="${escapeAttr(c)}" ${item.category === c ? 'selected' : ''}>${escapeHtml(c)}</option>`).join('');
 
     const LINK_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>`;
+    const REANALYZE_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2v6h-6"/><path d="M3 22v-6h6"/><path d="M20.49 9A9 9 0 0 0 6.38 5.66L3 8"/><path d="M3.51 15A9 9 0 0 0 17.62 18.34L21 16"/></svg>`;
 
     filtered.slice().reverse().forEach(item => {
       const div = document.createElement('div');
@@ -2988,6 +2989,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           <span class="kb-item-source ${item.source}">${sourceLabel}</span>
           <span class="kb-item-title" title="點擊編輯">${escapeHtml(item.title)}</span>
           ${item.url ? `<button class="kb-item-link" title="${escapeAttr(item.url)}">${LINK_SVG}</button>` : ''}
+          <button class="kb-item-reanalyze" title="重新分析" ${item.status === 'processing' ? 'disabled' : ''}>${REANALYZE_SVG}</button>
           <button class="kb-item-delete" title="刪除">
             <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
           </button>
@@ -2996,12 +2998,36 @@ document.addEventListener('DOMContentLoaded', async () => {
           <span class="kb-item-date">${formatItemDate(item.createdAt)}</span>
           <select class="item-cat-select ${item.category ? 'has-value' : ''}" title="分類">${catOptions(item)}</select>
         </div>
-        ${item.summary ? `<div class="kb-item-summary">${escapeHtml(item.summary)}</div>` : ''}
+        ${item.summary ? `<div class="kb-item-summary" title="${escapeAttr(item.summary)}">${escapeHtml(item.summary)}</div>` : ''}
         ${tagsHtml ? `<div class="kb-item-tags">${tagsHtml}</div>` : ''}
       `;
       // URL 連結
       div.querySelector('.kb-item-link')?.addEventListener('click', () => {
         if (item.url) chrome.tabs.create({ url: item.url });
+      });
+      // 重新分析
+      div.querySelector('.kb-item-reanalyze')?.addEventListener('click', async () => {
+        if (item.status === 'processing') return;
+        const idx = knowledgeBase.findIndex(k => k.id === item.id);
+        if (idx === -1) return;
+        const prevStatus = knowledgeBase[idx].status;
+        try {
+          knowledgeBase[idx].status = 'processing';
+          await chrome.storage.local.set({ knowledgeBase });
+          renderKnowledgeList();
+          pollKbProcessing();
+          const res = await chrome.runtime.sendMessage({
+            type: 'REANALYZE_KNOWLEDGE',
+            data: { itemId: item.id }
+          });
+          if (!res?.success) throw new Error(res?.error || '重新分析失敗');
+          setStatus(`已重新分析：${item.title}`, false, 2000);
+        } catch (err) {
+          knowledgeBase[idx].status = prevStatus;
+          await chrome.storage.local.set({ knowledgeBase });
+          renderKnowledgeList();
+          setStatus(`重新分析失敗：${err.message}`, true, 3000);
+        }
       });
       // 標籤點擊篩選
       div.querySelectorAll('.kb-item-tag').forEach(tagEl => {
