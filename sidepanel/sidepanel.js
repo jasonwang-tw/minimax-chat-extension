@@ -41,6 +41,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   const typingIndicator = document.getElementById('typingIndicator');
   const historyPanel = document.getElementById('historyPanel');
   const historyList = document.getElementById('historyList');
+  const currentSessionNameEl = document.getElementById('currentSessionName');
+  const renameCurrentSessionBtn = document.getElementById('renameCurrentSessionBtn');
+  const deleteCurrentSessionBtn = document.getElementById('deleteCurrentSessionBtn');
   const newSessionBtn = document.getElementById('newSessionBtn');
   const toggleHistoryBtn = document.getElementById('toggleHistory');
   const clearHistoryBtn = document.getElementById('clearHistory');
@@ -636,6 +639,57 @@ document.addEventListener('DOMContentLoaded', async () => {
   newSessionBtn.addEventListener('click', () => {
     startNewSession();
     historyPanel.classList.add('hidden');
+  });
+
+  renameCurrentSessionBtn?.addEventListener('click', async () => {
+    if (!currentSession) startNewSession();
+    const defaultName = getSessionDefaultName(currentSession);
+    const initialName = (currentSession.name || defaultName || '').trim();
+    const nextRaw = prompt('請輸入當前對話名稱', initialName);
+    if (nextRaw === null) return;
+    const nextName = nextRaw.trim();
+    const oldName = (currentSession.name || '').trim();
+    if (nextName === oldName) return;
+
+    currentSession.name = nextName;
+    const idx = sessions.findIndex(s => s.id === currentSession.id);
+    if (idx !== -1) {
+      sessions[idx].name = nextName;
+      await chrome.runtime.sendMessage({
+        type: 'RENAME_SESSION',
+        data: { sessionId: currentSession.id, name: nextName }
+      });
+    }
+    renderHistory();
+    updateCurrentSessionBar();
+  });
+
+  deleteCurrentSessionBtn?.addEventListener('click', async () => {
+    if (!currentSession) {
+      startNewSession();
+      return;
+    }
+    if (!confirm('確定要刪除當前對話嗎？刪除後會立即開啟新對話。')) return;
+
+    const deletingId = currentSession.id;
+    try {
+      if (sessions.some(s => s.id === deletingId)) {
+        await chrome.runtime.sendMessage({ type: 'DELETE_SESSION', data: { sessionId: deletingId } });
+        sessions = sessions.filter(s => s.id !== deletingId);
+      }
+
+      if (sessionSummaries[deletingId]) {
+        delete sessionSummaries[deletingId];
+        await chrome.storage.local.set({ sessionSummaries });
+      }
+
+      startNewSession();
+      renderHistory();
+      historyPanel.classList.add('hidden');
+      setStatus('已刪除當前對話', false, 1600);
+    } catch (error) {
+      setStatus(`刪除失敗：${error.message}`, true, 2500);
+    }
   });
 
   toggleHistoryBtn.addEventListener('click', () => {
@@ -1280,6 +1334,34 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (response.success) {
       sessions = response.data || [];
       renderHistory();
+      updateCurrentSessionBar();
+    }
+  }
+
+  function getSessionDefaultName(session) {
+    if (!session) return '新對話';
+    const firstUserMsg = (session.messages || []).find(m => m.role === 'user');
+    const hasImage = (session.messages || []).some(m => m.image || (m.images && m.images.length > 0));
+    const base = firstUserMsg
+      ? firstUserMsg.content.substring(0, 40) + (firstUserMsg.content.length > 40 ? '...' : '')
+      : '新對話';
+    return base + (hasImage ? ' [圖]' : '');
+  }
+
+  function getSessionDisplayName(session) {
+    if (!session) return '新對話';
+    return (session.name || getSessionDefaultName(session) || '新對話').trim() || '新對話';
+  }
+
+  function updateCurrentSessionBar() {
+    if (currentSessionNameEl) {
+      currentSessionNameEl.textContent = getSessionDisplayName(currentSession);
+    }
+    if (renameCurrentSessionBtn) {
+      renameCurrentSessionBtn.disabled = !currentSession;
+    }
+    if (deleteCurrentSessionBtn) {
+      deleteCurrentSessionBtn.disabled = !currentSession;
     }
   }
 
@@ -1288,6 +1370,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (sessions.length === 0) {
       historyList.innerHTML = '<p class="history-empty">尚無歷史紀錄</p>';
       if (batchSelectMode) exitBatchMode();
+      updateCurrentSessionBar();
       return;
     }
 
@@ -1304,6 +1387,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     if (filtered.length === 0) {
       historyList.innerHTML = `<p class="history-empty">${query ? '找不到相關對話' : '尚無歷史紀錄'}</p>`;
+      updateCurrentSessionBar();
       return;
     }
 
@@ -1419,6 +1503,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     if (batchSelectMode) updateBatchDeleteBtn();
+    updateCurrentSessionBar();
   }
 
   function startRenameSession(session, itemEl) {
@@ -1442,18 +1527,20 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
       }
       renderHistory();
+      updateCurrentSessionBar();
     };
 
     input.addEventListener('blur', commit);
     input.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
-      if (e.key === 'Escape') { input.removeEventListener('blur', commit); renderHistory(); }
+      if (e.key === 'Escape') { input.removeEventListener('blur', commit); renderHistory(); updateCurrentSessionBar(); }
     });
   }
 
   function loadSession(index) {
     currentSession = sessions[index];
     chatMessages.innerHTML = '';
+    updateCurrentSessionBar();
 
     // 還原 session 當時的 model 和 replyMode
     if (currentSession.model) {
@@ -1497,6 +1584,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     };
     chatMessages.innerHTML = '';
     emptyState.classList.remove('hidden');
+    updateCurrentSessionBar();
   }
 
   // ── 發送訊息 ────────────────────────────────────────────

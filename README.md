@@ -1,5 +1,19 @@
 # MiniMax AI Chat Extension
 
+## Latest UI Update (2026-04-21)
+
+This update adds explicit current-session controls directly in the side panel:
+
+- A new **current session bar** under the header that shows the active session name
+- A **rename current session** button next to the current session name
+- A new **delete current session** button in the right toolbar
+- Deleting the current session now **immediately creates and switches to a new session**
+- Session name display now stays in sync when:
+  - creating a new session
+  - loading a session from history
+  - renaming a session
+  - deleting the active session
+
 ## Latest Sync Update
 
 This branch delivers the WordPress-based sync flow with expanded backup scope and admin/debug hardening.

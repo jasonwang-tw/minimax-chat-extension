@@ -223,6 +223,9 @@ async function analyzeKnowledgeItem(itemId) {
     const { knowledgeBase = [] } = await chrome.storage.local.get(['knowledgeBase']);
     const item = knowledgeBase.find(kb => kb.id === itemId);
     if (!item) return;
+    const existingTagPool = [...new Set(
+      knowledgeBase.flatMap(kb => Array.isArray(kb.tags) ? kb.tags : [])
+    )].slice(0, 60);
 
     const { apiKey } = await chrome.storage.sync.get(['apiKey']);
     if (!apiKey) {
@@ -247,7 +250,11 @@ async function analyzeKnowledgeItem(itemId) {
           },
           {
             role: 'user',
-            content: `請分析以下內容並回覆 JSON：\n\n${snippet}`
+            content: `請為以下內容產生摘要與標籤，請回傳 JSON。
+既有可用標籤（請優先沿用；不適合再新增）：${existingTagPool.length ? existingTagPool.join('、') : '（目前無既有標籤）'}
+
+內容如下：
+${snippet}`
           }
         ],
         max_tokens: 500
@@ -265,7 +272,12 @@ async function analyzeKnowledgeItem(itemId) {
 
     if (parsed) {
       kb2[idx].summary = typeof parsed.summary === 'string' ? parsed.summary : '';
-      kb2[idx].tags = Array.isArray(parsed.tags) ? parsed.tags.slice(0, 5) : [];
+      const currentTags = Array.isArray(kb2[idx].tags) ? kb2[idx].tags : [];
+      const suggestedTags = Array.isArray(parsed.tags) ? parsed.tags : [];
+      const existingTags = [...new Set(
+        kb2.flatMap(kb => Array.isArray(kb.tags) ? kb.tags : [])
+      )];
+      kb2[idx].tags = resolveKnowledgeTags(suggestedTags, existingTags, currentTags, 5);
     }
     kb2[idx].status = 'ready';
     await chrome.storage.local.set({ knowledgeBase: kb2 });
@@ -292,6 +304,69 @@ async function reanalyzeKnowledgeItem(itemId) {
   analyzeKnowledgeItem(itemId).catch((error) => {
     console.error('[知識庫] reanalyzeKnowledgeItem error:', error);
   });
+}
+
+function cleanKnowledgeTag(tag) {
+  return String(tag || '').trim().replace(/\s+/g, ' ');
+}
+
+function normalizeKnowledgeTag(tag) {
+  return cleanKnowledgeTag(tag).toLowerCase();
+}
+
+function normalizeKnowledgeTagCompact(tag) {
+  return normalizeKnowledgeTag(tag).replace(/[\s_\-./]+/g, '');
+}
+
+function resolveKnowledgeTags(suggestedTags, existingTags, fallbackTags = [], limit = 5) {
+  const existing = [];
+  const existingByNorm = new Map();
+  const existingByCompact = new Map();
+
+  (Array.isArray(existingTags) ? existingTags : []).forEach(raw => {
+    const clean = cleanKnowledgeTag(raw);
+    if (!clean) return;
+    const norm = normalizeKnowledgeTag(clean);
+    const compact = normalizeKnowledgeTagCompact(clean);
+    if (!existingByNorm.has(norm)) existingByNorm.set(norm, clean);
+    if (!existingByCompact.has(compact)) existingByCompact.set(compact, clean);
+    existing.push(clean);
+  });
+
+  const tryMatchExisting = (raw) => {
+    const clean = cleanKnowledgeTag(raw);
+    if (!clean) return '';
+    const norm = normalizeKnowledgeTag(clean);
+    const compact = normalizeKnowledgeTagCompact(clean);
+    if (existingByNorm.has(norm)) return existingByNorm.get(norm);
+    if (existingByCompact.has(compact)) return existingByCompact.get(compact);
+    if (norm.length >= 2) {
+      const includeHit = existing.find(t => {
+        const tNorm = normalizeKnowledgeTag(t);
+        return tNorm.includes(norm) || norm.includes(tNorm);
+      });
+      if (includeHit) return includeHit;
+    }
+    return clean;
+  };
+
+  const resolved = [];
+  const seenNorm = new Set();
+  const pushTag = (raw) => {
+    if (resolved.length >= limit) return;
+    const matched = tryMatchExisting(raw);
+    if (!matched) return;
+    const norm = normalizeKnowledgeTag(matched);
+    if (!norm || seenNorm.has(norm)) return;
+    seenNorm.add(norm);
+    resolved.push(matched);
+  };
+
+  const source = (Array.isArray(suggestedTags) && suggestedTags.length > 0)
+    ? suggestedTags
+    : (Array.isArray(fallbackTags) ? fallbackTags : []);
+  source.forEach(pushTag);
+  return resolved.slice(0, limit);
 }
 
 function extractKbJson(text) {
