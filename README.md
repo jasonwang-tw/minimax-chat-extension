@@ -14,6 +14,22 @@ This update adds explicit current-session controls directly in the side panel:
   - renaming a session
   - deleting the active session
 
+## Latest Modal Recovery Update (2026-04-21)
+
+Restored and completed modal features for Long-term Memory / Vocabulary / Knowledge Base:
+
+- Restored **Long-term Memory search** in the memory modal
+- Restored **Knowledge Base search** (title / summary / tags / content / URL)
+- Restored **Knowledge tag management**:
+  - Added `管理標籤` button next to `管理分類`
+  - Added tag manager panel to remove tags globally from all KB items
+  - Tag counts are shown in manager list
+- Restored **Vocabulary language filter** (dynamic options based on stored languages)
+- Kept existing UI behavior:
+  - Knowledge analysis re-run button
+  - Summary hover to view full text
+  - Knowledge tag filter bar horizontal scroll layout
+
 ## Latest Sync Update
 
 This branch delivers the WordPress-based sync flow with expanded backup scope and admin/debug hardening.

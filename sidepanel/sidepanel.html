@@ -340,6 +340,9 @@
         <select id="memoryCategoryFilter" class="modal-filter-select"></select>
         <button id="manageMemoryCatBtn" class="btn-manage-cat">管理分類</button>
       </div>
+      <div class="modal-search-bar">
+        <input type="text" id="memorySearchInput" class="modal-search-input" placeholder="搜尋記憶內容...">
+      </div>
       <div id="memoryCatManager" class="category-manager hidden">
         <div class="cat-add-row">
           <input type="text" id="memoryNewCatInput" class="cat-add-input" placeholder="新增分類名稱...">
@@ -365,7 +368,8 @@
         </button>
       </div>
       <p class="memory-modal-hint">在任意網頁反白文字後點右鍵「加入單字簿」即可新增。</p>
-      <div class="modal-filter-bar">
+      <div class="modal-filter-bar modal-filter-bar-vocab">
+        <select id="vocabularyLangFilter" class="modal-filter-select"></select>
         <select id="vocabularyCategoryFilter" class="modal-filter-select"></select>
         <button id="manageVocabularyCatBtn" class="btn-manage-cat">管理分類</button>
       </div>
@@ -397,6 +401,10 @@
       <div class="modal-filter-bar">
         <select id="knowledgeCategoryFilter" class="modal-filter-select"></select>
         <button id="manageKnowledgeCatBtn" class="btn-manage-cat">管理分類</button>
+        <button id="manageKnowledgeTagBtn" class="btn-manage-cat">管理標籤</button>
+      </div>
+      <div class="modal-search-bar">
+        <input type="text" id="knowledgeSearchInput" class="modal-search-input" placeholder="搜尋標題、摘要、標籤...">
       </div>
       <div id="knowledgeCatManager" class="category-manager hidden">
         <div class="cat-add-row">
@@ -404,6 +412,12 @@
           <button id="knowledgeAddCatBtn" class="btn-cat-add">+</button>
         </div>
         <div id="knowledgeCatList" class="cat-tag-list"></div>
+      </div>
+      <div id="knowledgeTagManager" class="category-manager hidden">
+        <div class="cat-add-row">
+          <span class="cat-empty-hint">移除標籤會從所有知識項目一併移除</span>
+        </div>
+        <div id="knowledgeTagList" class="cat-tag-list"></div>
       </div>
       <div id="knowledgeTagFilters" class="kb-tag-filters hidden"></div>
       <div id="knowledgeList" class="memory-list"></div>
