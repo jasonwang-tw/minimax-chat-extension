@@ -30,6 +30,22 @@ Restored and completed modal features for Long-term Memory / Vocabulary / Knowle
   - Summary hover to view full text
   - Knowledge tag filter bar horizontal scroll layout
 
+## Latest Session Workflow Update (2026-04-21)
+
+This update improves side toolbar workflow and session post-processing:
+
+- Moved **delete current session** button to the last position in the right toolbar
+- Added **session to vocabulary** button:
+  - Extracts vocabulary from current session via AI
+  - Deduplicates against existing vocabulary entries
+  - Saves new entries into vocabulary storage
+- Added persistent **chat-end process status messages** when:
+  - session-to-vocabulary finishes
+  - summarize-now finishes
+- Updated assistant message container width to full available area (`max-width: 100%`)
+- Swapped modal bar order for Memory / Knowledge:
+  - search bar above filter bar
+
 ## Latest Sync Update
 
 This branch delivers the WordPress-based sync flow with expanded backup scope and admin/debug hardening.
@@ -67,7 +83,7 @@ Quick deployment notes:
 
 ## 版本
 
-**v1.12.0** (2026-04-14)
+**v1.13.0** (2026-04-21)
 
 ## 功能特色
 
@@ -160,6 +176,16 @@ npm run build:css
 - **TailwindCSS + SCSS**：樣式設計
 
 ## Changelog
+
+## [1.13.0] - 2026-04-21
+### Added
+- **當前對話整理為單字簿**：側邊工具列新增按鈕，會從當前 Session 萃取單字清單、去重後存入單字簿
+- **流程完成訊息寫入聊天區**：整理單字與立即總結完成後，會在 chat 末端保留狀態訊息（不只底部短暫提示）
+
+### Changed
+- **刪除當前對話按鈕位置**：`deleteCurrentSessionBtn` 移到右側工具列最後一個
+- **記憶/知識庫 Modal 欄位順序**：`modal-search-bar` 與 `modal-filter-bar` 位置對調（搜尋列在上）
+- **Assistant 訊息寬度**：`.message.message-assistant` 改為 `max-width: 100%`
 
 ## [1.12.0] - 2026-04-14
 ### Added

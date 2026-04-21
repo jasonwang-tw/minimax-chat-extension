@@ -20,6 +20,7 @@ let knowledgeTagFilter = '';       // 知識庫標籤篩選
 let knowledgeSearchQuery = '';     // 知識庫關鍵字篩選
 let sessionSummaries = {};         // { [sessionId]: [{ id, text, createdAt, addedToMemory }] }
 let isSummarizing = false;         // 防止重複總結
+let isSessionToVocabularyRunning = false; // 防止重複整理單字
 let inputHistory = [];             // 輸入歷史（最多 10 則）
 let inputHistoryIndex = -1;        // 當前瀏覽的歷史索引（-1 = 非瀏覽狀態）
 let inputHistorySaved = '';        // 暫存使用者正在輸入的文字
@@ -133,6 +134,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const knowledgeTagFilters = document.getElementById('knowledgeTagFilters');
   // 總結工具列元素
   const summarizeBtn = document.getElementById('summarizeBtn');
+  const sessionToVocabularyBtn = document.getElementById('sessionToVocabularyBtn');
   const manageSummaryBtn = document.getElementById('manageSummaryBtn');
   const summaryModal = document.getElementById('summaryModal');
   const summaryModalOverlay = document.getElementById('summaryModalOverlay');
@@ -492,6 +494,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Summary Toolbar
   summarizeBtn.addEventListener('click', handleSummarize);
+  sessionToVocabularyBtn.addEventListener('click', handleSessionToVocabulary);
   manageSummaryBtn.addEventListener('click', openSummaryModal);
   summaryModalClose.addEventListener('click', closeSummaryModal);
   summaryModalOverlay.addEventListener('click', closeSummaryModal);
@@ -1383,6 +1386,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (deleteCurrentSessionBtn) {
       deleteCurrentSessionBtn.disabled = !currentSession;
     }
+    if (sessionToVocabularyBtn) {
+      sessionToVocabularyBtn.disabled = !currentSession;
+    }
   }
 
   function renderHistory() {
@@ -1889,6 +1895,17 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (duration > 0) setTimeout(() => { if (statusNoticeEl) { statusNoticeEl.remove(); statusNoticeEl = null; } }, duration);
   }
   function clearStatus() { setStatus(''); }
+
+  // 將流程結果寫入 chat 末端（非短暫底部提示）
+  function addProcessStatusMessage(text, isError = false) {
+    if (!text) return;
+    const div = document.createElement('div');
+    div.className = 'message message-process-status' + (isError ? ' error' : '');
+    div.innerHTML = `<div class="message-content">${escapeHtml(text).replace(/\n/g, '<br>')}</div>`;
+    chatMessages.appendChild(div);
+    emptyState.classList.add('hidden');
+    scrollToBottom();
+  }
 
   async function saveCurrentSession() {
     if (!currentSession || currentSession.messages.length === 0) return;
@@ -2807,6 +2824,155 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   // ── Summary Toolbar ──────────────────────────────────────────
+  function detectVocabularyLang(word) {
+    if (/[\u4e00-\u9fff]/.test(word)) return 'zh';
+    if (/[\u3040-\u30ff]/.test(word)) return 'ja';
+    if (/^[\x00-\x7F]+$/.test(word)) return 'en';
+    return 'other';
+  }
+
+  function normalizeVocabularyLang(lang, word) {
+    const raw = String(lang || '').trim().toLowerCase();
+    if (!raw) return detectVocabularyLang(word);
+    if (['en', 'zh', 'ja', 'ko', 'vi', 'th', 'ar', 'other'].includes(raw)) return raw;
+    if (raw.startsWith('zh')) return 'zh';
+    if (raw.startsWith('ja')) return 'ja';
+    if (raw.startsWith('ko')) return 'ko';
+    if (raw.startsWith('vi')) return 'vi';
+    if (raw.startsWith('th')) return 'th';
+    if (raw.startsWith('ar')) return 'ar';
+    if (raw.startsWith('en')) return 'en';
+    return detectVocabularyLang(word);
+  }
+
+  function parseVocabularyExtractionResult(text) {
+    const fenceMatch = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+    const source = (fenceMatch?.[1] || text || '').trim();
+    let jsonText = source;
+    if (!(jsonText.startsWith('[') && jsonText.endsWith(']'))) {
+      const start = jsonText.indexOf('[');
+      const end = jsonText.lastIndexOf(']');
+      if (start !== -1 && end > start) {
+        jsonText = jsonText.slice(start, end + 1);
+      }
+    }
+    const parsed = JSON.parse(jsonText);
+    if (!Array.isArray(parsed)) throw new Error('AI 回傳格式不是陣列');
+    return parsed
+      .map(item => {
+        if (typeof item === 'string') {
+          return { word: item.trim(), lang: '' };
+        }
+        if (!item || typeof item !== 'object') return null;
+        const word = String(item.word || item.term || item.vocab || '').trim();
+        const lang = String(item.lang || item.language || '').trim();
+        return { word, lang };
+      })
+      .filter(item => item && item.word);
+  }
+
+  async function handleSessionToVocabulary() {
+    if (isSessionToVocabularyRunning) return;
+    if (!currentSession || currentSession.messages.length === 0) {
+      setStatus('目前沒有可整理的對話內容', false, 2500);
+      return;
+    }
+    isSessionToVocabularyRunning = true;
+    sessionToVocabularyBtn.disabled = true;
+    setStatus('整理單字中...');
+
+    const convText = currentSession.messages.map(m => {
+      const role = m.role === 'user' ? '用戶' : 'AI';
+      const content = typeof m.content === 'string' ? m.content : '[多媒體內容]';
+      return `${role}：${content}`;
+    }).join('\n\n');
+
+    const prompt = `請從以下對話中擷取「值得收藏到單字簿」的詞彙或短語。\n要求：\n1. 僅輸出 JSON 陣列，不要任何額外文字或 markdown。\n2. 每個元素格式：{"word":"詞彙","lang":"en|zh|ja|ko|vi|th|ar|other"}。\n3. 同義或重複項目只保留一個。\n4. 最多輸出 30 個項目。\n\n---\n${convText}`;
+
+    const port = chrome.runtime.connect({ name: 'chat-stream' });
+    let rawContent = '';
+
+    port.onMessage.addListener(async (msg) => {
+      if (msg.type === 'chunk') {
+        rawContent = msg.full || '';
+        return;
+      }
+      if (msg.type === 'done') {
+        try {
+          const reply = (msg.reply || rawContent || '').trim();
+          const parsedItems = parseVocabularyExtractionResult(reply);
+          const { vocabulary: current = [] } = await chrome.storage.local.get(['vocabulary']);
+          const now = Date.now();
+          const existingWords = new Set(current.map(v => String(v.word || '').trim().toLowerCase()).filter(Boolean));
+          let added = 0;
+
+          parsedItems.forEach((item, idx) => {
+            const word = item.word.trim();
+            if (!word || word.length > 120) return;
+            const key = word.toLowerCase();
+            if (existingWords.has(key)) return;
+            existingWords.add(key);
+            current.push({
+              id: `vocab_${now}_${idx}`,
+              word,
+              definition: '',
+              category: '',
+              lang: normalizeVocabularyLang(item.lang, word),
+              createdAt: Date.now()
+            });
+            added++;
+          });
+
+          if (added > 0) {
+            await chrome.storage.local.set({ vocabulary: current });
+            if (vocabularyModal && !vocabularyModal.classList.contains('hidden')) {
+              renderVocabularyList(current);
+            }
+            setStatus(`已加入 ${added} 個單字到單字簿`, false, 2600);
+            addProcessStatusMessage(`✅ 單字整理並存入完畢（新增 ${added} 筆）`);
+          } else {
+            setStatus('沒有可新增的單字（可能都已存在）', false, 2600);
+            addProcessStatusMessage('✅ 單字整理完成，沒有新增項目（可能都已存在）');
+          }
+        } catch (error) {
+          setStatus(`整理單字失敗: ${error.message}`, true, 3200);
+          addProcessStatusMessage(`❌ 整理單字失敗：${error.message}`, true);
+        }
+        isSessionToVocabularyRunning = false;
+        sessionToVocabularyBtn.disabled = !currentSession;
+        port.disconnect();
+        return;
+      }
+      if (msg.type === 'error') {
+        setStatus(`整理單字失敗: ${msg.message}`, true, 3200);
+        addProcessStatusMessage(`❌ 整理單字失敗：${msg.message}`, true);
+        isSessionToVocabularyRunning = false;
+        sessionToVocabularyBtn.disabled = !currentSession;
+        port.disconnect();
+      }
+    });
+
+    port.onDisconnect.addListener(() => {
+      if (!isSessionToVocabularyRunning) return;
+      isSessionToVocabularyRunning = false;
+      sessionToVocabularyBtn.disabled = !currentSession;
+      setStatus('連線中斷，請重試', true, 3000);
+    });
+
+    port.postMessage({
+      type: 'STREAM_MESSAGE',
+      data: {
+        message: prompt,
+        history: [],
+        images: [],
+        translateConfig: null,
+        model: currentModel,
+        systemPrompt: '你是精準的語言學習助手，擅長從對話萃取高價值詞彙，並嚴格輸出指定 JSON 格式。',
+        memoryContext: ''
+      }
+    });
+  }
+
   async function handleSummarize() {
     if (isSummarizing) return;
     if (!currentSession || currentSession.messages.length === 0) {
@@ -2871,11 +3037,13 @@ document.addEventListener('DOMContentLoaded', async () => {
         isSummarizing = false;
         summarizeBtn.disabled = false;
         setStatus('總結已儲存', false, 2000);
+        addProcessStatusMessage('✅ 當前對話總結整理並存入完畢');
         return;
       }
       if (msg.type === 'error') {
         liveDiv.remove();
         setStatus(`總結失敗: ${msg.message}`, true, 3000);
+        addProcessStatusMessage(`❌ 總結失敗：${msg.message}`, true);
         port.disconnect();
         isSummarizing = false;
         summarizeBtn.disabled = false;
@@ -2886,6 +3054,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (!isSummarizing) return;
       liveDiv.remove();
       setStatus('連線中斷，請重試', true, 3000);
+      addProcessStatusMessage('❌ 總結連線中斷，請重試', true);
       isSummarizing = false;
       summarizeBtn.disabled = false;
     });

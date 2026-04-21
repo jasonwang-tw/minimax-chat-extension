@@ -344,6 +344,7 @@ body {
 .message.message-assistant {
   align-self: flex-start;
   align-items: flex-start;
+  max-width: 100%;
 }
 
 .message.message-assistant .message-content {
@@ -363,6 +364,26 @@ body {
   background: rgba(239, 68, 68, 0.1);
   color: var(--danger);
   border-radius: 24px 24px 24px 6px;
+}
+
+.message.message-process-status {
+  align-self: center;
+  max-width: 92%;
+}
+
+.message.message-process-status .message-content {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  padding: 6px 12px;
+}
+
+.message.message-process-status.error .message-content {
+  background: rgba(239, 68, 68, 0.1);
+  border-color: rgba(239, 68, 68, 0.35);
+  color: var(--danger);
 }
 
 .message-content {
