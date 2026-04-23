@@ -1,10 +1,89 @@
 # MiniMax AI Chat Extension
 
+## Latest UI Update (2026-04-21)
+
+This update adds explicit current-session controls directly in the side panel:
+
+- A new **current session bar** under the header that shows the active session name
+- A **rename current session** button next to the current session name
+- A new **delete current session** button in the right toolbar
+- Deleting the current session now **immediately creates and switches to a new session**
+- Session name display now stays in sync when:
+  - creating a new session
+  - loading a session from history
+  - renaming a session
+  - deleting the active session
+
+## Latest Modal Recovery Update (2026-04-21)
+
+Restored and completed modal features for Long-term Memory / Vocabulary / Knowledge Base:
+
+- Restored **Long-term Memory search** in the memory modal
+- Restored **Knowledge Base search** (title / summary / tags / content / URL)
+- Restored **Knowledge tag management**:
+  - Added `管理標籤` button next to `管理分類`
+  - Added tag manager panel to remove tags globally from all KB items
+  - Tag counts are shown in manager list
+- Restored **Vocabulary language filter** (dynamic options based on stored languages)
+- Kept existing UI behavior:
+  - Knowledge analysis re-run button
+  - Summary hover to view full text
+  - Knowledge tag filter bar horizontal scroll layout
+
+## Latest Session Workflow Update (2026-04-21)
+
+This update improves side toolbar workflow and session post-processing:
+
+- Moved **delete current session** button to the last position in the right toolbar
+- Added **session to vocabulary** button:
+  - Extracts vocabulary from current session via AI
+  - Deduplicates against existing vocabulary entries
+  - Saves new entries into vocabulary storage
+- Added persistent **chat-end process status messages** when:
+  - session-to-vocabulary finishes
+  - summarize-now finishes
+- Updated assistant message container width to full available area (`max-width: 100%`)
+- Swapped modal bar order for Memory / Knowledge:
+  - search bar above filter bar
+
+## Latest Sync Update
+
+This branch delivers the WordPress-based sync flow with expanded backup scope and admin/debug hardening.
+
+What is included:
+- WordPress fallback provider for extension sync
+- External WordPress login flow using `chrome.identity.launchWebAuthFlow`
+- Manual `backup settings` and `restore settings` actions in the sync settings page
+- Daily auto-backup schedule (`auto backup time`)
+- Backup scope expanded to settings + memories + knowledge base + vocabulary + chat sessions
+- Settings page navigation changed to sticky left sidebar
+- Deployable WordPress plugin scaffold under `wordpress/minimax-sync/`
+- Plugin-side debug log file for sync troubleshooting: `wp-content/plugins/minimax-sync/minimax-sync-debug.log`
+
+MVP scope:
+- Uses WordPress sync as the primary active path
+- Backs up settings + `memories` + `knowledgeBase` + `vocabulary` + `chatSessions` + `sessionSummaries`
+- Google Drive sync UI is currently hidden in settings
+
+Main files:
+- `sync/sync-service.js`
+- `sync/providers/wordpress-provider.js`
+- `sync/settings-backup.js`
+- `wordpress/minimax-sync/minimax-sync.php`
+- `options/options.html`
+- `options/options.js`
+
+Quick deployment notes:
+1. Copy `wordpress/minimax-sync` into `wp-content/plugins/`
+2. Activate `MiniMax Sync Bridge` in WordPress
+3. Enable WordPress user registration if self-service signup is needed
+4. Reload the Chrome extension and test login from the `同步` page
+
 串接 MiniMax + Gemini Vision API 的 Chrome 擴充功能，支援側邊欄對話、區域截圖、OCR 文字辨識、翻譯、TTS 語音輸出、歷史紀錄管理。
 
 ## 版本
 
-**v1.11.4** (2026-04-13)
+**v1.13.0** (2026-04-21)
 
 ## 功能特色
 
@@ -97,6 +176,26 @@ npm run build:css
 - **TailwindCSS + SCSS**：樣式設計
 
 ## Changelog
+
+## [1.13.0] - 2026-04-21
+### Added
+- **當前對話整理為單字簿**：側邊工具列新增按鈕，會從當前 Session 萃取單字清單、去重後存入單字簿
+- **流程完成訊息寫入聊天區**：整理單字與立即總結完成後，會在 chat 末端保留狀態訊息（不只底部短暫提示）
+
+### Changed
+- **刪除當前對話按鈕位置**：`deleteCurrentSessionBtn` 移到右側工具列最後一個
+- **記憶/知識庫 Modal 欄位順序**：`modal-search-bar` 與 `modal-filter-bar` 位置對調（搜尋列在上）
+- **Assistant 訊息寬度**：`.message.message-assistant` 改為 `max-width: 100%`
+
+## [1.12.0] - 2026-04-14
+### Added
+- **WordPress 自動備份時間**：同步設定新增每日自動備份與時間欄位，背景以 alarm 排程執行
+- **備份範圍擴大**：納入長期記憶（memories）、知識庫（knowledgeBase）、單字簿（vocabulary）、Session（chatSessions / sessionSummaries）
+- **外掛除錯強化**：外掛後台新增「顯示日誌」彈窗，並支援 log fallback 到 uploads 目錄
+
+### Changed
+- **設定頁導覽改版**：頂部導覽改為左側 Sidebar，並支援固定置頂與長內容獨立滾動
+- **同步入口調整**：Google Drive 同步 UI 暫時隱藏，WordPress 作為主要同步路徑
 
 ## [1.11.4] - 2026-04-13
 ### Fixed

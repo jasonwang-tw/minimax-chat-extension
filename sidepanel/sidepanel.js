@@ -9,14 +9,18 @@ let replyModes = [];          // 從 storage 載入的回覆模式
 let historySearchQuery = '';  // 歷史紀錄搜尋關鍵字
 let memories = [];            // 全域長期記憶條目
 let memoryCategoryFilter = '';     // 長期記憶分類篩選
+let memorySearchQuery = '';        // 長期記憶關鍵字篩選
 let vocabularyCategoryFilter = ''; // 單字簿分類篩選
+let vocabularyLangFilter = '';     // 單字簿語言篩選
 let knowledgeBase = [];            // 全域知識庫條目
 let selectedKnowledge = [];        // 本次訊息已選取的知識庫條目
 let kbPaletteIndex = -1;           // @ palette 鍵盤游標
 let knowledgeCategoryFilter = '';  // 知識庫分類篩選
 let knowledgeTagFilter = '';       // 知識庫標籤篩選
+let knowledgeSearchQuery = '';     // 知識庫關鍵字篩選
 let sessionSummaries = {};         // { [sessionId]: [{ id, text, createdAt, addedToMemory }] }
 let isSummarizing = false;         // 防止重複總結
+let isSessionToVocabularyRunning = false; // 防止重複整理單字
 let inputHistory = [];             // 輸入歷史（最多 10 則）
 let inputHistoryIndex = -1;        // 當前瀏覽的歷史索引（-1 = 非瀏覽狀態）
 let inputHistorySaved = '';        // 暫存使用者正在輸入的文字
@@ -41,6 +45,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   const typingIndicator = document.getElementById('typingIndicator');
   const historyPanel = document.getElementById('historyPanel');
   const historyList = document.getElementById('historyList');
+  const currentSessionNameEl = document.getElementById('currentSessionName');
+  const renameCurrentSessionBtn = document.getElementById('renameCurrentSessionBtn');
+  const deleteCurrentSessionBtn = document.getElementById('deleteCurrentSessionBtn');
   const newSessionBtn = document.getElementById('newSessionBtn');
   const toggleHistoryBtn = document.getElementById('toggleHistory');
   const clearHistoryBtn = document.getElementById('clearHistory');
@@ -95,12 +102,14 @@ document.addEventListener('DOMContentLoaded', async () => {
   const memoryModalOverlay = document.getElementById('memoryModalOverlay');
   const memoryModalClose = document.getElementById('memoryModalClose');
   const memoryList = document.getElementById('memoryList');
+  const memorySearchInput = document.getElementById('memorySearchInput');
   const memoryClearAllBtn = document.getElementById('memoryClearAllBtn');
   const openMemoryBtn = document.getElementById('openMemoryBtn');
   const vocabularyModal = document.getElementById('vocabularyModal');
   const vocabularyModalOverlay = document.getElementById('vocabularyModalOverlay');
   const vocabularyModalClose = document.getElementById('vocabularyModalClose');
   const vocabularyList = document.getElementById('vocabularyList');
+  const vocabularyLangFilterEl = document.getElementById('vocabularyLangFilter');
   const vocabularyClearAllBtn = document.getElementById('vocabularyClearAllBtn');
   const openVocabularyBtn = document.getElementById('openVocabularyBtn');
   // 知識庫元素
@@ -112,15 +121,20 @@ document.addEventListener('DOMContentLoaded', async () => {
   const knowledgeModalClose = document.getElementById('knowledgeModalClose');
   const knowledgeList = document.getElementById('knowledgeList');
   const knowledgeClearAllBtn = document.getElementById('knowledgeClearAllBtn');
+  const knowledgeSearchInput = document.getElementById('knowledgeSearchInput');
   const knowledgeCategoryFilterEl = document.getElementById('knowledgeCategoryFilter');
   const manageKnowledgeCatBtn = document.getElementById('manageKnowledgeCatBtn');
+  const manageKnowledgeTagBtn = document.getElementById('manageKnowledgeTagBtn');
   const knowledgeCatManager = document.getElementById('knowledgeCatManager');
+  const knowledgeTagManager = document.getElementById('knowledgeTagManager');
   const knowledgeNewCatInput = document.getElementById('knowledgeNewCatInput');
   const knowledgeAddCatBtn = document.getElementById('knowledgeAddCatBtn');
   const knowledgeCatList = document.getElementById('knowledgeCatList');
+  const knowledgeTagList = document.getElementById('knowledgeTagList');
   const knowledgeTagFilters = document.getElementById('knowledgeTagFilters');
   // 總結工具列元素
   const summarizeBtn = document.getElementById('summarizeBtn');
+  const sessionToVocabularyBtn = document.getElementById('sessionToVocabularyBtn');
   const manageSummaryBtn = document.getElementById('manageSummaryBtn');
   const summaryModal = document.getElementById('summaryModal');
   const summaryModalOverlay = document.getElementById('summaryModalOverlay');
@@ -230,6 +244,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         knowledgeBase = changes.knowledgeBase.newValue || [];
         if (knowledgeModal && !knowledgeModal.classList.contains('hidden')) {
           renderKnowledgeTagFilters();
+          renderKnowledgeTagManager();
           renderKnowledgeList();
         }
       }
@@ -435,6 +450,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   openMemoryBtn.addEventListener('click', openMemoryModal);
   memoryModalClose.addEventListener('click', closeMemoryModal);
   memoryModalOverlay.addEventListener('click', closeMemoryModal);
+  memorySearchInput.addEventListener('input', () => {
+    memorySearchQuery = memorySearchInput.value.trim();
+    renderMemoryList();
+  });
 
   // Vocabulary Modal
   openVocabularyBtn.addEventListener('click', openVocabularyModal);
@@ -459,16 +478,23 @@ document.addEventListener('DOMContentLoaded', async () => {
   openKnowledgeBtn.addEventListener('click', openKnowledgeModal);
   knowledgeModalClose.addEventListener('click', closeKnowledgeModal);
   knowledgeModalOverlay.addEventListener('click', closeKnowledgeModal);
+  knowledgeSearchInput.addEventListener('input', () => {
+    knowledgeSearchQuery = knowledgeSearchInput.value.trim();
+    renderKnowledgeList();
+  });
   knowledgeClearAllBtn.addEventListener('click', async () => {
     if (confirm('確定要清除所有知識庫內容？')) {
       knowledgeBase = [];
       await chrome.storage.local.set({ knowledgeBase: [] });
+      renderKnowledgeTagFilters();
+      renderKnowledgeTagManager();
       renderKnowledgeList();
     }
   });
 
   // Summary Toolbar
   summarizeBtn.addEventListener('click', handleSummarize);
+  sessionToVocabularyBtn.addEventListener('click', handleSessionToVocabulary);
   manageSummaryBtn.addEventListener('click', openSummaryModal);
   summaryModalClose.addEventListener('click', closeSummaryModal);
   summaryModalOverlay.addEventListener('click', closeSummaryModal);
@@ -636,6 +662,57 @@ document.addEventListener('DOMContentLoaded', async () => {
   newSessionBtn.addEventListener('click', () => {
     startNewSession();
     historyPanel.classList.add('hidden');
+  });
+
+  renameCurrentSessionBtn?.addEventListener('click', async () => {
+    if (!currentSession) startNewSession();
+    const defaultName = getSessionDefaultName(currentSession);
+    const initialName = (currentSession.name || defaultName || '').trim();
+    const nextRaw = prompt('請輸入當前對話名稱', initialName);
+    if (nextRaw === null) return;
+    const nextName = nextRaw.trim();
+    const oldName = (currentSession.name || '').trim();
+    if (nextName === oldName) return;
+
+    currentSession.name = nextName;
+    const idx = sessions.findIndex(s => s.id === currentSession.id);
+    if (idx !== -1) {
+      sessions[idx].name = nextName;
+      await chrome.runtime.sendMessage({
+        type: 'RENAME_SESSION',
+        data: { sessionId: currentSession.id, name: nextName }
+      });
+    }
+    renderHistory();
+    updateCurrentSessionBar();
+  });
+
+  deleteCurrentSessionBtn?.addEventListener('click', async () => {
+    if (!currentSession) {
+      startNewSession();
+      return;
+    }
+    if (!confirm('確定要刪除當前對話嗎？刪除後會立即開啟新對話。')) return;
+
+    const deletingId = currentSession.id;
+    try {
+      if (sessions.some(s => s.id === deletingId)) {
+        await chrome.runtime.sendMessage({ type: 'DELETE_SESSION', data: { sessionId: deletingId } });
+        sessions = sessions.filter(s => s.id !== deletingId);
+      }
+
+      if (sessionSummaries[deletingId]) {
+        delete sessionSummaries[deletingId];
+        await chrome.storage.local.set({ sessionSummaries });
+      }
+
+      startNewSession();
+      renderHistory();
+      historyPanel.classList.add('hidden');
+      setStatus('已刪除當前對話', false, 1600);
+    } catch (error) {
+      setStatus(`刪除失敗：${error.message}`, true, 2500);
+    }
   });
 
   toggleHistoryBtn.addEventListener('click', () => {
@@ -1280,6 +1357,37 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (response.success) {
       sessions = response.data || [];
       renderHistory();
+      updateCurrentSessionBar();
+    }
+  }
+
+  function getSessionDefaultName(session) {
+    if (!session) return '新對話';
+    const firstUserMsg = (session.messages || []).find(m => m.role === 'user');
+    const hasImage = (session.messages || []).some(m => m.image || (m.images && m.images.length > 0));
+    const base = firstUserMsg
+      ? firstUserMsg.content.substring(0, 40) + (firstUserMsg.content.length > 40 ? '...' : '')
+      : '新對話';
+    return base + (hasImage ? ' [圖]' : '');
+  }
+
+  function getSessionDisplayName(session) {
+    if (!session) return '新對話';
+    return (session.name || getSessionDefaultName(session) || '新對話').trim() || '新對話';
+  }
+
+  function updateCurrentSessionBar() {
+    if (currentSessionNameEl) {
+      currentSessionNameEl.textContent = getSessionDisplayName(currentSession);
+    }
+    if (renameCurrentSessionBtn) {
+      renameCurrentSessionBtn.disabled = !currentSession;
+    }
+    if (deleteCurrentSessionBtn) {
+      deleteCurrentSessionBtn.disabled = !currentSession;
+    }
+    if (sessionToVocabularyBtn) {
+      sessionToVocabularyBtn.disabled = !currentSession;
     }
   }
 
@@ -1288,6 +1396,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (sessions.length === 0) {
       historyList.innerHTML = '<p class="history-empty">尚無歷史紀錄</p>';
       if (batchSelectMode) exitBatchMode();
+      updateCurrentSessionBar();
       return;
     }
 
@@ -1304,6 +1413,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     if (filtered.length === 0) {
       historyList.innerHTML = `<p class="history-empty">${query ? '找不到相關對話' : '尚無歷史紀錄'}</p>`;
+      updateCurrentSessionBar();
       return;
     }
 
@@ -1419,6 +1529,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     if (batchSelectMode) updateBatchDeleteBtn();
+    updateCurrentSessionBar();
   }
 
   function startRenameSession(session, itemEl) {
@@ -1442,18 +1553,20 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
       }
       renderHistory();
+      updateCurrentSessionBar();
     };
 
     input.addEventListener('blur', commit);
     input.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
-      if (e.key === 'Escape') { input.removeEventListener('blur', commit); renderHistory(); }
+      if (e.key === 'Escape') { input.removeEventListener('blur', commit); renderHistory(); updateCurrentSessionBar(); }
     });
   }
 
   function loadSession(index) {
     currentSession = sessions[index];
     chatMessages.innerHTML = '';
+    updateCurrentSessionBar();
 
     // 還原 session 當時的 model 和 replyMode
     if (currentSession.model) {
@@ -1497,6 +1610,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     };
     chatMessages.innerHTML = '';
     emptyState.classList.remove('hidden');
+    updateCurrentSessionBar();
   }
 
   // ── 發送訊息 ────────────────────────────────────────────
@@ -1781,6 +1895,17 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (duration > 0) setTimeout(() => { if (statusNoticeEl) { statusNoticeEl.remove(); statusNoticeEl = null; } }, duration);
   }
   function clearStatus() { setStatus(''); }
+
+  // 將流程結果寫入 chat 末端（非短暫底部提示）
+  function addProcessStatusMessage(text, isError = false) {
+    if (!text) return;
+    const div = document.createElement('div');
+    div.className = 'message message-process-status' + (isError ? ' error' : '');
+    div.innerHTML = `<div class="message-content">${escapeHtml(text).replace(/\n/g, '<br>')}</div>`;
+    chatMessages.appendChild(div);
+    emptyState.classList.add('hidden');
+    scrollToBottom();
+  }
 
   async function saveCurrentSession() {
     if (!currentSession || currentSession.messages.length === 0) return;
@@ -2308,6 +2433,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   async function openMemoryModal() {
     memoryModal.classList.remove('hidden');
     await populateCategoryFilter('memory', memoryCategoryFilterEl);
+    memorySearchInput.value = memorySearchQuery;
     renderMemoryList();
   }
 
@@ -2331,12 +2457,17 @@ document.addEventListener('DOMContentLoaded', async () => {
     const cats = await getCategories('memory');
     if (_v !== _renderMemoryVer) return; // 已有更新的 render，捨棄本次
     memoryList.innerHTML = '';
-    const filtered = memoryCategoryFilter
+    let filtered = memoryCategoryFilter
       ? memories.filter(m => m.category === memoryCategoryFilter)
       : memories;
+    if (memorySearchQuery) {
+      const query = memorySearchQuery.toLowerCase();
+      filtered = filtered.filter(m => (m.text || '').toLowerCase().includes(query));
+    }
     if (filtered.length === 0) {
-      memoryList.innerHTML = memoryCategoryFilter
-        ? '<p class="memory-empty">此分類沒有記憶。</p>'
+      const hasFilter = memoryCategoryFilter || memorySearchQuery;
+      memoryList.innerHTML = hasFilter
+        ? '<p class="memory-empty">此篩選條件沒有記憶。</p>'
         : '<p class="memory-empty">尚無長期記憶。<br>使用 /remember 內容 來新增。</p>';
       return;
     }
@@ -2481,6 +2612,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     const { vocabulary = [] } = await chrome.storage.local.get(['vocabulary']);
     renderVocabularyList(vocabulary);
   });
+  vocabularyLangFilterEl.addEventListener('change', async e => {
+    vocabularyLangFilter = e.target.value;
+    const { vocabulary = [] } = await chrome.storage.local.get(['vocabulary']);
+    renderVocabularyList(vocabulary);
+  });
 
   // 管理分類 toggle
   manageMemoryCatBtn.addEventListener('click', async () => {
@@ -2527,9 +2663,23 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
   manageKnowledgeCatBtn.addEventListener('click', async () => {
     const hidden = knowledgeCatManager.classList.contains('hidden');
+    if (hidden) {
+      knowledgeTagManager.classList.add('hidden');
+      manageKnowledgeTagBtn.classList.remove('active');
+    }
     knowledgeCatManager.classList.toggle('hidden');
     manageKnowledgeCatBtn.classList.toggle('active', hidden);
     if (hidden) await renderCategoryManager('knowledge', knowledgeCatList);
+  });
+  manageKnowledgeTagBtn.addEventListener('click', async () => {
+    const hidden = knowledgeTagManager.classList.contains('hidden');
+    if (hidden) {
+      knowledgeCatManager.classList.add('hidden');
+      manageKnowledgeCatBtn.classList.remove('active');
+    }
+    knowledgeTagManager.classList.toggle('hidden');
+    manageKnowledgeTagBtn.classList.toggle('active', hidden);
+    if (hidden) await renderKnowledgeTagManager();
   });
   knowledgeAddCatBtn.addEventListener('click', () =>
     handleAddCategory('knowledge', knowledgeNewCatInput, knowledgeCatList, knowledgeCategoryFilterEl));
@@ -2658,7 +2808,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   async function openKnowledgeModal() {
     knowledgeModal.classList.remove('hidden');
     await populateCategoryFilter('knowledge', knowledgeCategoryFilterEl);
+    knowledgeSearchInput.value = knowledgeSearchQuery;
     renderKnowledgeTagFilters();
+    renderKnowledgeTagManager();
     renderKnowledgeList();
     pollKbProcessing(); // 若有分析中項目，每 2 秒自動刷新
   }
@@ -2666,10 +2818,161 @@ document.addEventListener('DOMContentLoaded', async () => {
   function closeKnowledgeModal() {
     knowledgeModal.classList.add('hidden');
     knowledgeCatManager.classList.add('hidden');
+    knowledgeTagManager.classList.add('hidden');
     manageKnowledgeCatBtn.classList.remove('active');
+    manageKnowledgeTagBtn.classList.remove('active');
   }
 
   // ── Summary Toolbar ──────────────────────────────────────────
+  function detectVocabularyLang(word) {
+    if (/[\u4e00-\u9fff]/.test(word)) return 'zh';
+    if (/[\u3040-\u30ff]/.test(word)) return 'ja';
+    if (/^[\x00-\x7F]+$/.test(word)) return 'en';
+    return 'other';
+  }
+
+  function normalizeVocabularyLang(lang, word) {
+    const raw = String(lang || '').trim().toLowerCase();
+    if (!raw) return detectVocabularyLang(word);
+    if (['en', 'zh', 'ja', 'ko', 'vi', 'th', 'ar', 'other'].includes(raw)) return raw;
+    if (raw.startsWith('zh')) return 'zh';
+    if (raw.startsWith('ja')) return 'ja';
+    if (raw.startsWith('ko')) return 'ko';
+    if (raw.startsWith('vi')) return 'vi';
+    if (raw.startsWith('th')) return 'th';
+    if (raw.startsWith('ar')) return 'ar';
+    if (raw.startsWith('en')) return 'en';
+    return detectVocabularyLang(word);
+  }
+
+  function parseVocabularyExtractionResult(text) {
+    const fenceMatch = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+    const source = (fenceMatch?.[1] || text || '').trim();
+    let jsonText = source;
+    if (!(jsonText.startsWith('[') && jsonText.endsWith(']'))) {
+      const start = jsonText.indexOf('[');
+      const end = jsonText.lastIndexOf(']');
+      if (start !== -1 && end > start) {
+        jsonText = jsonText.slice(start, end + 1);
+      }
+    }
+    const parsed = JSON.parse(jsonText);
+    if (!Array.isArray(parsed)) throw new Error('AI 回傳格式不是陣列');
+    return parsed
+      .map(item => {
+        if (typeof item === 'string') {
+          return { word: item.trim(), lang: '' };
+        }
+        if (!item || typeof item !== 'object') return null;
+        const word = String(item.word || item.term || item.vocab || '').trim();
+        const lang = String(item.lang || item.language || '').trim();
+        return { word, lang };
+      })
+      .filter(item => item && item.word);
+  }
+
+  async function handleSessionToVocabulary() {
+    if (isSessionToVocabularyRunning) return;
+    if (!currentSession || currentSession.messages.length === 0) {
+      setStatus('目前沒有可整理的對話內容', false, 2500);
+      return;
+    }
+    isSessionToVocabularyRunning = true;
+    sessionToVocabularyBtn.disabled = true;
+    setStatus('整理單字中...');
+
+    const convText = currentSession.messages.map(m => {
+      const role = m.role === 'user' ? '用戶' : 'AI';
+      const content = typeof m.content === 'string' ? m.content : '[多媒體內容]';
+      return `${role}：${content}`;
+    }).join('\n\n');
+
+    const prompt = `請從以下對話中擷取「值得收藏到單字簿」的詞彙或短語。\n要求：\n1. 僅輸出 JSON 陣列，不要任何額外文字或 markdown。\n2. 每個元素格式：{"word":"詞彙","lang":"en|zh|ja|ko|vi|th|ar|other"}。\n3. 同義或重複項目只保留一個。\n4. 最多輸出 30 個項目。\n\n---\n${convText}`;
+
+    const port = chrome.runtime.connect({ name: 'chat-stream' });
+    let rawContent = '';
+
+    port.onMessage.addListener(async (msg) => {
+      if (msg.type === 'chunk') {
+        rawContent = msg.full || '';
+        return;
+      }
+      if (msg.type === 'done') {
+        try {
+          const reply = (msg.reply || rawContent || '').trim();
+          const parsedItems = parseVocabularyExtractionResult(reply);
+          const { vocabulary: current = [] } = await chrome.storage.local.get(['vocabulary']);
+          const now = Date.now();
+          const existingWords = new Set(current.map(v => String(v.word || '').trim().toLowerCase()).filter(Boolean));
+          let added = 0;
+
+          parsedItems.forEach((item, idx) => {
+            const word = item.word.trim();
+            if (!word || word.length > 120) return;
+            const key = word.toLowerCase();
+            if (existingWords.has(key)) return;
+            existingWords.add(key);
+            current.push({
+              id: `vocab_${now}_${idx}`,
+              word,
+              definition: '',
+              category: '',
+              lang: normalizeVocabularyLang(item.lang, word),
+              createdAt: Date.now()
+            });
+            added++;
+          });
+
+          if (added > 0) {
+            await chrome.storage.local.set({ vocabulary: current });
+            if (vocabularyModal && !vocabularyModal.classList.contains('hidden')) {
+              renderVocabularyList(current);
+            }
+            setStatus(`已加入 ${added} 個單字到單字簿`, false, 2600);
+            addProcessStatusMessage(`✅ 單字整理並存入完畢（新增 ${added} 筆）`);
+          } else {
+            setStatus('沒有可新增的單字（可能都已存在）', false, 2600);
+            addProcessStatusMessage('✅ 單字整理完成，沒有新增項目（可能都已存在）');
+          }
+        } catch (error) {
+          setStatus(`整理單字失敗: ${error.message}`, true, 3200);
+          addProcessStatusMessage(`❌ 整理單字失敗：${error.message}`, true);
+        }
+        isSessionToVocabularyRunning = false;
+        sessionToVocabularyBtn.disabled = !currentSession;
+        port.disconnect();
+        return;
+      }
+      if (msg.type === 'error') {
+        setStatus(`整理單字失敗: ${msg.message}`, true, 3200);
+        addProcessStatusMessage(`❌ 整理單字失敗：${msg.message}`, true);
+        isSessionToVocabularyRunning = false;
+        sessionToVocabularyBtn.disabled = !currentSession;
+        port.disconnect();
+      }
+    });
+
+    port.onDisconnect.addListener(() => {
+      if (!isSessionToVocabularyRunning) return;
+      isSessionToVocabularyRunning = false;
+      sessionToVocabularyBtn.disabled = !currentSession;
+      setStatus('連線中斷，請重試', true, 3000);
+    });
+
+    port.postMessage({
+      type: 'STREAM_MESSAGE',
+      data: {
+        message: prompt,
+        history: [],
+        images: [],
+        translateConfig: null,
+        model: currentModel,
+        systemPrompt: '你是精準的語言學習助手，擅長從對話萃取高價值詞彙，並嚴格輸出指定 JSON 格式。',
+        memoryContext: ''
+      }
+    });
+  }
+
   async function handleSummarize() {
     if (isSummarizing) return;
     if (!currentSession || currentSession.messages.length === 0) {
@@ -2734,11 +3037,13 @@ document.addEventListener('DOMContentLoaded', async () => {
         isSummarizing = false;
         summarizeBtn.disabled = false;
         setStatus('總結已儲存', false, 2000);
+        addProcessStatusMessage('✅ 當前對話總結整理並存入完畢');
         return;
       }
       if (msg.type === 'error') {
         liveDiv.remove();
         setStatus(`總結失敗: ${msg.message}`, true, 3000);
+        addProcessStatusMessage(`❌ 總結失敗：${msg.message}`, true);
         port.disconnect();
         isSummarizing = false;
         summarizeBtn.disabled = false;
@@ -2749,6 +3054,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (!isSummarizing) return;
       liveDiv.remove();
       setStatus('連線中斷，請重試', true, 3000);
+      addProcessStatusMessage('❌ 總結連線中斷，請重試', true);
       isSummarizing = false;
       summarizeBtn.disabled = false;
     });
@@ -2911,6 +3217,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (changed) {
         knowledgeBase = latest;
         renderKnowledgeTagFilters();
+        renderKnowledgeTagManager();
         renderKnowledgeList();
       }
       pollKbProcessing(); // 繼續輪詢直到全部 ready
@@ -2950,6 +3257,44 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
+  async function renderKnowledgeTagManager() {
+    if (!knowledgeTagList) return;
+    const tagMap = new Map();
+    knowledgeBase.forEach(item => {
+      (item.tags || []).forEach(tag => {
+        tagMap.set(tag, (tagMap.get(tag) || 0) + 1);
+      });
+    });
+    const tags = [...tagMap.keys()].sort();
+    knowledgeTagList.innerHTML = '';
+    if (tags.length === 0) {
+      knowledgeTagList.innerHTML = '<span class="cat-empty-hint">尚無標籤可管理。</span>';
+      return;
+    }
+
+    tags.forEach(tag => {
+      const row = document.createElement('span');
+      row.className = 'cat-tag';
+      row.innerHTML = `
+        ${escapeHtml(tag)}
+        <span class="kb-tag-manager-count">(${tagMap.get(tag)})</span>
+        <button class="btn-cat-delete" title="移除標籤">×</button>
+      `;
+      row.querySelector('.btn-cat-delete').addEventListener('click', async () => {
+        knowledgeBase = knowledgeBase.map(item => ({
+          ...item,
+          tags: (item.tags || []).filter(t => t !== tag)
+        }));
+        if (knowledgeTagFilter === tag) knowledgeTagFilter = '';
+        await chrome.storage.local.set({ knowledgeBase });
+        renderKnowledgeTagFilters();
+        renderKnowledgeList();
+        renderKnowledgeTagManager();
+      });
+      knowledgeTagList.appendChild(row);
+    });
+  }
+
   async function renderKnowledgeList() {
     const _v = ++_renderKbVer;
     const cats = await getCategories('knowledge');
@@ -2961,8 +3306,18 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (knowledgeTagFilter) {
       filtered = filtered.filter(kb => (kb.tags || []).includes(knowledgeTagFilter));
     }
+    if (knowledgeSearchQuery) {
+      const query = knowledgeSearchQuery.toLowerCase();
+      filtered = filtered.filter(item =>
+        (item.title || '').toLowerCase().includes(query) ||
+        (item.summary || '').toLowerCase().includes(query) ||
+        (item.content || '').toLowerCase().includes(query) ||
+        (item.url || '').toLowerCase().includes(query) ||
+        (item.tags || []).some(tag => tag.toLowerCase().includes(query))
+      );
+    }
     if (filtered.length === 0) {
-      const hasFilter = knowledgeCategoryFilter || knowledgeTagFilter;
+      const hasFilter = knowledgeCategoryFilter || knowledgeTagFilter || knowledgeSearchQuery;
       knowledgeList.innerHTML = hasFilter
         ? '<p class="memory-empty">此篩選條件沒有知識庫項目。</p>'
         : '<p class="memory-empty">尚無內容。<br>在任意頁面右鍵「加入知識庫」。</p>';
@@ -2973,6 +3328,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       + cats.map(c => `<option value="${escapeAttr(c)}" ${item.category === c ? 'selected' : ''}>${escapeHtml(c)}</option>`).join('');
 
     const LINK_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>`;
+    const REANALYZE_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2v6h-6"/><path d="M3 22v-6h6"/><path d="M20.49 9A9 9 0 0 0 6.38 5.66L3 8"/><path d="M3.51 15A9 9 0 0 0 17.62 18.34L21 16"/></svg>`;
 
     filtered.slice().reverse().forEach(item => {
       const div = document.createElement('div');
@@ -2988,6 +3344,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           <span class="kb-item-source ${item.source}">${sourceLabel}</span>
           <span class="kb-item-title" title="點擊編輯">${escapeHtml(item.title)}</span>
           ${item.url ? `<button class="kb-item-link" title="${escapeAttr(item.url)}">${LINK_SVG}</button>` : ''}
+          <button class="kb-item-reanalyze" title="重新分析" ${item.status === 'processing' ? 'disabled' : ''}>${REANALYZE_SVG}</button>
           <button class="kb-item-delete" title="刪除">
             <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
           </button>
@@ -2996,12 +3353,36 @@ document.addEventListener('DOMContentLoaded', async () => {
           <span class="kb-item-date">${formatItemDate(item.createdAt)}</span>
           <select class="item-cat-select ${item.category ? 'has-value' : ''}" title="分類">${catOptions(item)}</select>
         </div>
-        ${item.summary ? `<div class="kb-item-summary">${escapeHtml(item.summary)}</div>` : ''}
+        ${item.summary ? `<div class="kb-item-summary" title="${escapeAttr(item.summary)}">${escapeHtml(item.summary)}</div>` : ''}
         ${tagsHtml ? `<div class="kb-item-tags">${tagsHtml}</div>` : ''}
       `;
       // URL 連結
       div.querySelector('.kb-item-link')?.addEventListener('click', () => {
         if (item.url) chrome.tabs.create({ url: item.url });
+      });
+      // 重新分析
+      div.querySelector('.kb-item-reanalyze')?.addEventListener('click', async () => {
+        if (item.status === 'processing') return;
+        const idx = knowledgeBase.findIndex(k => k.id === item.id);
+        if (idx === -1) return;
+        const prevStatus = knowledgeBase[idx].status;
+        try {
+          knowledgeBase[idx].status = 'processing';
+          await chrome.storage.local.set({ knowledgeBase });
+          renderKnowledgeList();
+          pollKbProcessing();
+          const res = await chrome.runtime.sendMessage({
+            type: 'REANALYZE_KNOWLEDGE',
+            data: { itemId: item.id }
+          });
+          if (!res?.success) throw new Error(res?.error || '重新分析失敗');
+          setStatus(`已重新分析：${item.title}`, false, 2000);
+        } catch (err) {
+          knowledgeBase[idx].status = prevStatus;
+          await chrome.storage.local.set({ knowledgeBase });
+          renderKnowledgeList();
+          setStatus(`重新分析失敗：${err.message}`, true, 3000);
+        }
       });
       // 標籤點擊篩選
       div.querySelectorAll('.kb-item-tag').forEach(tagEl => {
@@ -3051,6 +3432,8 @@ document.addEventListener('DOMContentLoaded', async () => {
       div.querySelector('.kb-item-delete').addEventListener('click', async () => {
         knowledgeBase = knowledgeBase.filter(k => k.id !== item.id);
         await chrome.storage.local.set({ knowledgeBase });
+        renderKnowledgeTagFilters();
+        renderKnowledgeTagManager();
         renderKnowledgeList();
       });
       knowledgeList.appendChild(div);
@@ -3066,10 +3449,44 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // ── Vocabulary ───────────────────────────────────────────
 
+  function getVocabularyLangLabel(lang) {
+    const labels = {
+      en: '英文',
+      zh: '中文',
+      ja: '日文',
+      ko: '韓文',
+      vi: '越南文',
+      th: '泰文',
+      ar: '阿拉伯文',
+      other: '其他'
+    };
+    return labels[lang] || lang?.toUpperCase() || '未知';
+  }
+
+  function populateVocabularyLangFilter(vocabulary) {
+    const allLangs = [...new Set(vocabulary.map(v => v.lang).filter(Boolean))].sort();
+    const previous = vocabularyLangFilterEl.value || vocabularyLangFilter;
+    vocabularyLangFilterEl.innerHTML = '<option value="">全部語言</option>';
+    allLangs.forEach(lang => {
+      const opt = document.createElement('option');
+      opt.value = lang;
+      opt.textContent = getVocabularyLangLabel(lang);
+      vocabularyLangFilterEl.appendChild(opt);
+    });
+    if (previous && allLangs.includes(previous)) {
+      vocabularyLangFilter = previous;
+      vocabularyLangFilterEl.value = previous;
+    } else {
+      vocabularyLangFilter = '';
+      vocabularyLangFilterEl.value = '';
+    }
+  }
+
   async function openVocabularyModal() {
     vocabularyModal.classList.remove('hidden');
     await populateCategoryFilter('vocabulary', vocabularyCategoryFilterEl);
     const { vocabulary = [] } = await chrome.storage.local.get(['vocabulary']);
+    populateVocabularyLangFilter(vocabulary);
     renderVocabularyList(vocabulary);
   }
 
@@ -3083,17 +3500,21 @@ document.addEventListener('DOMContentLoaded', async () => {
     const _v = ++_renderVocabVer;
     const cats = await getCategories('vocabulary');
     if (_v !== _renderVocabVer) return; // 已有更新的 render，捨棄本次
+    populateVocabularyLangFilter(vocabulary);
     vocabularyList.innerHTML = '';
-    const filtered = vocabularyCategoryFilter
-      ? vocabulary.filter(v => v.category === vocabularyCategoryFilter)
-      : vocabulary;
+    const filtered = vocabulary.filter(v => {
+      if (vocabularyCategoryFilter && v.category !== vocabularyCategoryFilter) return false;
+      if (vocabularyLangFilter && (v.lang || '') !== vocabularyLangFilter) return false;
+      return true;
+    });
     if (filtered.length === 0) {
-      vocabularyList.innerHTML = vocabularyCategoryFilter
-        ? '<p class="memory-empty">此分類沒有單字。</p>'
+      const hasFilter = vocabularyCategoryFilter || vocabularyLangFilter;
+      vocabularyList.innerHTML = hasFilter
+        ? '<p class="memory-empty">此篩選條件沒有單字。</p>'
         : '<p class="memory-empty">尚無單字。<br>在任意網頁反白文字後右鍵「加入單字簿」。</p>';
       return;
     }
-    const langLabel = { en: 'EN', zh: '中', ja: '日', other: '?' };
+    const langLabel = { en: 'EN', zh: '中', ja: '日', ko: '韓', vi: '越', th: '泰', ar: '阿', other: '?' };
     const ttsLangMap = { en: 'en-US', zh: 'zh-TW', ja: 'ja-JP', other: 'zh-TW' };
     filtered.slice().reverse().forEach(item => {
       const div = document.createElement('div');
