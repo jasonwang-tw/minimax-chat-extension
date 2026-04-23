@@ -31,7 +31,6 @@
           <a href="#sec-api">API 設定</a>
           <a href="#sec-chat">對話設定</a>
           <a href="#sec-prompts">提示詞</a>
-          <a href="#sec-modes">回覆模式</a>
           <a href="#sec-commands">自訂指令</a>
           <a href="#sec-memory">長期記憶</a>
           <a href="#sec-sync">同步</a>
@@ -165,14 +164,6 @@
         <button id="savePromptsBtn" class="btn-primary">儲存提示詞</button>
       </section>
 
-      <section class="section" id="sec-modes">
-        <h2>回覆模式</h2>
-        <p class="section-desc">自訂不同的回覆模式，讓聊天切換更快。</p>
-        <div id="replyModesList" class="reply-modes-list"></div>
-        <button id="addModeBtn" class="btn-secondary btn-add-mode">新增回覆模式</button>
-        <button id="saveModesBtn" class="btn-primary" style="margin-top:8px">儲存回覆模式</button>
-      </section>
-
       <section class="section" id="sec-commands">
         <h2>自訂指令</h2>
         <p class="section-desc">使用 `/指令` 的方式快速插入模板或觸發行為，模板可使用 <code>{input}</code> 佔位。</p>
@@ -217,6 +208,13 @@
             <input type="time" id="autoBackupTime" value="03:00">
           </div>
         </div>
+        <div class="form-group">
+          <label>
+            <input type="checkbox" id="syncAutoRestoreEnabled" style="margin-right:6px">
+            開啟時自動同步（從 WordPress 還原最新備份）
+          </label>
+          <p class="hint">在其他裝置開啟 extension 時，自動拉取最新備份並套用，保持跨裝置資料一致。</p>
+        </div>
 
         <div class="sync-provider-card feature-hidden">
           <h3>Google Drive OAuth</h3>
@@ -238,14 +236,7 @@
 
         <div class="sync-provider-card">
           <h3>WordPress 備援同步</h3>
-          <p class="hint">Google 授權失敗時可改用 WordPress 網站登入，僅同步設定快照，不含對話歷史與知識庫。</p>
-          <div class="form-group">
-            <label for="wpBaseUrl">WordPress 站點網址</label>
-            <div class="input-wrapper">
-              <input type="text" id="wpBaseUrl" placeholder="https://jasonsbase.com">
-            </div>
-            <p class="hint">站外登入會開啟 WordPress 授權頁，完成登入後把短效授權碼帶回 extension。</p>
-          </div>
+          <p class="hint">透過 jasonsbase.com 登入，同步設定、長期記憶、知識庫、單字簿與 Session 內容。</p>
           <div class="sync-action-row">
             <button id="connectWordPressBtn" class="btn-secondary">使用 WordPress 登入</button>
             <button id="backupWordPressBtn" class="btn-secondary">立即備份設定</button>

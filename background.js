@@ -69,10 +69,22 @@ chrome.runtime.onInstalled.addListener(({ reason }) => {
   });
 });
 
-chrome.runtime.onStartup.addListener(() => {
+chrome.runtime.onStartup.addListener(async () => {
   refreshWordPressAutoBackupAlarm().catch((error) => {
     console.warn('[Sync] Failed to refresh backup alarm on startup:', error?.message || error);
   });
+
+  // autoSync 啟用時，開啟 extension 自動從 WordPress 還原最新備份
+  try {
+    const settings = await syncService.getSettings();
+    if (settings.provider !== 'wordpress' || !settings.autoSync) return;
+    const { syncAuth = {} } = await chrome.storage.local.get(['syncAuth']);
+    if (!syncAuth.wordpress?.apiToken) return;
+    await syncService.restoreWordPressSettings();
+    console.log('[Sync] 自動同步完成（onStartup）');
+  } catch (error) {
+    console.warn('[Sync] 開啟時自動同步失敗:', error?.message || error);
+  }
 });
 
 chrome.alarms.onAlarm.addListener(async (alarm) => {
@@ -88,16 +100,42 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
   }
 });
 
+// 資料變動即時自動備份（debounce 5 秒，避免連續觸發）
+let _autoBackupTimer = null;
+const AUTO_BACKUP_KEYS_SYNC = new Set(['memories', 'apiKey', 'settings', 'defaultPrompts', 'customCommands', 'globalPrompt']);
+const AUTO_BACKUP_KEYS_LOCAL = new Set(['vocabulary', 'knowledgeBase', 'chatSessions']);
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  const watchedKeys = area === 'sync' ? AUTO_BACKUP_KEYS_SYNC : AUTO_BACKUP_KEYS_LOCAL;
+  const hasRelevantChange = Object.keys(changes).some(k => watchedKeys.has(k));
+  if (!hasRelevantChange) return;
+
+  if (_autoBackupTimer) clearTimeout(_autoBackupTimer);
+  _autoBackupTimer = setTimeout(async () => {
+    try {
+      const settings = await syncService.getSettings();
+      if (settings.provider !== 'wordpress') return;
+      const { syncAuth = {} } = await chrome.storage.local.get(['syncAuth']);
+      if (!syncAuth.wordpress?.apiToken) return;
+      await syncService.backupWordPressSettings();
+    } catch (error) {
+      console.warn('[Sync] 即時備份失敗:', error?.message || error);
+    }
+  }, 5000);
+});
+
 // 右鍵選單點擊處理
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   if (info.menuItemId === 'add-to-memory') {
     const text = info.selectionText?.trim();
     if (!text) return;
     const { memories = [] } = await chrome.storage.sync.get(['memories']);
-    if (memories.some(m => m.text === text)) return; // 防重複
+    if (memories.some(m => (m.summary || m.text) === text)) return; // 防重複
     memories.push({
       id: `mem_${Date.now()}`,
-      text,
+      title: text.slice(0, 30),
+      summary: text,
+      tags: [],
       source: 'context-menu',
       category: '',
       createdAt: Date.now()
@@ -1293,11 +1331,21 @@ async function fetchGoogleTTS(text, lang) {
 }
 
 // AI 自動萃取記憶（獨立呼叫，不帶歷史節省 token）
+// 回傳結構化物件陣列：{ title, summary, tags }
 async function extractMemories(userMessage, aiReply) {
   const { apiKey } = await chrome.storage.sync.get(['apiKey']);
   if (!apiKey) return [];
 
-  const prompt = `以下是一段對話：\n\n使用者：${userMessage}\n\nAI：${aiReply}\n\n請判斷這段對話是否包含值得長期記憶的使用者偏好、身份、重要事實。若有，以 JSON 陣列格式回傳（每項字串最多 30 字，僅客觀事實，不含 AI 回應內容）；若無，回傳 []。只回傳 JSON，不要其他說明。`;
+  const prompt = `以下是一段對話：
+
+使用者：${userMessage}
+
+AI：${aiReply}
+
+請判斷這段對話是否包含值得長期記憶的使用者偏好、身份、重要事實或事件。
+若有，以 JSON 陣列回傳，每項格式如下：
+{ "title": "簡短標題（10字內）", "summary": "完整事件摘要（50字內，保留關鍵細節）", "tags": ["標籤1", "標籤2"] }
+若無，回傳 []。只回傳 JSON，不要其他說明。`;
 
   const response = await fetch(MINIMAX_API_URL, {
     method: 'POST',
@@ -1323,7 +1371,23 @@ async function extractMemories(userMessage, aiReply) {
     const match = text.match(/\[[\s\S]*\]/);
     if (!match) return [];
     const items = JSON.parse(match[0]);
-    return Array.isArray(items) ? items.filter(i => typeof i === 'string' && i.trim()) : [];
+    if (!Array.isArray(items)) return [];
+    // 相容舊格式（字串）與新格式（物件）
+    return items
+      .map(i => {
+        if (typeof i === 'string' && i.trim()) {
+          return { title: i.trim().slice(0, 30), summary: i.trim(), tags: [] };
+        }
+        if (i && typeof i === 'object' && i.title) {
+          return {
+            title: String(i.title || '').trim().slice(0, 30),
+            summary: String(i.summary || i.title || '').trim(),
+            tags: Array.isArray(i.tags) ? i.tags.map(t => String(t).trim()).filter(Boolean) : []
+          };
+        }
+        return null;
+      })
+      .filter(Boolean);
   } catch {
     return [];
   }

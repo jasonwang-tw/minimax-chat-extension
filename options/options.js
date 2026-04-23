@@ -1,8 +1,3 @@
-const DEFAULT_REPLY_MODES = [
-  { id: 'standard', name: '標準', prompt: '' },
-  { id: 'discuss', name: '討論', prompt: '請先分析需求、列出重點，再給出清楚可執行的答案。' }
-];
-
 const MINIMAX_API_URL = 'https://api.minimax.io/v1/chat/completions';
 const TEST_MODEL = 'MiniMax-M2.7';
 const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash-lite:generateContent';
@@ -28,9 +23,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   const promptImageAnalysisInput = document.getElementById('promptImageAnalysis');
   const promptOcrInput = document.getElementById('promptOcr');
   const savePromptsBtn = document.getElementById('savePromptsBtn');
-  const replyModesList = document.getElementById('replyModesList');
-  const addModeBtn = document.getElementById('addModeBtn');
-  const saveModesBtn = document.getElementById('saveModesBtn');
   const customCommandsList = document.getElementById('customCommandsList');
   const addCommandBtn = document.getElementById('addCommandBtn');
   const saveCommandsBtn = document.getElementById('saveCommandsBtn');
@@ -39,10 +31,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   const googleDriveClientIdInput = document.getElementById('googleDriveClientId');
   const wpBaseUrlInput = document.getElementById('wpBaseUrl');
   const syncAutoEnabledChk = document.getElementById('syncAutoEnabled');
+  const syncAutoRestoreChk = document.getElementById('syncAutoRestoreEnabled');
   const autoBackupTimeInput = document.getElementById('autoBackupTime');
   const saveSyncSettingsBtn = document.getElementById('saveSyncSettingsBtn');
   const connectGoogleDriveBtn = document.getElementById('connectGoogleDriveBtn');
   const disconnectGoogleDriveBtn = document.getElementById('disconnectGoogleDriveBtn');
+  const wpBaseUrlInput = null; // 已硬編碼為 jasonsbase.com，移除輸入欄位
   const connectWordPressBtn = document.getElementById('connectWordPressBtn');
   const backupWordPressBtn = document.getElementById('backupWordPressBtn');
   const restoreWordPressBtn = document.getElementById('restoreWordPressBtn');
@@ -52,13 +46,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   const wordpressStatusText = document.getElementById('wordpressStatusText');
   const googleRedirectUriEl = document.getElementById('googleRedirectUri');
 
-  let replyModes = [];
   let customCommands = [];
   let messageTimer = null;
 
   await loadSettings();
   await loadPrompts();
-  await loadReplyModes();
   await loadCustomCommands();
   await loadMemorySection();
   await loadSyncSection();
@@ -104,17 +96,6 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
     });
     showMessage('提示詞已儲存', 'success');
-  });
-
-  addModeBtn?.addEventListener('click', () => {
-    replyModes.push({ id: `mode_${Date.now()}`, name: '新模式', prompt: '' });
-    renderReplyModes();
-  });
-
-  saveModesBtn?.addEventListener('click', async () => {
-    replyModes = collectReplyModesFromDom(replyModesList);
-    await chrome.storage.sync.set({ replyModes });
-    showMessage('回覆模式已儲存', 'success');
   });
 
   addCommandBtn?.addEventListener('click', () => {
@@ -228,12 +209,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     promptOcrInput.value = defaultPrompts?.ocr || '';
   }
 
-  async function loadReplyModes() {
-    const { replyModes: stored } = await chrome.storage.sync.get(['replyModes']);
-    replyModes = Array.isArray(stored) && stored.length > 0 ? stored : [...DEFAULT_REPLY_MODES];
-    renderReplyModes();
-  }
-
   async function loadCustomCommands() {
     const { customCommands: stored } = await chrome.storage.sync.get(['customCommands']);
     customCommands = Array.isArray(stored) ? stored : [];
@@ -258,11 +233,11 @@ document.addEventListener('DOMContentLoaded', async () => {
       syncProviderSelect.value = settings.provider || 'none';
       googleDriveClientIdInput.value = settings.googleDriveClientId || '';
       wpBaseUrlInput.value = settings.wpBaseUrl || DEFAULT_WORDPRESS_BASE_URL;
-      syncAutoEnabledChk.checked = !!(settings.autoBackupEnabled || settings.autoSync);
+      syncAutoEnabledChk.checked = !!settings.autoBackupEnabled;
+      syncAutoRestoreChk.checked = !!settings.autoSync;
       autoBackupTimeInput.value = settings.autoBackupTime || '03:00';
       autoBackupTimeInput.disabled = !syncAutoEnabledChk.checked;
     } else {
-      wpBaseUrlInput.value = DEFAULT_WORDPRESS_BASE_URL;
       autoBackupTimeInput.value = '03:00';
       autoBackupTimeInput.disabled = !syncAutoEnabledChk.checked;
     }
@@ -413,7 +388,6 @@ document.addEventListener('DOMContentLoaded', async () => {
       showMessage('已從 WordPress 還原設定', 'success');
       await loadSettings();
       await loadPrompts();
-      await loadReplyModes();
       await loadCustomCommands();
       await loadMemorySection();
       await loadSyncSection();
@@ -480,34 +454,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     return {
       provider: syncProviderSelect.value,
       googleDriveClientId: googleDriveClientIdInput.value.trim(),
-      wpBaseUrl: wpBaseUrlInput.value.trim() || DEFAULT_WORDPRESS_BASE_URL,
-      autoSync: !!syncAutoEnabledChk.checked,
+      wpBaseUrl: DEFAULT_WORDPRESS_BASE_URL,
+      autoSync: !!syncAutoRestoreChk.checked,
       autoBackupEnabled: !!syncAutoEnabledChk.checked,
       autoBackupTime: autoBackupTimeInput.value || '03:00'
     };
-  }
-
-  function renderReplyModes() {
-    replyModesList.innerHTML = '';
-    replyModes.forEach((mode, index) => {
-      const item = document.createElement('div');
-      item.className = 'reply-mode-item';
-      item.dataset.id = mode.id;
-      item.innerHTML = `
-        <div class="reply-mode-header">
-          <input type="text" class="mode-name" value="${escapeVal(mode.name)}" placeholder="模式名稱">
-          <button class="btn-mode-delete" data-index="${index}" title="刪除模式" type="button">
-            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
-          </button>
-        </div>
-        <textarea class="mode-prompt" rows="2" placeholder="此模式的系統提示詞">${escapeVal(mode.prompt)}</textarea>
-      `;
-      item.querySelector('.btn-mode-delete').addEventListener('click', () => {
-        replyModes.splice(index, 1);
-        renderReplyModes();
-      });
-      replyModesList.appendChild(item);
-    });
   }
 
   function renderCustomCommands() {
@@ -539,14 +490,6 @@ document.addEventListener('DOMContentLoaded', async () => {
       });
       customCommandsList.appendChild(item);
     });
-  }
-
-  function collectReplyModesFromDom(container) {
-    return Array.from(container.querySelectorAll('.reply-mode-item')).map((item) => ({
-      id: item.dataset.id,
-      name: item.querySelector('.mode-name').value.trim() || '未命名模式',
-      prompt: item.querySelector('.mode-prompt').value.trim()
-    }));
   }
 
   function collectCommandsFromDom(container) {

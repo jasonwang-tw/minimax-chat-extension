@@ -4,8 +4,6 @@ let currentImages = [];  // [{ dataUrl, mode, fileType, fileName }]  目前附�
 let statusNoticeEl = null; // 聊天區底部的狀態通知元素
 let pendingRegionMode = null; // 區域截圖完成後要套用的 mode（null = 'region'）
 let currentModel = 'MiniMax-M2.7';  // 目前選擇的模型
-let currentReplyModeId = 'standard'; // 目前回覆模式 ID
-let replyModes = [];          // 從 storage 載入的回覆模式
 let historySearchQuery = '';  // 歷史紀錄搜尋關鍵字
 let memories = [];            // 全域長期記憶條目
 let memoryCategoryFilter = '';     // 長期記憶分類篩選
@@ -91,7 +89,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   const annUndoBtn = document.getElementById('annUndo');
   const annClearBtn = document.getElementById('annClear');
   const modelSelect = document.getElementById('modelSelect');
-  const replyModeSelect = document.getElementById('replyModeSelect');
   const historySearchInput = document.getElementById('historySearch');
   const historyClearSearchBtn = document.getElementById('historyClearSearch');
   const commandPalette = document.getElementById('commandPalette');
@@ -218,9 +215,6 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (changes.geminiApiKey || changes.apiKey) {
         checkApiKey();
       }
-      if (changes.replyModes) {
-        loadReplyModes();
-      }
       if (changes.customCommands) {
         loadCustomCommands();
       }
@@ -263,11 +257,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   // ── 模型選擇 ────────────────────────────────────────────
   modelSelect.addEventListener('change', () => {
     currentModel = modelSelect.value;
-  });
-
-  // ── 回覆模式選擇 ─────────────────────────────────────────
-  replyModeSelect.addEventListener('change', () => {
-    currentReplyModeId = replyModeSelect.value;
   });
 
   // ── 歷史搜尋 ────────────────────────────────────────────
@@ -1327,30 +1316,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   }
 
-  // ── 回覆模式 ────────────────────────────────────────────
-  async function loadReplyModes() {
-    const { replyModes: stored } = await chrome.storage.sync.get(['replyModes']);
-    replyModes = stored && stored.length > 0 ? stored : [
-      { id: 'standard', name: '標準', prompt: '' },
-      { id: 'discuss', name: '討論模式', prompt: '請針對問題進行多角度分析，引用可靠資訊，交互比對後給出結論，並附上推理過程。' }
-    ];
-    // 更新 select 選項
-    replyModeSelect.innerHTML = '';
-    replyModes.forEach(mode => {
-      const opt = document.createElement('option');
-      opt.value = mode.id;
-      opt.textContent = mode.name;
-      replyModeSelect.appendChild(opt);
-    });
-    // 保持目前選取
-    if (replyModes.find(m => m.id === currentReplyModeId)) {
-      replyModeSelect.value = currentReplyModeId;
-    } else {
-      currentReplyModeId = replyModes[0]?.id || 'standard';
-      replyModeSelect.value = currentReplyModeId;
-    }
-  }
-
   // ── Session 管理 ────────────────────────────────────────
   async function loadHistory() {
     const response = await chrome.runtime.sendMessage({ type: 'GET_HISTORY' });
@@ -1573,11 +1538,6 @@ document.addEventListener('DOMContentLoaded', async () => {
       currentModel = currentSession.model;
       modelSelect.value = currentModel;
     }
-    if (currentSession.replyModeId) {
-      currentReplyModeId = currentSession.replyModeId;
-      replyModeSelect.value = currentReplyModeId;
-    }
-
     currentSession.messages.forEach(msg => {
       // 歷史訊息不知道當時語言設定，用內容自動偵測
       const ttsLang = detectLang(msg.content);
@@ -1605,8 +1565,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       id: Date.now(),
       timestamp: new Date().toISOString(),
       messages: [],
-      model: currentModel,
-      replyModeId: currentReplyModeId
+      model: currentModel
     };
     chatMessages.innerHTML = '';
     emptyState.classList.remove('hidden');
@@ -1695,8 +1654,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       images: m.images || (m.image ? [m.image] : null)
     }));
 
-    const activeMode = replyModes.find(m => m.id === currentReplyModeId);
-    const systemPrompt = activeMode?.prompt || '';
+    const systemPrompt = '';
     const memoryContext = buildMemoryBlock();
     const replyLang = translateEnabled ? null : sourceLangSelect.value;
 
@@ -1773,7 +1731,27 @@ document.addEventListener('DOMContentLoaded', async () => {
             data: { userMessage: message, aiReply: reply }
           }).then(async (res) => {
             if (res.success && res.items.length > 0) {
-              for (const text of res.items) await addMemory(text, 'auto');
+              for (const item of res.items) {
+                // 新格式：物件有 title/summary；舊格式相容：字串
+                if (typeof item === 'string') {
+                  await addMemory(item, 'auto');
+                } else if (item && item.summary) {
+                  const trimmed = item.summary.trim();
+                  if (!trimmed) continue;
+                  if (memories.some(m => (m.summary || m.text) === trimmed)) continue;
+                  memories.push({
+                    id: `mem_${Date.now()}`,
+                    title: (item.title || trimmed).slice(0, 30),
+                    summary: trimmed,
+                    tags: Array.isArray(item.tags) ? item.tags : [],
+                    source: 'auto',
+                    category: '',
+                    createdAt: Date.now()
+                  });
+                  if (memories.length > 30) memories.shift();
+                  await saveMemories();
+                }
+              }
             }
           }).catch(() => {});
         }
@@ -2317,8 +2295,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     let rawContent = '';
 
     const replyLang = translateEnabled ? null : sourceLangSelect.value;
-    const activeMode = replyModes.find(m => m.id === currentReplyModeId);
-    const systemPrompt = activeMode?.prompt || '';
+    const systemPrompt = '';
     const memoryContext = buildMemoryBlock();
 
     function resetWebSearch() {
@@ -2418,12 +2395,20 @@ document.addEventListener('DOMContentLoaded', async () => {
   async function addMemory(text, source) {
     const trimmed = text.trim();
     if (!trimmed) return;
-    // 去重
-    if (memories.some(m => m.text === trimmed)) {
+    // 去重（檢查 summary 或舊版 text）
+    if (memories.some(m => (m.summary || m.text) === trimmed)) {
       setStatus('此記憶已存在', false, 2000);
       return;
     }
-    memories.push({ id: `mem_${Date.now()}`, text: trimmed, source, createdAt: Date.now() });
+    memories.push({
+      id: `mem_${Date.now()}`,
+      title: trimmed.slice(0, 30),
+      summary: trimmed,
+      tags: [],
+      source,
+      category: '',
+      createdAt: Date.now()
+    });
     // 上限 30 筆（sync 容量限制）
     if (memories.length > 30) memories.shift();
     await saveMemories();
@@ -2462,7 +2447,10 @@ document.addEventListener('DOMContentLoaded', async () => {
       : memories;
     if (memorySearchQuery) {
       const query = memorySearchQuery.toLowerCase();
-      filtered = filtered.filter(m => (m.text || '').toLowerCase().includes(query));
+      filtered = filtered.filter(m => {
+        const haystack = [m.title, m.summary, m.text, ...(m.tags || [])].filter(Boolean).join(' ').toLowerCase();
+        return haystack.includes(query);
+      });
     }
     if (filtered.length === 0) {
       const hasFilter = memoryCategoryFilter || memorySearchQuery;
@@ -2472,14 +2460,24 @@ document.addEventListener('DOMContentLoaded', async () => {
       return;
     }
     filtered.slice().reverse().forEach(mem => {
+      // 向下相容：舊格式只有 text，新格式有 title + summary
+      const displayTitle = mem.title || mem.text || '';
+      const displaySummary = mem.summary && mem.summary !== displayTitle ? mem.summary : '';
+      const tags = Array.isArray(mem.tags) && mem.tags.length ? mem.tags : [];
+
       const div = document.createElement('div');
       div.className = 'memory-item';
       const badgeLabel = { manual: '手動', auto: '自動', 'context-menu': '右鍵', summary: '總結' }[mem.source] || mem.source;
       const catOptions = `<option value="">${cats.length ? '無分類' : '新增分類後使用'}</option>`
         + cats.map(c => `<option value="${escapeAttr(c)}" ${mem.category === c ? 'selected' : ''}>${escapeHtml(c)}</option>`).join('');
+      const tagsHtml = tags.length ? `<div class="memory-item-tags">${tags.map(t => `<span class="memory-tag">${escapeHtml(t)}</span>`).join('')}</div>` : '';
       div.innerHTML = `
         <span class="memory-item-badge ${mem.source}">${badgeLabel}</span>
-        <span class="memory-item-text editable" title="點擊編輯">${escapeHtml(mem.text)}</span>
+        <div class="memory-item-body">
+          <span class="memory-item-text editable" title="點擊編輯">${escapeHtml(displayTitle)}</span>
+          ${displaySummary ? `<span class="memory-item-summary">${escapeHtml(displaySummary)}</span>` : ''}
+          ${tagsHtml}
+        </div>
         <span class="memory-item-date">${formatItemDate(mem.createdAt)}</span>
         <select class="item-cat-select ${mem.category ? 'has-value' : ''}" title="分類">${catOptions}</select>
         <button class="btn-memory-delete" title="刪除">
@@ -2495,21 +2493,28 @@ document.addEventListener('DOMContentLoaded', async () => {
           e.target.classList.toggle('has-value', !!e.target.value);
         }
       });
-      // 點擊文字進入編輯模式（textarea）
+      // 點擊 title 進入編輯模式（textarea，編輯 summary）
       const textSpan = div.querySelector('.memory-item-text');
       textSpan.addEventListener('click', () => {
+        const editVal = mem.summary || mem.text || '';
         const ta = document.createElement('textarea');
         ta.className = 'memory-item-textarea';
-        ta.value = mem.text;
-        ta.rows = Math.max(2, Math.ceil(mem.text.length / 40));
+        ta.value = editVal;
+        ta.rows = Math.max(2, Math.ceil(editVal.length / 40));
         textSpan.replaceWith(ta);
         ta.focus();
         ta.setSelectionRange(ta.value.length, ta.value.length);
         const save = async () => {
           const newText = ta.value.trim();
-          if (newText && newText !== mem.text) {
+          if (newText && newText !== editVal) {
             const idx = memories.findIndex(m => m.id === mem.id);
-            if (idx !== -1) { memories[idx].text = newText; await saveMemories(); }
+            if (idx !== -1) {
+              memories[idx].summary = newText;
+              memories[idx].title = newText.slice(0, 30);
+              // 相容舊格式
+              if (memories[idx].text !== undefined) memories[idx].text = newText;
+              await saveMemories();
+            }
           }
           renderMemoryList();
         };
@@ -3444,7 +3449,13 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   function buildMemoryBlock() {
     if (memories.length === 0) return '';
-    return `【使用者長期記憶】\n${memories.map(m => `- ${m.text}`).join('\n')}`;
+    const lines = memories.map(m => {
+      const title = m.title || m.text || '';
+      const summary = m.summary && m.summary !== title ? m.summary : '';
+      const tags = Array.isArray(m.tags) && m.tags.length ? ` [${m.tags.join(', ')}]` : '';
+      return summary ? `- ${title}：${summary}${tags}` : `- ${title}${tags}`;
+    });
+    return `【使用者長期記憶】\n${lines.join('\n')}`;
   }
 
   // ── Vocabulary ───────────────────────────────────────────
