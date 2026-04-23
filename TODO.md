@@ -21,14 +21,25 @@
   - admin time display in `Asia/Taipei`
   - token management cleanup UI (`Delete` revoked token / bulk cleanup revoked tokens)
 
+## Done (v1.14.x)
+
+- Improved sync section UI: hide login button after login, show backup/restore/logout only when authorized
+- Removed daily scheduled backup (replaced by instant backup on storage change with 5s debounce)
+- Fixed geminiApiKey / braveApiKey / exaApiKey missing from auto-backup watch list
+- Removed reply modes feature
+- Structured long-term memory format (title / summary / tags)
+- Added chatSessions to instant backup scope
+- Added "auto-restore on startup" option
+
 ## Next Phase
 
 - Final E2E regression pass on production-like setup (login -> backup -> restore -> token cleanup)
 - PHP lint/test on machine with `php` installed
-- Improve user-facing copy in extension sync section and plugin admin pages
 - Define token lifecycle policy:
   - expiration / rotation
   - retention cleanup rules
 - Optional encrypted payload support for settings backup
-- Optional auto-sync background scheduling
 - Optional backup version history
+- Spaces feature (Phase 1: tab-based space switching)
+- 財經功能：/stock、/twstock、/news slash commands
+- 自動化功能：daily Gmail digest via chrome.alarms + chrome.identity
