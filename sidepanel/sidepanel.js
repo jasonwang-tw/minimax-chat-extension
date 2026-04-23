@@ -196,8 +196,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   let annPreviewState = null;
   let annTextPos = { x: 0, y: 0 };
 
-  // 載入回覆模式、記憶、自訂指令、知識庫
-  await loadReplyModes();
+  // 載入記憶、自訂指令、知識庫
   await loadMemories();
   await migrateCategoriesIfNeeded();
   await loadCustomCommands();

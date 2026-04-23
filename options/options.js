@@ -29,10 +29,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const autoMemoryEnabledChk = document.getElementById('autoMemoryEnabled');
   const syncProviderSelect = document.getElementById('syncProvider');
   const googleDriveClientIdInput = document.getElementById('googleDriveClientId');
-  const wpBaseUrlInput = document.getElementById('wpBaseUrl');
-  const syncAutoEnabledChk = document.getElementById('syncAutoEnabled');
   const syncAutoRestoreChk = document.getElementById('syncAutoRestoreEnabled');
-  const autoBackupTimeInput = document.getElementById('autoBackupTime');
   const saveSyncSettingsBtn = document.getElementById('saveSyncSettingsBtn');
   const connectGoogleDriveBtn = document.getElementById('connectGoogleDriveBtn');
   const disconnectGoogleDriveBtn = document.getElementById('disconnectGoogleDriveBtn');
@@ -232,14 +229,8 @@ document.addEventListener('DOMContentLoaded', async () => {
       const settings = settingsResp.data;
       syncProviderSelect.value = settings.provider || 'none';
       googleDriveClientIdInput.value = settings.googleDriveClientId || '';
-      wpBaseUrlInput.value = settings.wpBaseUrl || DEFAULT_WORDPRESS_BASE_URL;
-      syncAutoEnabledChk.checked = !!settings.autoBackupEnabled;
+      if (wpBaseUrlInput) wpBaseUrlInput.value = settings.wpBaseUrl || DEFAULT_WORDPRESS_BASE_URL;
       syncAutoRestoreChk.checked = !!settings.autoSync;
-      autoBackupTimeInput.value = settings.autoBackupTime || '03:00';
-      autoBackupTimeInput.disabled = !syncAutoEnabledChk.checked;
-    } else {
-      autoBackupTimeInput.value = '03:00';
-      autoBackupTimeInput.disabled = !syncAutoEnabledChk.checked;
     }
 
     await refreshSyncStatus();
@@ -258,10 +249,6 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     showMessage('同步設定已儲存', 'success');
     await refreshSyncStatus();
-  });
-
-  syncAutoEnabledChk?.addEventListener('change', () => {
-    autoBackupTimeInput.disabled = !syncAutoEnabledChk.checked;
   });
 
   connectGoogleDriveBtn?.addEventListener('click', async () => {
@@ -319,11 +306,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   connectWordPressBtn?.addEventListener('click', async () => {
-    if (!wpBaseUrlInput.value.trim()) {
-      showMessage('請先輸入 WordPress 站點網址', 'error');
-      return;
-    }
-
     connectWordPressBtn.disabled = true;
     connectWordPressBtn.textContent = '登入中...';
     try {
@@ -440,14 +422,12 @@ document.addEventListener('DOMContentLoaded', async () => {
       wordpressStatusText.textContent = `WordPress：未登入${wordpress.baseUrl ? `（${wordpress.baseUrl}）` : ''}`;
     }
 
-    const autoBackupText = status.autoBackupEnabled
-      ? `每日 ${status.autoBackupTime || '03:00'} 自動備份`
-      : '未啟用自動備份';
-    syncStatusText.textContent = `目前供應商：${status.provider || 'none'}｜Google Drive：${googleDrive.connected ? '已連線' : '未連線'}｜WordPress：${wordpressAuthorized ? (wordpress.connected ? '已登入' : '已授權（狀態檢查失敗）') : '未登入'}｜${autoBackupText}`;
+    syncStatusText.textContent = `目前供應商：${status.provider || 'none'}｜Google Drive：${googleDrive.connected ? '已連線' : '未連線'}｜WordPress：${wordpressAuthorized ? (wordpress.connected ? '已登入' : '已授權（狀態檢查失敗）') : '未登入'}`;
 
-    backupWordPressBtn.disabled = !wordpressAuthorized;
-    restoreWordPressBtn.disabled = !wordpressAuthorized;
-    disconnectWordPressBtn.disabled = !wordpressAuthorized;
+    connectWordPressBtn.style.display = wordpressAuthorized ? 'none' : '';
+    backupWordPressBtn.style.display = wordpressAuthorized ? '' : 'none';
+    restoreWordPressBtn.style.display = wordpressAuthorized ? '' : 'none';
+    disconnectWordPressBtn.style.display = wordpressAuthorized ? '' : 'none';
   }
 
   function buildSyncSettingsPayload() {
@@ -455,9 +435,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       provider: syncProviderSelect.value,
       googleDriveClientId: googleDriveClientIdInput.value.trim(),
       wpBaseUrl: DEFAULT_WORDPRESS_BASE_URL,
-      autoSync: !!syncAutoRestoreChk.checked,
-      autoBackupEnabled: !!syncAutoEnabledChk.checked,
-      autoBackupTime: autoBackupTimeInput.value || '03:00'
+      autoSync: !!syncAutoRestoreChk.checked
     };
   }
 

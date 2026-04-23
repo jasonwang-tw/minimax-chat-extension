@@ -177,6 +177,26 @@ npm run build:css
 
 ## Changelog
 
+## [1.14.5] - 2026-04-23
+### Fixed
+- **API Key 重載後消失**：`geminiApiKey`、`braveApiKey`、`exaApiKey` 未加入 `AUTO_BACKUP_KEYS_SYNC`，導致儲存後不觸發即時備份；開啟時自動同步用舊備份覆蓋，三組 Key 全部遺失
+- 移除 `sanitizeSyncSettingsForBackup` 中 `autoBackupEnabled`/`autoBackupTime` 殘留欄位
+
+## [1.14.4] - 2026-04-23
+### Removed
+- **每日定時備份**：移除 `chrome.alarms` 定時備份機制（`WORDPRESS_AUTO_BACKUP_ALARM`、`refreshWordPressAutoBackupAlarm`、`getNextAlarmTimestamp`），改以即時備份（storage.onChanged + 5s debounce）為唯一自動備份方式
+- 移除 manifest.json 的 `alarms` 權限
+- 移除設定頁「啟用每日自動備份」與「自動備份時間」UI 欄位
+- 移除 `DEFAULT_SYNC_SETTINGS` 中的 `autoBackupEnabled` / `autoBackupTime` 欄位
+
+## [1.14.3] - 2026-04-23
+### Fixed
+- **設定頁 API Key 全部消失**：options.js 中 `wpBaseUrlInput` 重複 `const` 宣告（第 32、39 行）導致 `SyntaxError`，整個設定頁腳本無法執行；移除多餘宣告，並補上兩處 null 保護
+
+## [1.14.2] - 2026-04-23
+### Fixed
+- **按鈕無反應**：移除 `loadReplyModes()` 殘留呼叫（函式已刪除但呼叫未清除），導致 `DOMContentLoaded` 初始化中斷，所有 icon 按鈕（header 及 chatbox）均無法點擊
+
 ## [1.14.1] - 2026-04-23
 ### Added
 - **Session 自動備份**：新增/更新 session 時同樣觸發即時備份（`chatSessions` 加入監聽清單）

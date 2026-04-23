@@ -97,12 +97,9 @@ export async function restoreSettingsBackupPayload(payload) {
 }
 
 export function sanitizeSyncSettingsForBackup(syncSettings = {}) {
-  const autoBackupTime = typeof syncSettings.autoBackupTime === 'string' ? syncSettings.autoBackupTime : '03:00';
   return {
     provider: normalizeProvider(syncSettings.provider),
     autoSync: !!syncSettings.autoSync,
-    autoBackupEnabled: !!syncSettings.autoBackupEnabled || !!syncSettings.autoSync,
-    autoBackupTime: /^\d{2}:\d{2}$/.test(autoBackupTime) ? autoBackupTime : '03:00',
     googleDriveClientId: typeof syncSettings.googleDriveClientId === 'string' ? syncSettings.googleDriveClientId : '',
     wpBaseUrl: typeof syncSettings.wpBaseUrl === 'string' ? syncSettings.wpBaseUrl : 'https://jasonsbase.com'
   };

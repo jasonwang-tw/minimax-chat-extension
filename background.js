@@ -19,7 +19,6 @@ const DEFAULT_REPLY_MODES = [
 ];
 
 const syncService = new SyncService();
-const WORDPRESS_AUTO_BACKUP_ALARM = 'wordpress-auto-backup';
 
 // 監聽插件安裝
 chrome.runtime.onInstalled.addListener(({ reason }) => {
@@ -64,16 +63,9 @@ chrome.runtime.onInstalled.addListener(({ reason }) => {
     });
   });
 
-  refreshWordPressAutoBackupAlarm().catch((error) => {
-    console.warn('[Sync] Failed to refresh backup alarm on install/update:', error?.message || error);
-  });
 });
 
 chrome.runtime.onStartup.addListener(async () => {
-  refreshWordPressAutoBackupAlarm().catch((error) => {
-    console.warn('[Sync] Failed to refresh backup alarm on startup:', error?.message || error);
-  });
-
   // autoSync 啟用時，開啟 extension 自動從 WordPress 還原最新備份
   try {
     const settings = await syncService.getSettings();
@@ -87,22 +79,9 @@ chrome.runtime.onStartup.addListener(async () => {
   }
 });
 
-chrome.alarms.onAlarm.addListener(async (alarm) => {
-  if (alarm.name !== WORDPRESS_AUTO_BACKUP_ALARM) return;
-
-  try {
-    const settings = await syncService.getSettings();
-    if (settings.provider !== 'wordpress' || !settings.autoBackupEnabled) return;
-
-    await syncService.backupWordPressSettings();
-  } catch (error) {
-    console.warn('[Sync] Auto backup failed:', error?.message || error);
-  }
-});
-
 // 資料變動即時自動備份（debounce 5 秒，避免連續觸發）
 let _autoBackupTimer = null;
-const AUTO_BACKUP_KEYS_SYNC = new Set(['memories', 'apiKey', 'settings', 'defaultPrompts', 'customCommands', 'globalPrompt']);
+const AUTO_BACKUP_KEYS_SYNC = new Set(['memories', 'apiKey', 'geminiApiKey', 'braveApiKey', 'exaApiKey', 'settings', 'defaultPrompts', 'customCommands', 'globalPrompt']);
 const AUTO_BACKUP_KEYS_LOCAL = new Set(['vocabulary', 'knowledgeBase', 'chatSessions']);
 
 chrome.storage.onChanged.addListener((changes, area) => {
@@ -692,39 +671,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 });
 
-async function refreshWordPressAutoBackupAlarm() {
-  const settings = await syncService.getSettings();
-  const enabled = settings.provider === 'wordpress' && settings.autoBackupEnabled;
-
-  if (!enabled) {
-    await chrome.alarms.clear(WORDPRESS_AUTO_BACKUP_ALARM);
-    return;
-  }
-
-  const when = getNextAlarmTimestamp(settings.autoBackupTime || '03:00');
-  await chrome.alarms.create(WORDPRESS_AUTO_BACKUP_ALARM, {
-    when,
-    periodInMinutes: 24 * 60
-  });
-}
-
-function getNextAlarmTimestamp(timeText) {
-  const [hourRaw, minuteRaw] = String(timeText || '03:00').split(':');
-  const hour = Number.parseInt(hourRaw, 10);
-  const minute = Number.parseInt(minuteRaw, 10);
-
-  const validHour = Number.isFinite(hour) && hour >= 0 && hour <= 23 ? hour : 3;
-  const validMinute = Number.isFinite(minute) && minute >= 0 && minute <= 59 ? minute : 0;
-
-  const now = new Date();
-  const next = new Date(now);
-  next.setHours(validHour, validMinute, 0, 0);
-  if (next.getTime() <= now.getTime()) {
-    next.setDate(next.getDate() + 1);
-  }
-
-  return next.getTime();
-}
 
 // ── Streaming（Port 長連線）─────────────────────────────
 chrome.runtime.onConnect.addListener(port => {
