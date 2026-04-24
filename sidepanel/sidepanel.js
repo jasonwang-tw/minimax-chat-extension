@@ -275,17 +275,20 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   // 自動調整輸入框高度 + 指令選單 + 知識庫 @ palette
+  // 計算對話歷史使用率（對話完成後更新，非逐鍵更新）
+  const MAX_CONTEXT_CHARS = 40000;
   function updateCharCounter() {
-    const len = messageInput.value.length;
-    if (len < 1000) {
+    const totalChars = (currentSession?.messages || [])
+      .reduce((sum, m) => sum + (typeof m.content === 'string' ? m.content.length : 0), 0);
+    const pct = Math.min(Math.round(totalChars / MAX_CONTEXT_CHARS * 100), 999);
+    charCounter.classList.remove('warn', 'danger');
+    if (pct < 60) {
       charCounter.classList.add('hidden');
-      charCounter.classList.remove('warn', 'danger');
     } else {
       charCounter.classList.remove('hidden');
-      charCountText.textContent = `${len.toLocaleString()} 字`;
-      charCounter.classList.remove('warn', 'danger');
-      if (len > 5000) charCounter.classList.add('danger');
-      else if (len > 3000) charCounter.classList.add('warn');
+      charCountText.textContent = `${pct}%`;
+      if (pct >= 80) charCounter.classList.add('danger');
+      else charCounter.classList.add('warn');
     }
   }
 
@@ -295,7 +298,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     updateSendButton();
     handleCommandPaletteInput();
     handleKbPaletteInput();
-    updateCharCounter();
   });
 
   // 發送 / 停止
@@ -1615,7 +1617,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         messageInput.value = '';
         messageInput.style.height = 'auto';
         updateSendButton();
-        updateCharCounter();
         executeAction(matchedCmd.trigger, args);
         return;
       }
@@ -1659,7 +1660,6 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     messageInput.value = '';
     messageInput.style.height = 'auto';
-    updateCharCounter();
     clearImageData();
 
     // 翻譯設定
@@ -1749,6 +1749,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         resetLoading();
         await saveCurrentSession();
         await loadHistory();
+        updateCharCounter();
         const { autoMemoryEnabled } = await chrome.storage.sync.get(['autoMemoryEnabled']);
         if (autoMemoryEnabled && message && reply) {
           chrome.runtime.sendMessage({
