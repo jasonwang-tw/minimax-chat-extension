@@ -78,6 +78,21 @@
       <!-- Chat Body: Messages + Right Toolbar -->
       <div class="chat-body-wrapper">
         <div class="chat-main">
+          <!-- Session Search Bar -->
+          <div id="sessionSearchBar" class="session-search-bar hidden">
+            <svg class="session-search-icon" xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+            <input type="text" id="sessionSearchInput" class="session-search-input" placeholder="搜尋對話內容...">
+            <span id="sessionSearchCount" class="session-search-count"></span>
+            <button id="sessionSearchPrev" class="session-search-nav" title="上一個">
+              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="18 15 12 9 6 15"/></svg>
+            </button>
+            <button id="sessionSearchNext" class="session-search-nav" title="下一個">
+              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+            </button>
+            <button id="sessionSearchClose" class="session-search-close" title="關閉">
+              <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+          </div>
           <div id="chatMessages" class="chat-messages"></div>
 
           <!-- Empty State -->
@@ -103,6 +118,9 @@
 
         <!-- Right Toolbar -->
         <div id="chatToolbar" class="chat-toolbar">
+          <button id="sessionSearchBtn" class="chat-toolbar-btn" title="搜尋對話">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+          </button>
           <button id="summarizeBtn" class="chat-toolbar-btn" title="立即總結">
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/></svg>
           </button>

@@ -137,6 +137,15 @@ document.addEventListener('DOMContentLoaded', async () => {
   const knowledgeCatList = document.getElementById('knowledgeCatList');
   const knowledgeTagList = document.getElementById('knowledgeTagList');
   const knowledgeTagFilters = document.getElementById('knowledgeTagFilters');
+  // 搜尋工具列元素
+  const sessionSearchBtn = document.getElementById('sessionSearchBtn');
+  const sessionSearchBar = document.getElementById('sessionSearchBar');
+  const sessionSearchInput = document.getElementById('sessionSearchInput');
+  const sessionSearchCount = document.getElementById('sessionSearchCount');
+  const sessionSearchPrev = document.getElementById('sessionSearchPrev');
+  const sessionSearchNext = document.getElementById('sessionSearchNext');
+  const sessionSearchClose = document.getElementById('sessionSearchClose');
+
   // 總結工具列元素
   const summarizeBtn = document.getElementById('summarizeBtn');
   const sessionToVocabularyBtn = document.getElementById('sessionToVocabularyBtn');
@@ -534,6 +543,172 @@ document.addEventListener('DOMContentLoaded', async () => {
       renderKnowledgeTagManager();
       renderKnowledgeList();
     }
+  });
+
+  // Session Search
+  let sessionSearchMatches = []; // 每個元素為 <mark> DOM 節點
+  let sessionSearchIndex = -1;
+  const _searchBackups = new Map(); // messageContent el -> original innerHTML
+
+  function openSessionSearch() {
+    sessionSearchBar.classList.remove('hidden');
+    sessionSearchBtn.classList.add('active');
+    sessionSearchInput.focus();
+    sessionSearchInput.select();
+  }
+
+  function closeSessionSearch() {
+    sessionSearchBar.classList.add('hidden');
+    sessionSearchBtn.classList.remove('active');
+    clearSessionSearchHighlights();
+    sessionSearchInput.value = '';
+    sessionSearchCount.textContent = '';
+    sessionSearchMatches = [];
+    sessionSearchIndex = -1;
+  }
+
+  function clearSessionSearchHighlights() {
+    _searchBackups.forEach((html, el) => { el.innerHTML = html; });
+    _searchBackups.clear();
+    chatMessages.querySelectorAll('.search-match').forEach(el => {
+      el.classList.remove('search-match');
+    });
+  }
+
+  // 走訪 DOM 樹的文字節點，將關鍵字包在 <mark> 內，回傳所有產生的 <mark> 元素
+  function wrapTextNodes(node, lowerQuery, queryLen) {
+    const marks = [];
+    if (node.nodeType === Node.TEXT_NODE) {
+      const text = node.textContent;
+      const lower = text.toLowerCase();
+      let idx = lower.indexOf(lowerQuery);
+      if (idx === -1) return marks;
+      const frag = document.createDocumentFragment();
+      let last = 0;
+      while (idx !== -1) {
+        if (idx > last) frag.appendChild(document.createTextNode(text.slice(last, idx)));
+        const mark = document.createElement('mark');
+        mark.className = 'search-keyword';
+        mark.textContent = text.slice(idx, idx + queryLen);
+        frag.appendChild(mark);
+        marks.push(mark);
+        last = idx + queryLen;
+        idx = lower.indexOf(lowerQuery, last);
+      }
+      if (last < text.length) frag.appendChild(document.createTextNode(text.slice(last)));
+      node.parentNode.replaceChild(frag, node);
+      return marks;
+    }
+    if (node.nodeType === Node.ELEMENT_NODE) {
+      const tag = node.tagName;
+      if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'MARK' ||
+          tag === 'TEXTAREA' || tag === 'INPUT' || tag === 'CODE') return marks;
+      for (const child of Array.from(node.childNodes)) {
+        marks.push(...wrapTextNodes(child, lowerQuery, queryLen));
+      }
+    }
+    return marks;
+  }
+
+  function runSessionSearch() {
+    clearSessionSearchHighlights();
+    sessionSearchMatches = [];
+    sessionSearchIndex = -1;
+    const query = sessionSearchInput.value.trim();
+    const lowerQuery = query.toLowerCase();
+    if (!query) {
+      sessionSearchCount.textContent = '';
+      updateSessionSearchNav();
+      return;
+    }
+    chatMessages.querySelectorAll('.message').forEach(msg => {
+      const content = msg.querySelector('.message-content');
+      if (!content || !content.textContent.toLowerCase().includes(lowerQuery)) return;
+      _searchBackups.set(content, content.innerHTML);
+      const marks = wrapTextNodes(content, lowerQuery, query.length);
+      if (marks.length > 0) {
+        msg.classList.add('search-match');
+        sessionSearchMatches.push(...marks);
+      }
+    });
+    if (sessionSearchMatches.length > 0) {
+      sessionSearchIndex = 0;
+      highlightCurrentMatch();
+    }
+    updateSessionSearchCount();
+    updateSessionSearchNav();
+  }
+
+  function highlightCurrentMatch() {
+    sessionSearchMatches.forEach((m, i) => {
+      m.classList.toggle('search-keyword-current', i === sessionSearchIndex);
+    });
+    const cur = sessionSearchMatches[sessionSearchIndex];
+    if (cur) cur.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+
+  function updateSessionSearchCount() {
+    if (sessionSearchMatches.length === 0) {
+      sessionSearchCount.textContent = sessionSearchInput.value.trim() ? '無結果' : '';
+    } else {
+      sessionSearchCount.textContent = `${sessionSearchIndex + 1}/${sessionSearchMatches.length}`;
+    }
+  }
+
+  function updateSessionSearchNav() {
+    sessionSearchPrev.disabled = sessionSearchMatches.length === 0;
+    sessionSearchNext.disabled = sessionSearchMatches.length === 0;
+  }
+
+  sessionSearchBtn.addEventListener('click', () => {
+    if (sessionSearchBar.classList.contains('hidden')) {
+      openSessionSearch();
+    } else {
+      closeSessionSearch();
+    }
+  });
+
+  sessionSearchClose.addEventListener('click', closeSessionSearch);
+
+  document.addEventListener('keydown', e => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
+      e.preventDefault();
+      if (sessionSearchBar.classList.contains('hidden')) {
+        openSessionSearch();
+      } else {
+        closeSessionSearch();
+      }
+    }
+  });
+
+  sessionSearchInput.addEventListener('input', runSessionSearch);
+
+  sessionSearchInput.addEventListener('keydown', e => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if (sessionSearchMatches.length === 0) return;
+      sessionSearchIndex = e.shiftKey
+        ? (sessionSearchIndex - 1 + sessionSearchMatches.length) % sessionSearchMatches.length
+        : (sessionSearchIndex + 1) % sessionSearchMatches.length;
+      highlightCurrentMatch();
+      updateSessionSearchCount();
+    } else if (e.key === 'Escape') {
+      closeSessionSearch();
+    }
+  });
+
+  sessionSearchNext.addEventListener('click', () => {
+    if (sessionSearchMatches.length === 0) return;
+    sessionSearchIndex = (sessionSearchIndex + 1) % sessionSearchMatches.length;
+    highlightCurrentMatch();
+    updateSessionSearchCount();
+  });
+
+  sessionSearchPrev.addEventListener('click', () => {
+    if (sessionSearchMatches.length === 0) return;
+    sessionSearchIndex = (sessionSearchIndex - 1 + sessionSearchMatches.length) % sessionSearchMatches.length;
+    highlightCurrentMatch();
+    updateSessionSearchCount();
   });
 
   // Summary Toolbar

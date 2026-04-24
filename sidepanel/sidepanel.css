@@ -2939,6 +2939,96 @@ mark {
   color: var(--primary);
 }
 
+/* ── Session Search Bar ─────────────────────────────── */
+.session-search-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 8px 5px 10px;
+  margin-bottom: 8px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  flex-shrink: 0;
+  margin-right: 16px;
+}
+
+.session-search-bar.hidden {
+  display: none;
+}
+
+.session-search-icon {
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.session-search-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text-primary);
+  font-size: 13px;
+  min-width: 0;
+}
+
+.session-search-input::placeholder {
+  color: var(--text-secondary);
+}
+
+.session-search-count {
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.session-search-nav,
+.session-search-close {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 3px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: color 0.15s, background 0.15s;
+}
+
+.session-search-nav:hover,
+.session-search-close:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.session-search-nav:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.message.search-match {
+  border-radius: 10px;
+}
+
+mark.search-keyword {
+  background: rgba(236, 41, 112, 0.25);
+  color: inherit;
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
+mark.search-keyword-current {
+  background: rgba(236, 41, 112, 0.6);
+  color: #fff;
+  border-radius: 2px;
+  padding: 0 1px;
+  outline: 1px solid rgba(236, 41, 112, 0.9);
+  outline-offset: 1px;
+}
+
 /* ── Summary Message (in chat) ───────────────────────── */
 .message-summary {
   align-self: stretch;
