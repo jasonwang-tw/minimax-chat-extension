@@ -579,9 +579,49 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             const title = document.title || '';
             const url = location.href || '';
             const desc = document.querySelector('meta[name="description"]')?.content || '';
-            const raw = document.body?.innerText || '';
-            const text = raw.length > 8000 ? raw.slice(0, 8000) + '\n...（已截斷）' : raw;
+            // 優先抓取主要內容區域，避免 nav/footer 干擾
+            const mainEl = document.querySelector('main, [role="main"], article, #main-content, #content, .main-content');
+            const raw = mainEl ? mainEl.innerText : (document.body?.innerText || '');
+            const MAX = 30000;
+            const text = raw.length > MAX ? raw.slice(0, MAX) + `\n...（內容過長，僅擷取前 ${MAX.toLocaleString()} 字）` : raw;
             return { title, url, description: desc, text };
+          }
+        });
+        sendResponse({ success: true, data: results[0].result });
+      } catch (err) {
+        sendResponse({ success: false, error: err.message });
+      }
+    });
+    return true;
+  }
+
+  if (message.type === 'READ_PAGE_CODE') {
+    chrome.windows.getLastFocused({ windowTypes: ['normal'] }, async (win) => {
+      if (chrome.runtime.lastError || !win) {
+        sendResponse({ success: false, error: '找不到可讀取的視窗' });
+        return;
+      }
+      try {
+        const tabs = await chrome.tabs.query({ active: true, windowId: win.id });
+        const tab = tabs[0];
+        if (!tab) {
+          sendResponse({ success: false, error: '找不到活動分頁' });
+          return;
+        }
+        const results = await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          func: () => {
+            const title = document.title || '';
+            const url = location.href || '';
+            // 內嵌 CSS
+            const styles = Array.from(document.querySelectorAll('style'))
+              .map(s => s.textContent?.trim()).filter(Boolean).join('\n\n');
+            // 外部 CSS 路徑
+            const cssLinks = Array.from(document.querySelectorAll('link[rel="stylesheet"]'))
+              .map(l => l.href).filter(Boolean).join('\n');
+            // HTML 原始碼（整頁）
+            const html = document.documentElement.outerHTML;
+            return { title, url, styles, cssLinks, html };
           }
         });
         sendResponse({ success: true, data: results[0].result });

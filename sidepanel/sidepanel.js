@@ -2142,7 +2142,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   // ── Commands ─────────────────────────────────────────────
 
   const BUILTIN_COMMANDS = [
-    { trigger: '/page',     name: '讀取當前頁面', type: 'action', icon: '📄' },
+    { trigger: '/page',      name: '讀取當前頁面',       type: 'action', icon: '📄' },
+    { trigger: '/page-code', name: '分析頁面原始碼/樣式', type: 'action', icon: '🔬', argHint: '/page-code <問題（可選）>' },
     { trigger: '/clear',    name: '清空對話',    type: 'action', icon: '🗑️' },
     { trigger: '/new',      name: '新對話',      type: 'action', icon: '➕' },
     { trigger: '/remember', name: '記住某件事',  type: 'action', icon: '🧠', argHint: '/remember <內容>' },
@@ -2236,6 +2237,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     switch (trigger) {
       case '/page':
         fetchPageContext();
+        break;
+      case '/page-code':
+        handlePageCodeAnalysis(args);
         break;
       case '/new':
         startNewSession();
@@ -3659,6 +3663,120 @@ document.addEventListener('DOMContentLoaded', async () => {
     } catch (err) {
       setStatus('無法讀取頁面：' + err.message, true, 4000);
     }
+  }
+
+  async function handlePageCodeAnalysis(question) {
+    if (isLoading) return;
+    setStatus('讀取頁面代碼中...');
+    let pageData;
+    try {
+      const response = await chrome.runtime.sendMessage({ type: 'READ_PAGE_CODE' });
+      if (!response.success) throw new Error(response.error);
+      pageData = response.data;
+    } catch (err) {
+      setStatus('無法讀取頁面代碼：' + err.message, true, 4000);
+      return;
+    }
+
+    const { title, url, styles, cssLinks, html } = pageData;
+
+    // 組合代碼內容：CSS 優先，HTML 附後
+    let codeContent = `標題：${title}\n網址：${url}\n`;
+    if (cssLinks) codeContent += `\n=== 外部 CSS 路徑 ===\n${cssLinks}\n`;
+    if (styles) codeContent += `\n=== 內嵌 <style> ===\n${styles}\n`;
+    codeContent += `\n=== HTML 原始碼 ===\n${html}`;
+
+    // 編碼為 base64 text file，透過現有 text files pipeline 分批分析
+    const base64 = btoa(unescape(encodeURIComponent(codeContent)));
+    const fakeFile = { dataUrl: `data:text/plain;base64,${base64}`, fileType: 'text', fileName: `${title || url}.html` };
+
+    const displayMsg = question ? `🔬 ${question}` : `🔬 分析頁面代碼：${(title || url).slice(0, 40)}`;
+    const apiMsg = question || '';
+
+    if (!currentSession) startNewSession();
+    isLoading = true;
+    setStreamingMode(true);
+    messageInput.disabled = true;
+    typingIndicator.classList.add('hidden');
+    emptyState.classList.add('hidden');
+    clearStatus();
+
+    currentSession.messages.push({ role: 'user', content: displayMsg });
+    addMessage(displayMsg, 'user');
+
+    const historyForApi = currentSession.messages.slice(0, -1).map(m => ({
+      role: m.role, content: m.content, images: m.images || null
+    }));
+
+    const liveDiv = createLiveMessageDiv();
+    currentLiveDiv = liveDiv;
+    currentRawContent = '';
+    let rawContent = '';
+
+    const port = chrome.runtime.connect({ name: 'chat-stream' });
+    currentPort = port;
+
+    function resetLoadingCode() {
+      isLoading = false;
+      currentPort = null;
+      currentLiveDiv = null;
+      currentRawContent = '';
+      setStreamingMode(false);
+      messageInput.disabled = false;
+      messageInput.focus();
+    }
+
+    port.onMessage.addListener(async (msg) => {
+      if (msg.type === 'status') { setStatus(msg.text); return; }
+      if (msg.type === 'compressed') { setStatus('歷史對話已自動壓縮，保留最近輪次', false, 3000); return; }
+      if (msg.type === 'chunk') {
+        rawContent = msg.full;
+        currentRawContent = rawContent;
+        updateLiveMessageContent(liveDiv, rawContent);
+        scrollToBottom();
+        return;
+      }
+      if (msg.type === 'done') {
+        const reply = msg.reply;
+        currentSession.messages.push({ role: 'assistant', content: reply });
+        finalizeLiveMessage(liveDiv, rawContent, reply);
+        clearStatus();
+        port.disconnect();
+        resetLoadingCode();
+        await saveCurrentSession();
+        await loadHistory();
+        updateCharCounter();
+        return;
+      }
+      if (msg.type === 'error') {
+        liveDiv.remove();
+        addMessage(`錯誤: ${msg.message}`, 'error');
+        clearStatus();
+        port.disconnect();
+        resetLoadingCode();
+      }
+    });
+
+    port.onDisconnect.addListener(() => {
+      if (!isLoading) return;
+      clearStatus();
+      liveDiv.remove();
+      resetLoadingCode();
+    });
+
+    port.postMessage({
+      type: 'STREAM_MESSAGE',
+      data: {
+        message: apiMsg,
+        history: historyForApi,
+        images: [fakeFile],
+        translateConfig: null,
+        model: currentModel,
+        systemPrompt: null,
+        memoryContext: buildMemoryBlock(),
+        sessionId: currentSession?.id
+      }
+    });
   }
 
   function clearPageContext() {
