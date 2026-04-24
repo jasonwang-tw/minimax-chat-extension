@@ -718,6 +718,24 @@ body {
   border-color: rgba(236, 41, 112, 0.5);
 }
 
+.queue-indicator {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  color: rgba(236, 41, 112, 0.85);
+  background: rgba(236, 41, 112, 0.08);
+  border: 1px solid rgba(236, 41, 112, 0.25);
+  border-radius: 10px;
+  padding: 3px 8px;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.queue-indicator.hidden {
+  display: none;
+}
+
 .char-counter {
   display: flex;
   align-items: center;

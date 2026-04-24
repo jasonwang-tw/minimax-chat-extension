@@ -177,6 +177,13 @@ npm run build:css
 
 ## Changelog
 
+## [1.15.4] - 2026-04-24
+### Added
+- **訊息佇列**：串流進行中可繼續輸入並送出，訊息自動排入等待佇列；前一則回覆完成後立即送出下一則，依序執行
+- **佇列 badge**：`input-bottom-bar` 顯示「N 則排隊中」指示器，停止按鈕或新建 session 時自動清空佇列
+### Changed
+- 主聊天串流期間 `messageInput` 不再被 disabled，使用者可自由輸入下一則訊息
+
 ## [1.15.3] - 2026-04-24
 ### Removed
 - **模型選擇下拉**：移除 sidepanel 輸入列的模型 select（MiniMax-M2.7-highspeed / M2.5 選項），固定使用 MiniMax-M2.7

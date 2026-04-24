@@ -28,12 +28,15 @@ let _renderVocabVer = 0;
 let _renderKbVer = 0;
 let customCommands = [];      // 使用者自訂指令
 let pageContext = null;       // 當前分頁內容（/page 指令觸發後）
+let messageQueue = [];       // 串流中排入的待發送訊息 [{ message, images, pageCtx }]
 let cmdPaletteIndex = -1;     // 指令選單鍵盤選取游標
 
 document.addEventListener('DOMContentLoaded', async () => {
   const messageInput = document.getElementById('messageInput');
   const charCounter = document.getElementById('charCounter');
   const charCountText = document.getElementById('charCountText');
+  const queueIndicator = document.getElementById('queueIndicator');
+  const queueCount = document.getElementById('queueCount');
   const sendBtn = document.getElementById('sendBtn');
   const sendIcon = document.getElementById('sendIcon');
   const stopIcon = document.getElementById('stopIcon');
@@ -303,13 +306,14 @@ document.addEventListener('DOMContentLoaded', async () => {
       const liveDiv = currentLiveDiv;
       const rawContent = currentRawContent;
       port.disconnect();
-      // 立即清理狀態
+      // 立即清理狀態（同時清空佇列，停止即終止所有排隊訊息）
       isLoading = false;
       currentPort = null;
       currentLiveDiv = null;
       currentRawContent = '';
       setStreamingMode(false);
-      messageInput.disabled = false;
+      messageQueue = [];
+      updateQueueIndicator();
       clearStatus();
       if (rawContent) {
         const partial = rawContent.trimEnd();
@@ -1589,16 +1593,42 @@ document.addEventListener('DOMContentLoaded', async () => {
       messages: [],
       model: currentModel
     };
+    messageQueue = [];
+    updateQueueIndicator();
     chatMessages.innerHTML = '';
     emptyState.classList.remove('hidden');
     updateCurrentSessionBar();
   }
 
+  function updateQueueIndicator() {
+    if (messageQueue.length > 0) {
+      queueCount.textContent = messageQueue.length;
+      queueIndicator.classList.remove('hidden');
+    } else {
+      queueIndicator.classList.add('hidden');
+    }
+  }
+
   // ── 發送訊息 ────────────────────────────────────────────
   async function handleSend() {
-    if (isLoading) return; // 串流中不重複送出
     const message = messageInput.value.trim();
     if (!message && !currentImages.length && !pageContext) return;
+
+    // 串流中：入佇列，等待當前回覆完成後自動送出
+    if (isLoading) {
+      messageQueue.push({
+        message,
+        images: [...currentImages],
+        pageCtx: pageContext ? { ...pageContext } : null
+      });
+      messageInput.value = '';
+      messageInput.style.height = 'auto';
+      if (currentImages.length) clearImageData();
+      if (pageContext) clearPageContext();
+      updateSendButton();
+      updateQueueIndicator();
+      return;
+    }
 
     // 存入輸入歷史（去重、上限 10 則）
     if (message) {
@@ -1628,7 +1658,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     isLoading = true;
-    messageInput.disabled = true;
     typingIndicator.classList.remove('hidden');
     emptyState.classList.add('hidden');
     clearStatus();
@@ -1738,8 +1767,28 @@ document.addEventListener('DOMContentLoaded', async () => {
       currentLiveDiv = null;
       currentRawContent = '';
       setStreamingMode(false);
-      messageInput.disabled = false;
-      messageInput.focus();
+      // 佇列有訊息：還原並自動送出
+      if (messageQueue.length > 0) {
+        const next = messageQueue.shift();
+        messageInput.value = next.message;
+        messageInput.style.height = 'auto';
+        messageInput.style.height = Math.min(messageInput.scrollHeight, 120) + 'px';
+        if (next.images.length > 0) {
+          currentImages = next.images;
+          renderImagePreviews();
+        }
+        if (next.pageCtx) {
+          pageContext = next.pageCtx;
+          const shortTitle = next.pageCtx.title.slice(0, 25) + (next.pageCtx.title.length > 25 ? '...' : '');
+          pageContextLabel.textContent = `📄 ${shortTitle}`;
+          pageContextChip.classList.remove('hidden');
+        }
+        updateSendButton();
+        updateQueueIndicator();
+        setTimeout(() => handleSend(), 50);
+      } else {
+        messageInput.focus();
+      }
     }
 
     port.onMessage.addListener(async (msg) => {
