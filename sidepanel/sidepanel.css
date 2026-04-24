@@ -1936,7 +1936,6 @@ mark {
 .memory-item {
   display: flex;
   align-items: flex-start;
-  flex-wrap: wrap;
   gap: 6px 8px;
   padding: 8px 16px;
   transition: background 0.12s;
@@ -1977,6 +1976,11 @@ mark {
 .memory-item-text.vocab-word {
   font-weight: 500;
   letter-spacing: 0.01em;
+  width: 100%;
+}
+
+.memory-item-text.vocab-word.editable {
+  width: 100%;
 }
 
 .memory-item-date {
