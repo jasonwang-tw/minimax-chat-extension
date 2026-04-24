@@ -177,6 +177,12 @@ npm run build:css
 
 ## Changelog
 
+## [1.15.3] - 2026-04-24
+### Removed
+- **模型選擇下拉**：移除 sidepanel 輸入列的模型 select（MiniMax-M2.7-highspeed / M2.5 選項），固定使用 MiniMax-M2.7
+- **設定頁「預設模型」**：移除 options.html 對話設定中的 `defaultModel` select 及提示文字，`options.js` 對應的 DOM ref、存取與讀取邏輯一併移除
+- **相關 CSS**：移除 `.chat-options-bar-wrapper`、`.chat-options-bar`、`.chat-select` 及 media query 樣式
+
 ## [1.15.2] - 2026-04-24
 ### Fixed
 - **`/page` 自動搜尋干擾**：短頁面（< 6000 字）使用 `/page` 後發問，自動搜尋誤觸並將不相關的外部結果混入 context，導致 AI 解讀錯誤（如問 GitHub token 設定卻回答區塊鏈）；現在有頁面內容時一律跳過自動搜尋

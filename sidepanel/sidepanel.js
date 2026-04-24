@@ -90,7 +90,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   const confirmAnnotationBtn = document.getElementById('confirmAnnotation');
   const annUndoBtn = document.getElementById('annUndo');
   const annClearBtn = document.getElementById('annClear');
-  const modelSelect = document.getElementById('modelSelect');
   const historySearchInput = document.getElementById('historySearch');
   const historyClearSearchBtn = document.getElementById('historyClearSearch');
   const commandPalette = document.getElementById('commandPalette');
@@ -255,10 +254,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   // 載入歷史記錄
   await loadHistory();
 
-  // ── 模型選擇 ────────────────────────────────────────────
-  modelSelect.addEventListener('change', () => {
-    currentModel = modelSelect.value;
-  });
 
   // ── 歷史搜尋 ────────────────────────────────────────────
   historySearchInput.addEventListener('input', () => {
@@ -1565,11 +1560,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     messageInput.style.height = 'auto';
     updateCharCounter();
 
-    // 還原 session 當時的 model 和 replyMode
-    if (currentSession.model) {
-      currentModel = currentSession.model;
-      modelSelect.value = currentModel;
-    }
     currentSession.messages.forEach(msg => {
       // 歷史訊息不知道當時語言設定，用內容自動偵測
       const ttsLang = detectLang(msg.content);

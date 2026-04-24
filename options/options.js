@@ -16,7 +16,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   const testBtn = document.getElementById('testBtn');
   const testGeminiBtn = document.getElementById('testGeminiBtn');
   const maxHistorySelect = document.getElementById('maxHistory');
-  const defaultModelSelect = document.getElementById('defaultModel');
   const saveConversationBtn = document.getElementById('saveConversationBtn');
   const globalPromptInput = document.getElementById('globalPrompt');
   const promptChatInput = document.getElementById('promptChat');
@@ -76,8 +75,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   saveConversationBtn?.addEventListener('click', async () => {
     await chrome.storage.sync.set({
       settings: {
-        maxHistory: parseInt(maxHistorySelect.value, 10),
-        defaultModel: defaultModelSelect.value
+        maxHistory: parseInt(maxHistorySelect.value, 10)
       }
     });
     showMessage('對話設定已儲存', 'success');
@@ -195,7 +193,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     braveApiKeyInput.value = braveApiKey || '';
     exaApiKeyInput.value = exaApiKey || '';
     maxHistorySelect.value = String(settings?.maxHistory || 50);
-    defaultModelSelect.value = settings?.defaultModel || 'MiniMax-M2.7';
   }
 
   async function loadPrompts() {

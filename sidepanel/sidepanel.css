@@ -752,19 +752,6 @@ body {
   max-height: 120px;
 }
 
-.chat-options-bar-wrapper {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-@media (max-width: 480px) {
-  .chat-options-bar-wrapper {
-    width: 100%;
-    justify-content: space-between;
-  }
-}
-
 /* 底部工具列 + 送出按鈕 */
 .input-bottom-bar {
   display: flex;
@@ -1706,35 +1693,6 @@ mark {
 }
 
 /* ── 對話選項列（模型 + 回覆模式）──────────────────────── */
-.chat-options-bar {
-  display: flex;
-  gap: 10px;
-  /* padding: 10px 0; */
-  /* border-top: 1px solid rgba(255,255,255,0.06); */
-  /* background: var(--bg-dark); */
-}
-
-.chat-select {
-  flex: 1;
-  background: var(--bg-darker);
-  border: none;
-  /* border-radius: var(--border-radius); */
-  color: var(--text-primary);
-  font-size: 12px;
-  /* padding: var(--padding-small); */
-  cursor: pointer;
-  outline: none;
-  /* min-width: 0; */
-  transition: border-color 0.15s;
-}
-
-.chat-select:focus {
-  border-color: var(--primary);
-}
-
-.chat-select option {
-  background: var(--bg-dark);
-}
 
 /* ── 模式分界線 ────────────────────────────────────────── */
 .mode-divider {
