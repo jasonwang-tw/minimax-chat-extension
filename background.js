@@ -581,9 +581,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             const desc = document.querySelector('meta[name="description"]')?.content || '';
             // 優先抓取主要內容區域，避免 nav/footer 干擾
             const mainEl = document.querySelector('main, [role="main"], article, #main-content, #content, .main-content');
-            const raw = mainEl ? mainEl.innerText : (document.body?.innerText || '');
-            const MAX = 30000;
-            const text = raw.length > MAX ? raw.slice(0, MAX) + `\n...（內容過長，僅擷取前 ${MAX.toLocaleString()} 字）` : raw;
+            const text = mainEl ? mainEl.innerText : (document.body?.innerText || '');
             return { title, url, description: desc, text };
           }
         });
@@ -1048,7 +1046,7 @@ async function callGemini(geminiApiKey, images, prompt) {
 // 文字檔分批處理：每段 6000 字 → 逐段分析 → 合併結果
 async function handleTextFilesPipeline(textFiles, userMessage, history, translateConfig, model, systemPrompt, memoryContext) {
   const CHUNK_SIZE = 6000;
-  const MAX_TOTAL_CHARS = 30000; // 最多 5 段，避免 merge 也超出 context
+  const MAX_TOTAL_CHARS = 60000; // 最多 10 段，支援長頁面/代碼分析
 
   // 讀取並裁切所有文字檔，總量限制 MAX_TOTAL_CHARS
   const fileParts = [];

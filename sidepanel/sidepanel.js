@@ -1635,6 +1635,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     // 若有頁面內容，包裝 user message（先擷取標題供顯示用）
     const pageTitle = pageContext?.title;
     const isPageOnly = !message && !!pageContext;
+    const isLongPage = !!pageContext && pageContext.text.length > PAGE_INLINE_LIMIT;
+    // 長頁：轉 text file（buildPageContextFile 內會 clearPageContext）
+    const pageFile = isLongPage ? buildPageContextFile() : null;
     const knowledgePrefix = buildKnowledgeBlock();
     const finalMessage = knowledgePrefix + buildPageContextMessage(message);
     // 清除已選知識庫 chips
@@ -1648,6 +1651,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     const userMessage = { role: 'user', content: displayMessage };
     const snapshotImages = [...currentImages]; // 快照，避免 clearImageData 後遺失
+    if (pageFile) snapshotImages.unshift(pageFile); // 長頁 file 插到最前
     if (snapshotImages.length > 0) {
       userMessage.images = snapshotImages.map(i => i.dataUrl); // backward compat
       userMessage.fileInfos = snapshotImages.map(i => ({ fileType: i.fileType || 'image', fileName: i.fileName || null }));
@@ -3784,14 +3788,33 @@ document.addEventListener('DOMContentLoaded', async () => {
     pageContextChip.classList.add('hidden');
   }
 
+  const PAGE_INLINE_LIMIT = 6000; // 超過此字數改用分段分析 pipeline
+
   function buildPageContextMessage(userMessage) {
     if (!pageContext) return userMessage;
+    // 長頁：不 inline 嵌入（由 handleSend 轉 text file 走 pipeline）
+    if (pageContext.text.length > PAGE_INLINE_LIMIT) {
+      if (userMessage) return userMessage;
+      return ''; // 純 /page 時，message 由 pipeline 負責
+    }
     const parts = [`【當前頁面】`, `標題：${pageContext.title}`, `網址：${pageContext.url}`];
     if (pageContext.description) parts.push(`描述：${pageContext.description}`);
     parts.push(`內容：\n${pageContext.text}`);
     if (userMessage) parts.push(`\n使用者問題：\n${userMessage}`);
     clearPageContext();
     return parts.join('\n');
+  }
+
+  // 長頁時把 pageContext 轉成 text file，走 streamTextFilesPipeline
+  function buildPageContextFile() {
+    if (!pageContext || pageContext.text.length <= PAGE_INLINE_LIMIT) return null;
+    const { title, url, description, text } = pageContext;
+    let content = `標題：${title}\n網址：${url}\n`;
+    if (description) content += `描述：${description}\n`;
+    content += `\n內容：\n${text}`;
+    const b64 = btoa(unescape(encodeURIComponent(content)));
+    clearPageContext();
+    return { dataUrl: `data:text/plain;base64,${b64}`, fileType: 'text', fileName: `${title || url}.txt` };
   }
 
   // ── 工具函式 ────────────────────────────────────────────
