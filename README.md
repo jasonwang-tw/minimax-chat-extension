@@ -177,6 +177,16 @@ npm run build:css
 
 ## Changelog
 
+## [1.15.0] - 2026-04-24
+### Added
+- **輸入字數計數器**：輸入框超過 1000 字顯示計數，超過 3000 字橙色警示，超過 5000 字紅色閃爍警示
+- **自動對話壓縮**：歷史訊息超出 token budget 時，自動呼叫 MiniMax 生成 200 字繁體中文摘要，注入 system prompt 保留語意；壓縮結果存入 `sessionSummaries`（`auto: true`），下次同 session 發送可直接複用，不重複壓縮
+- **壓縮通知**：觸發壓縮時在狀態列顯示「歷史對話已自動壓縮，保留最近輪次」
+
+### Changed
+- `streamMiniMaxChat` / `handleMiniMaxChat` 接受 `sessionId` 並傳入壓縮函式
+- 主送出 `STREAM_MESSAGE` 帶入 `sessionId: currentSession?.id`
+
 ## [1.14.6] - 2026-04-24
 ### Fixed
 - **Context window 超限錯誤**：輸入或歷史累積過長時，API 回傳 `invalid params, context window exceeds limit` 導致 chatbox 顯示原始英文錯誤

@@ -32,6 +32,8 @@ let cmdPaletteIndex = -1;     // 指令選單鍵盤選取游標
 
 document.addEventListener('DOMContentLoaded', async () => {
   const messageInput = document.getElementById('messageInput');
+  const charCounter = document.getElementById('charCounter');
+  const charCountText = document.getElementById('charCountText');
   const sendBtn = document.getElementById('sendBtn');
   const sendIcon = document.getElementById('sendIcon');
   const stopIcon = document.getElementById('stopIcon');
@@ -279,6 +281,17 @@ document.addEventListener('DOMContentLoaded', async () => {
     updateSendButton();
     handleCommandPaletteInput();
     handleKbPaletteInput();
+    // 字數計數器
+    const len = messageInput.value.length;
+    if (len < 1000) {
+      charCounter.classList.add('hidden');
+    } else {
+      charCounter.classList.remove('hidden');
+      charCountText.textContent = `${len.toLocaleString()} 字`;
+      charCounter.classList.remove('warn', 'danger');
+      if (len > 5000) charCounter.classList.add('danger');
+      else if (len > 3000) charCounter.classList.add('warn');
+    }
   });
 
   // 發送 / 停止
@@ -1705,6 +1718,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         setStatus(msg.text);
         return;
       }
+      if (msg.type === 'compressed') {
+        setStatus('歷史對話已自動壓縮，保留最近輪次', false, 3000);
+        return;
+      }
       if (msg.type === 'chunk') {
         rawContent = msg.full;
         currentRawContent = rawContent;
@@ -1784,7 +1801,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         translateConfig,
         model: currentModel,
         systemPrompt,
-        memoryContext
+        memoryContext,
+        sessionId: currentSession?.id
       }
     });
   }

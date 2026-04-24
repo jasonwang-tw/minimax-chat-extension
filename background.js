@@ -686,13 +686,13 @@ chrome.runtime.onConnect.addListener(port => {
   });
 });
 
-async function streamHandleMessage({ message, history, images, image, mode, translateConfig, model, systemPrompt, memoryContext }, port) {
+async function streamHandleMessage({ message, history, images, image, mode, translateConfig, model, systemPrompt, memoryContext, sessionId }, port) {
   const fileList = images && images.length > 0
     ? images
     : (image ? [{ dataUrl: image, mode: mode || 'upload', fileType: 'image' }] : null);
 
   if (!fileList || fileList.length === 0) {
-    await streamMiniMaxChat(message, history, translateConfig, model, systemPrompt, memoryContext, port);
+    await streamMiniMaxChat(message, history, translateConfig, model, systemPrompt, memoryContext, port, sessionId);
     return;
   }
 
@@ -740,7 +740,7 @@ async function streamHandleMessage({ message, history, images, image, mode, tran
       const userQ = combinedMessage ? `\n\n使用者問題：${combinedMessage}` : '';
       minimaxPrompt = `以下是圖片分析結果：\n\n${geminiResult}${userQ}\n\n請根據以上分析，提供清晰、有條理的回應。`;
     }
-    await streamMiniMaxChat(minimaxPrompt, history, null, model, null, memoryContext, port);
+    await streamMiniMaxChat(minimaxPrompt, history, null, model, null, memoryContext, port, sessionId);
     return;
   }
 
@@ -797,7 +797,7 @@ async function streamTextFilesPipeline(textFiles, userMessage, history, translat
   await streamMiniMaxChat(mergePrompt, history, translateConfig, model, systemPrompt, memoryContext, port);
 }
 
-async function streamMiniMaxChat(message, history, translateConfig, model, systemPrompt, memoryContext, port) {
+async function streamMiniMaxChat(message, history, translateConfig, model, systemPrompt, memoryContext, port, sessionId) {
   const { apiKey, defaultPrompts, globalPrompt: storedGlobal } = await chrome.storage.sync.get(['apiKey', 'defaultPrompts', 'globalPrompt']);
   if (!apiKey) throw new Error('請先在設定頁面輸入 API Key');
 
@@ -810,7 +810,18 @@ async function streamMiniMaxChat(message, history, translateConfig, model, syste
   else if (systemPrompt) modePrompt = systemPrompt;
 
   const finalSystemPrompt = [memoryContext, globalPrompt, modePrompt].filter(Boolean).join('\n\n');
-  const messages = buildMessages(message, history, translateConfig, finalSystemPrompt, globalPrompt);
+
+  const fixedChars = (finalSystemPrompt?.length || 0) + message.length;
+  const historyBudget = Math.max(0, MAX_CONTEXT_CHARS - fixedChars);
+  const { history: compressedHistory, summary } = await compressHistoryIfNeeded(sessionId, history || [], apiKey, useModel, historyBudget);
+
+  if (summary) port.postMessage({ type: 'compressed' });
+
+  const effectiveSystemPrompt = summary
+    ? `${finalSystemPrompt ? finalSystemPrompt + '\n\n' : ''}[對話前段摘要]\n${summary}`
+    : finalSystemPrompt;
+
+  const messages = buildMessages(message, compressedHistory, translateConfig, effectiveSystemPrompt, globalPrompt);
 
   const response = await fetch(MINIMAX_API_URL, {
     method: 'POST',
@@ -866,14 +877,14 @@ async function streamMiniMaxChat(message, history, translateConfig, model, syste
 }
 
 // 處理聊天訊息
-async function handleChatMessage({ message, history, images, image, mode, translateConfig, model, systemPrompt, memoryContext }) {
+async function handleChatMessage({ message, history, images, image, mode, translateConfig, model, systemPrompt, memoryContext, sessionId }) {
   // 支援新格式 images（陣列）與舊格式 image（單張）
   const fileList = images && images.length > 0
     ? images
     : (image ? [{ dataUrl: image, mode: mode || 'upload', fileType: 'image' }] : null);
 
   if (!fileList || fileList.length === 0) {
-    return handleMiniMaxChat(message, history, translateConfig, model, systemPrompt, memoryContext);
+    return handleMiniMaxChat(message, history, translateConfig, model, systemPrompt, memoryContext, sessionId);
   }
 
   // 分離文字檔與視覺檔（圖片 / PDF）
@@ -1053,7 +1064,7 @@ async function handleTextFilesPipeline(textFiles, userMessage, history, translat
 }
 
 // MiniMax 文字對話
-async function handleMiniMaxChat(message, history, translateConfig, model, systemPrompt, memoryContext) {
+async function handleMiniMaxChat(message, history, translateConfig, model, systemPrompt, memoryContext, sessionId) {
   const { apiKey, defaultPrompts, globalPrompt: storedGlobal } = await chrome.storage.sync.get(['apiKey', 'defaultPrompts', 'globalPrompt']);
 
   if (!apiKey) {
@@ -1077,7 +1088,15 @@ async function handleMiniMaxChat(message, history, translateConfig, model, syste
   // 優先序：memory > globalPrompt > modePrompt
   const finalSystemPrompt = [memoryContext, globalPrompt, modePrompt].filter(Boolean).join('\n\n');
 
-  const messages = buildMessages(message, history, translateConfig, finalSystemPrompt, globalPrompt);
+  const fixedChars = (finalSystemPrompt?.length || 0) + message.length;
+  const historyBudget = Math.max(0, MAX_CONTEXT_CHARS - fixedChars);
+  const { history: compressedHistory, summary } = await compressHistoryIfNeeded(sessionId, history || [], apiKey, useModel, historyBudget);
+
+  const effectiveSystemPrompt = summary
+    ? `${finalSystemPrompt ? finalSystemPrompt + '\n\n' : ''}[對話前段摘要]\n${summary}`
+    : finalSystemPrompt;
+
+  const messages = buildMessages(message, compressedHistory, translateConfig, effectiveSystemPrompt, globalPrompt);
 
   console.log('發送請求到 MiniMax API:', { model: useModel, messages });
 
@@ -1140,6 +1159,82 @@ async function handleMiniMaxChat(message, history, translateConfig, model, syste
   }
 
   return { reply: assistantMessage.trim() };
+}
+
+// 自動壓縮歷史：超出 budget 時呼叫 MiniMax 生成摘要，複用 sessionSummaries
+async function compressHistoryIfNeeded(sessionId, history, apiKey, model, budgetChars) {
+  if (!history || history.length === 0) return { history, summary: '' };
+
+  const totalChars = history.reduce((sum, m) => sum + (typeof m.content === 'string' ? m.content.length : 0), 0);
+  if (totalChars <= budgetChars) return { history, summary: '' };
+
+  const KEEP_RECENT = 10;
+
+  // 讀取已有的自動摘要（避免重複壓縮相同段落）
+  let existingSummary = '';
+  let coveredUpTo = 0;
+  if (sessionId) {
+    const { sessionSummaries = {} } = await chrome.storage.local.get(['sessionSummaries']);
+    const autoList = (sessionSummaries[sessionId] || []).filter(s => s.auto);
+    if (autoList.length > 0) {
+      const latest = autoList.sort((a, b) => b.createdAt - a.createdAt)[0];
+      existingSummary = latest.text;
+      coveredUpTo = latest.coveredUpTo || 0;
+    }
+  }
+
+  const unsummarizedEnd = Math.max(0, history.length - KEEP_RECENT);
+  const newToSummarize = history.slice(coveredUpTo, unsummarizedEnd);
+  const toKeep = history.slice(-KEEP_RECENT);
+
+  // 已全數壓縮過，直接複用
+  if (newToSummarize.length === 0 && existingSummary) {
+    return { history: toKeep, summary: existingSummary };
+  }
+
+  // 組合要摘要的文字
+  let convText = existingSummary ? `[前段摘要]\n${existingSummary}\n\n[新增對話]\n` : '';
+  convText += newToSummarize
+    .filter(m => typeof m.content === 'string')
+    .map(m => `${m.role === 'user' ? '使用者' : 'AI'}: ${m.content}`)
+    .join('\n');
+
+  if (!convText.trim()) return { history: trimHistoryForContext(history, budgetChars), summary: '' };
+
+  try {
+    const res = await fetch(MINIMAX_API_URL, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model,
+        messages: [{ role: 'user', content: `請將以下對話濃縮成繁體中文摘要（200字以內），保留重要資訊、決定與結論：\n\n${convText}` }]
+      })
+    });
+    if (!res.ok) throw new Error('compress_failed');
+    const data = await res.json();
+    const summary = (data.choices?.[0]?.message?.content || '').trim();
+    if (!summary) throw new Error('empty_summary');
+
+    // 存入 sessionSummaries（取代舊的自動摘要）
+    if (sessionId) {
+      const { sessionSummaries: stored = {} } = await chrome.storage.local.get(['sessionSummaries']);
+      if (!stored[sessionId]) stored[sessionId] = [];
+      stored[sessionId] = stored[sessionId].filter(s => !s.auto);
+      stored[sessionId].push({
+        id: `sum_auto_${Date.now()}`,
+        text: summary,
+        createdAt: Date.now(),
+        addedToMemory: false,
+        auto: true,
+        coveredUpTo: unsummarizedEnd
+      });
+      await chrome.storage.local.set({ sessionSummaries: stored });
+    }
+
+    return { history: toKeep, summary };
+  } catch {
+    return { history: trimHistoryForContext(history, budgetChars), summary: '' };
+  }
 }
 
 // 從最舊端裁切歷史，確保不超出 token budget

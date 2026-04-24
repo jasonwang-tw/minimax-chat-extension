@@ -31,6 +31,14 @@
 - Added chatSessions to instant backup scope
 - Added "auto-restore on startup" option
 
+## Done (v1.15.0)
+
+- Input char counter: show count at 1000+, orange warning at 3000+, red pulse at 5000+
+- Auto history compression: when history exceeds token budget, summarize oldest turns via MiniMax (200-char summary in zh-TW), inject into system prompt
+- Compression result cached in sessionSummaries (auto: true, coveredUpTo index) to avoid re-summarizing on next turn
+- Compression notification shown in status bar when triggered
+- Context window API error now shows friendly Chinese message
+
 ## Next Phase
 
 - Final E2E regression pass on production-like setup (login -> backup -> restore -> token cleanup)
