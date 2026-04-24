@@ -1645,6 +1645,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // 若有頁面內容，包裝 user message（先擷取標題供顯示用）
     const pageTitle = pageContext?.title;
+    const hadPageContext = !!pageContext; // 記錄是否有頁面內容（buildPageContextMessage 會清除 pageContext）
     const isPageOnly = !message && !!pageContext;
     const isLongPage = !!pageContext && pageContext.text.length > PAGE_INLINE_LIMIT;
     // 長頁：轉 text file（buildPageContextFile 內會 clearPageContext）
@@ -1708,8 +1709,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     const replyLang = translateEnabled ? null : sourceLangSelect.value;
 
     // ── 自動搜尋（有 Search API Key 且純文字訊息時觸發）──────
+    // 有頁面內容時跳過自動搜尋：使用者問的是當前頁面，外部搜尋結果會干擾 context
     let augmentedMessage = textMessage;
-    if (message && !snapshotImages.length && !translateEnabled) {
+    if (message && !snapshotImages.length && !translateEnabled && !hadPageContext) {
       const { braveApiKey, exaApiKey } = await chrome.storage.sync.get(['braveApiKey', 'exaApiKey']);
       if (braveApiKey || exaApiKey) {
         setStatus('🔍 分析問題...');

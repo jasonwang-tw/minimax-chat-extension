@@ -177,6 +177,10 @@ npm run build:css
 
 ## Changelog
 
+## [1.15.2] - 2026-04-24
+### Fixed
+- **`/page` 自動搜尋干擾**：短頁面（< 6000 字）使用 `/page` 後發問，自動搜尋誤觸並將不相關的外部結果混入 context，導致 AI 解讀錯誤（如問 GitHub token 設定卻回答區塊鏈）；現在有頁面內容時一律跳過自動搜尋
+
 ## [1.15.1] - 2026-04-24
 ### Added
 - **AI 建議選項可點擊**：AI 回覆中 Markdown blockquote 格式（`> - 選項`）自動渲染為可點擊的 suggestion chip 按鈕，點擊後直接送出該選項至 chatbox
