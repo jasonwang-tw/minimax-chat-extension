@@ -1694,6 +1694,43 @@ mark {
 
 /* ── 對話選項列（模型 + 回覆模式）──────────────────────── */
 
+.chat-options-bar-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+@media (max-width: 480px) {
+  .chat-options-bar-wrapper {
+    width: 100%;
+    justify-content: space-between;
+  }
+}
+
+.chat-options-bar {
+  display: flex;
+  gap: 10px;
+}
+
+.chat-select {
+  flex: 1;
+  background: var(--bg-darker);
+  border: none;
+  color: var(--text-primary);
+  font-size: 12px;
+  cursor: pointer;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.chat-select:focus {
+  border-color: var(--primary);
+}
+
+.chat-select option {
+  background: var(--bg-dark);
+}
+
 /* ── 模式分界線 ────────────────────────────────────────── */
 .mode-divider {
   text-align: center;
