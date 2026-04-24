@@ -1200,6 +1200,43 @@ async function handleMiniMaxChat(message, history, translateConfig, model, syste
 }
 
 // 自動壓縮歷史：超出 budget 時呼叫 MiniMax 生成摘要，複用 sessionSummaries
+const COMPRESS_CHUNK_CHARS = 8000;  // 每段壓縮上限（留足空間給 prompt overhead）
+
+// 單次摘要 API call（內部工具，不 stream）
+async function callCompressApi(apiKey, model, text) {
+  const res = await fetch(MINIMAX_API_URL, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model,
+      messages: [{ role: 'user', content: `請將以下對話摘要成繁體中文（300字以內），保留重要資訊與結論：\n\n${text}` }]
+    })
+  });
+  if (!res.ok) throw new Error('compress_api_failed');
+  const data = await res.json();
+  const result = (data.choices?.[0]?.message?.content || '').trim();
+  if (!result) throw new Error('compress_empty');
+  return result;
+}
+
+// 合併多段摘要為最終摘要
+async function callMergeCompressApi(apiKey, model, summaries) {
+  const merged = summaries.join('\n\n---\n\n');
+  const res = await fetch(MINIMAX_API_URL, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model,
+      messages: [{ role: 'user', content: `以下是對話各段的摘要，請整合成一份繁體中文總摘要（200字以內），保留重要資訊、決定與結論：\n\n${merged}` }]
+    })
+  });
+  if (!res.ok) throw new Error('merge_api_failed');
+  const data = await res.json();
+  const result = (data.choices?.[0]?.message?.content || '').trim();
+  if (!result) throw new Error('merge_empty');
+  return result;
+}
+
 async function compressHistoryIfNeeded(sessionId, history, apiKey, model, budgetChars) {
   if (!history || history.length === 0) return { history, summary: '' };
 
@@ -1230,28 +1267,43 @@ async function compressHistoryIfNeeded(sessionId, history, apiKey, model, budget
     return { history: toKeep, summary: existingSummary };
   }
 
-  // 組合要摘要的文字
-  let convText = existingSummary ? `[前段摘要]\n${existingSummary}\n\n[新增對話]\n` : '';
-  convText += newToSummarize
+  // 組合新增對話的純文字
+  const newConvText = newToSummarize
     .filter(m => typeof m.content === 'string')
     .map(m => `${m.role === 'user' ? '使用者' : 'AI'}: ${m.content}`)
     .join('\n');
 
-  if (!convText.trim()) return { history: trimHistoryForContext(history, budgetChars), summary: '' };
+  if (!newConvText.trim() && !existingSummary) {
+    return { history: trimHistoryForContext(history, budgetChars), summary: '' };
+  }
+  if (!newConvText.trim()) {
+    return { history: toKeep, summary: existingSummary };
+  }
 
   try {
-    const res = await fetch(MINIMAX_API_URL, {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model,
-        messages: [{ role: 'user', content: `請將以下對話濃縮成繁體中文摘要（200字以內），保留重要資訊、決定與結論：\n\n${convText}` }]
-      })
-    });
-    if (!res.ok) throw new Error('compress_failed');
-    const data = await res.json();
-    const summary = (data.choices?.[0]?.message?.content || '').trim();
-    if (!summary) throw new Error('empty_summary');
+    let finalSummary;
+
+    if (newConvText.length <= COMPRESS_CHUNK_CHARS) {
+      // 短：單次摘要
+      const newSummary = await callCompressApi(apiKey, model, newConvText);
+      finalSummary = existingSummary
+        ? await callMergeCompressApi(apiKey, model, [existingSummary, newSummary])
+        : newSummary;
+    } else {
+      // 長：分段摘要 → 合併
+      const chunks = [];
+      for (let i = 0; i < newConvText.length; i += COMPRESS_CHUNK_CHARS) {
+        chunks.push(newConvText.slice(i, i + COMPRESS_CHUNK_CHARS));
+      }
+      const chunkSummaries = [];
+      if (existingSummary) chunkSummaries.push(`[前段摘要]\n${existingSummary}`);
+      for (const chunk of chunks) {
+        chunkSummaries.push(await callCompressApi(apiKey, model, chunk));
+      }
+      finalSummary = chunkSummaries.length === 1
+        ? chunkSummaries[0]
+        : await callMergeCompressApi(apiKey, model, chunkSummaries);
+    }
 
     // 存入 sessionSummaries（取代舊的自動摘要）
     if (sessionId) {
@@ -1260,7 +1312,7 @@ async function compressHistoryIfNeeded(sessionId, history, apiKey, model, budget
       stored[sessionId] = stored[sessionId].filter(s => !s.auto);
       stored[sessionId].push({
         id: `sum_auto_${Date.now()}`,
-        text: summary,
+        text: finalSummary,
         createdAt: Date.now(),
         addedToMemory: false,
         auto: true,
@@ -1269,7 +1321,7 @@ async function compressHistoryIfNeeded(sessionId, history, apiKey, model, budget
       await chrome.storage.local.set({ sessionSummaries: stored });
     }
 
-    return { history: toKeep, summary };
+    return { history: toKeep, summary: finalSummary };
   } catch {
     return { history: trimHistoryForContext(history, budgetChars), summary: '' };
   }
