@@ -177,6 +177,12 @@ npm run build:css
 
 ## Changelog
 
+## [1.14.6] - 2026-04-24
+### Fixed
+- **Context window 超限錯誤**：輸入或歷史累積過長時，API 回傳 `invalid params, context window exceeds limit` 導致 chatbox 顯示原始英文錯誤
+- 在 `buildMessages` 加入 `trimHistoryForContext`：自動從最舊端裁切歷史訊息，確保 token 預算（`MAX_CONTEXT_CHARS = 40000` 字元）不超限
+- 將 context window 相關 API 錯誤改為友善中文提示：「對話內容或歷史過長，已超出模型限制。請試著縮短輸入，或點擊「+」開啟新對話。」
+
 ## [1.14.5] - 2026-04-23
 ### Fixed
 - **API Key 重載後消失**：`geminiApiKey`、`braveApiKey`、`exaApiKey` 未加入 `AUTO_BACKUP_KEYS_SYNC`，導致儲存後不觸發即時備份；開啟時自動同步用舊備份覆蓋，三組 Key 全部遺失

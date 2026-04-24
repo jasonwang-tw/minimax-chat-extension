@@ -6,6 +6,7 @@ const MINIMAX_API_URL = 'https://api.minimax.io/v1/chat/completions';
 const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash-lite:generateContent';
 const MODEL_NAME = 'MiniMax-M2.7';
 const MAX_HISTORY = 50;
+const MAX_CONTEXT_CHARS = 40000; // 保守估計 ~20k tokens（中英混合約 2 字元/token）
 
 const DEFAULT_PROMPTS = {
   chat: '',
@@ -819,7 +820,11 @@ async function streamMiniMaxChat(message, history, translateConfig, model, syste
 
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));
-    throw new Error(errorData.error?.message || errorData.base_resp?.status_msg || `API 錯誤: ${response.status}`);
+    const rawMsg = errorData.error?.message || errorData.base_resp?.status_msg || '';
+    if (rawMsg.toLowerCase().includes('context window')) {
+      throw new Error('對話內容或歷史過長，已超出模型限制。請試著縮短輸入，或點擊「+」開啟新對話。');
+    }
+    throw new Error(rawMsg || `API 錯誤: ${response.status}`);
   }
 
   const reader = response.body.getReader();
@@ -1093,11 +1098,12 @@ async function handleMiniMaxChat(message, history, translateConfig, model, syste
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));
     console.error('API 錯誤回應:', errorData);
-    if (errorData.error?.message) {
-      throw new Error(errorData.error.message);
-    } else if (errorData.error) {
-      throw new Error(JSON.stringify(errorData.error));
+    const rawMsg = errorData.error?.message || '';
+    if (rawMsg.toLowerCase().includes('context window')) {
+      throw new Error('對話內容或歷史過長，已超出模型限制。請試著縮短輸入，或點擊「+」開啟新對話。');
     }
+    if (rawMsg) throw new Error(rawMsg);
+    if (errorData.error) throw new Error(JSON.stringify(errorData.error));
     throw new Error(`API 錯誤: ${response.status}`);
   }
 
@@ -1136,6 +1142,18 @@ async function handleMiniMaxChat(message, history, translateConfig, model, syste
   return { reply: assistantMessage.trim() };
 }
 
+// 從最舊端裁切歷史，確保不超出 token budget
+function trimHistoryForContext(history, budgetChars) {
+  if (!history || history.length === 0) return [];
+  const trimmed = [...history];
+  let total = trimmed.reduce((sum, item) => sum + (typeof item.content === 'string' ? item.content.length : 0), 0);
+  while (total > budgetChars && trimmed.length > 2) {
+    const removed = trimmed.shift();
+    total -= typeof removed.content === 'string' ? removed.content.length : 0;
+  }
+  return trimmed;
+}
+
 // 建立訊息陣列（支援翻譯模式、預設提示詞、回覆模式）
 function buildMessages(newMessage, history, translateConfig, systemPrompt, globalPrompt = '') {
   const messages = [];
@@ -1156,9 +1174,13 @@ function buildMessages(newMessage, history, translateConfig, systemPrompt, globa
     messages.push({ role: 'system', content: systemPrompt });
   }
 
-  // 歷史訊息
-  if (history && history.length > 0) {
-    history.forEach(item => {
+  // 歷史訊息（自動裁切避免超出 context window）
+  const fixedChars = (systemPrompt?.length || 0) + newMessage.length;
+  const historyBudget = Math.max(0, MAX_CONTEXT_CHARS - fixedChars);
+  const trimmedHistory = trimHistoryForContext(history, historyBudget);
+
+  if (trimmedHistory.length > 0) {
+    trimmedHistory.forEach(item => {
       const histImgs = item.images || (item.image ? [item.image] : null);
       if (histImgs && histImgs.length > 0) {
         messages.push({
