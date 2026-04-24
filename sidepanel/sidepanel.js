@@ -161,7 +161,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const COPY_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`;
   const COPY_OK_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>`;
   const FILE_SVG_PDF = `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#f87171" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="15" y2="17"/></svg>`;
-  const FILE_SVG_DOC = `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#93c5fd" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="15" y2="17"/></svg>`;
+  const FILE_SVG_DOC = `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ec2970" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="15" y2="17"/></svg>`;
   // 判斷 MIME type → fileType
   function getFileType(mimeType) {
     if (!mimeType || mimeType.startsWith('image/')) return 'image';
@@ -442,7 +442,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Page context chip 移除
   pageContextRemove.addEventListener('click', clearPageContext);
 
-  // Suggestion chips
+  // Suggestion chips（空白頁預設提示）
   document.querySelectorAll('.suggestion-chip').forEach(btn => {
     btn.addEventListener('click', () => {
       messageInput.value = btn.dataset.prompt;
@@ -451,6 +451,17 @@ document.addEventListener('DOMContentLoaded', async () => {
       updateSendButton();
       messageInput.focus();
     });
+  });
+
+  // AI 回覆中的 suggestion chip（event delegation，點擊直接送出）
+  chatMessages.addEventListener('click', (e) => {
+    const chip = e.target.closest('.ai-suggestion');
+    if (!chip) return;
+    const text = chip.dataset.text;
+    if (!text) return;
+    messageInput.value = text;
+    messageInput.dispatchEvent(new Event('input'));
+    handleSend();
   });
 
   // Memory Modal
@@ -3912,6 +3923,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const out = [];
     let inUl = false, inOl = false;
     let tRows = [], inTable = false;
+    let inBq = false, bqTexts = [], bqChips = [];
 
     function flushTable() {
       if (!tRows.length) return;
@@ -3931,7 +3943,36 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (inOl) { out.push('</ol>'); inOl = false; }
     }
 
+    function flushBlockquote() {
+      if (!inBq) return;
+      out.push('<div class="ai-suggestion-block">');
+      if (bqTexts.length) out.push(`<p class="suggestion-prompt">${bqTexts.join('<br>')}</p>`);
+      if (bqChips.length) {
+        out.push('<div class="suggestion-chips-row">');
+        for (const chip of bqChips) {
+          const attr = chip.replace(/"/g, '&quot;');
+          out.push(`<button class="suggestion-chip ai-suggestion" data-text="${attr}">${chip}</button>`);
+        }
+        out.push('</div>');
+      }
+      out.push('</div>');
+      inBq = false; bqTexts = []; bqChips = [];
+    }
+
     for (const line of lines) {
+      // blockquote（> text 或 > - item）
+      if (line.startsWith('&gt; ') || line === '&gt;') {
+        flushLists();
+        if (inTable) flushTable();
+        const content = line.startsWith('&gt; ') ? line.slice(5) : '';
+        const bqList = content.match(/^[-\*\+] (.+)/);
+        if (!inBq) { inBq = true; bqTexts = []; bqChips = []; }
+        if (bqList) { bqChips.push(applyInline(bqList[1])); }
+        else if (content) { bqTexts.push(applyInline(content)); }
+        continue;
+      }
+      if (inBq) flushBlockquote();
+
       // table
       if (/^\|.+\|$/.test(line)) {
         flushLists(); inTable = true; tRows.push(line); continue;
@@ -3971,6 +4012,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     flushLists();
+    flushBlockquote();
     if (inTable) flushTable();
 
     let html = out.join('');

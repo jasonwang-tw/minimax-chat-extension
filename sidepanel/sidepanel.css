@@ -621,6 +621,39 @@ body {
   color: var(--text-primary);
 }
 
+.ai-suggestion-block {
+  border-left: 2px solid rgba(236, 41, 112, 0.35);
+  padding: 8px 12px;
+  margin: 6px 0;
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 0 8px 8px 0;
+}
+
+.ai-suggestion-block .suggestion-prompt {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin: 0 0 8px 0;
+}
+
+.suggestion-chips-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.suggestion-chip.ai-suggestion {
+  white-space: normal;
+  text-align: left;
+}
+
+.suggestion-chip.ai-suggestion:hover {
+  background: rgba(236, 41, 112, 0.15);
+  border-color: rgba(236, 41, 112, 0.5);
+  color: var(--text-primary);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(236, 41, 112, 0.2);
+}
+
 .typing-indicator {
   display: flex;
   gap: 4px;
@@ -1027,9 +1060,8 @@ textarea:disabled {
   align-items: center;
   gap: 6px;
   background: rgba(255, 255, 255, 0.06);
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  padding: 6px 10px;
+  border-radius: 15px;
+  padding: 10px 12px;
   max-width: 200px;
 }
 

@@ -177,6 +177,13 @@ npm run build:css
 
 ## Changelog
 
+## [1.15.1] - 2026-04-24
+### Added
+- **AI 建議選項可點擊**：AI 回覆中 Markdown blockquote 格式（`> - 選項`）自動渲染為可點擊的 suggestion chip 按鈕，點擊後直接送出該選項至 chatbox
+
+### Changed
+- `renderMarkdown` 加入 blockquote 解析：`> text` 顯示為提示文字，`> - item` 渲染為帶粉紅左框線的互動 chip 卡片
+
 ## [1.15.0] - 2026-04-24
 ### Added
 - **輸入字數計數器**：輸入框超過 1000 字顯示計數，超過 3000 字橙色警示，超過 5000 字紅色閃爍警示
