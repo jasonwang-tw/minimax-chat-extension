@@ -275,16 +275,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   // 自動調整輸入框高度 + 指令選單 + 知識庫 @ palette
-  messageInput.addEventListener('input', () => {
-    messageInput.style.height = 'auto';
-    messageInput.style.height = Math.min(messageInput.scrollHeight, 120) + 'px';
-    updateSendButton();
-    handleCommandPaletteInput();
-    handleKbPaletteInput();
-    // 字數計數器
+  function updateCharCounter() {
     const len = messageInput.value.length;
     if (len < 1000) {
       charCounter.classList.add('hidden');
+      charCounter.classList.remove('warn', 'danger');
     } else {
       charCounter.classList.remove('hidden');
       charCountText.textContent = `${len.toLocaleString()} 字`;
@@ -292,6 +287,15 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (len > 5000) charCounter.classList.add('danger');
       else if (len > 3000) charCounter.classList.add('warn');
     }
+  }
+
+  messageInput.addEventListener('input', () => {
+    messageInput.style.height = 'auto';
+    messageInput.style.height = Math.min(messageInput.scrollHeight, 120) + 'px';
+    updateSendButton();
+    handleCommandPaletteInput();
+    handleKbPaletteInput();
+    updateCharCounter();
   });
 
   // 發送 / 停止
@@ -1544,6 +1548,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     currentSession = sessions[index];
     chatMessages.innerHTML = '';
     updateCurrentSessionBar();
+    messageInput.value = '';
+    messageInput.style.height = 'auto';
+    updateCharCounter();
 
     // 還原 session 當時的 model 和 replyMode
     if (currentSession.model) {
@@ -1608,6 +1615,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         messageInput.value = '';
         messageInput.style.height = 'auto';
         updateSendButton();
+        updateCharCounter();
         executeAction(matchedCmd.trigger, args);
         return;
       }
@@ -1651,6 +1659,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     messageInput.value = '';
     messageInput.style.height = 'auto';
+    updateCharCounter();
     clearImageData();
 
     // 翻譯設定
