@@ -35,8 +35,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   const messageInput = document.getElementById('messageInput');
   const charCounter = document.getElementById('charCounter');
   const charCountText = document.getElementById('charCountText');
-  const queueIndicator = document.getElementById('queueIndicator');
+  const queuePanel = document.getElementById('queuePanel');
+  const queuePanelToggle = document.getElementById('queuePanelToggle');
+  const queueListEl = document.getElementById('queueList');
   const queueCount = document.getElementById('queueCount');
+  const queueChevron = document.getElementById('queueChevron');
+  let queueListOpen = false;
   const sendBtn = document.getElementById('sendBtn');
   const sendIcon = document.getElementById('sendIcon');
   const stopIcon = document.getElementById('stopIcon');
@@ -461,6 +465,24 @@ document.addEventListener('DOMContentLoaded', async () => {
     messageInput.value = text;
     messageInput.dispatchEvent(new Event('input'));
     handleSend();
+  });
+
+  // 佇列面板展開/收合
+  queuePanelToggle.addEventListener('click', () => {
+    queueListOpen = !queueListOpen;
+    queueListEl.classList.toggle('hidden', !queueListOpen);
+    queueChevron.style.transform = queueListOpen ? 'rotate(180deg)' : '';
+    if (queueListOpen) renderQueueList();
+  });
+
+  // 佇列面板刪除（event delegation）
+  queueListEl.addEventListener('click', (e) => {
+    const btn = e.target.closest('.queue-item-delete');
+    if (!btn) return;
+    const idx = parseInt(btn.dataset.idx, 10);
+    messageQueue.splice(idx, 1);
+    updateQueueIndicator();
+    if (queueListOpen) renderQueueList();
   });
 
   // Memory Modal
@@ -1600,13 +1622,43 @@ document.addEventListener('DOMContentLoaded', async () => {
     updateCurrentSessionBar();
   }
 
+  function renderQueueList() {
+    queueListEl.innerHTML = '';
+    messageQueue.forEach((item, idx) => {
+      let preview;
+      if (item.message) {
+        preview = item.message.length > 55 ? item.message.slice(0, 55) + '…' : item.message;
+      } else if (item.images.length > 0) {
+        const first = item.images[0];
+        preview = first.fileName ? `📎 ${first.fileName}` : `📎 附件 ${item.images.length} 個`;
+      } else if (item.pageCtx) {
+        preview = `📄 ${(item.pageCtx.title || '頁面').slice(0, 35)}`;
+      } else {
+        preview = '（空）';
+      }
+      const div = document.createElement('div');
+      div.className = 'queue-item';
+      div.innerHTML = `
+        <span class="queue-item-num">${idx + 1}</span>
+        <span class="queue-item-text" title="${escapeAttr(item.message || '')}">${escapeHtml(preview)}</span>
+        <button class="queue-item-delete" data-idx="${idx}" title="從佇列移除">
+          <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>`;
+      queueListEl.appendChild(div);
+    });
+  }
+
   function updateQueueIndicator() {
-    if (messageQueue.length > 0) {
-      queueCount.textContent = messageQueue.length;
-      queueIndicator.classList.remove('hidden');
-    } else {
-      queueIndicator.classList.add('hidden');
+    if (messageQueue.length === 0) {
+      queuePanel.classList.add('hidden');
+      queueListEl.classList.add('hidden');
+      queueChevron.style.transform = '';
+      queueListOpen = false;
+      return;
     }
+    queuePanel.classList.remove('hidden');
+    queueCount.textContent = messageQueue.length;
+    if (queueListOpen) renderQueueList();
   }
 
   // ── 發送訊息 ────────────────────────────────────────────
