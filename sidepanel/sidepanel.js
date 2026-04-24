@@ -323,8 +323,13 @@ document.addEventListener('DOMContentLoaded', async () => {
         const partial = rawContent.trimEnd();
         const stopThinkMatch = !translateEnabled && rawContent.match(/<think>([\s\S]*?)(?:<\/think>|$)/i);
         const stopThinkContent = stopThinkMatch ? stopThinkMatch[1].trim() : undefined;
-        if (currentSession) currentSession.messages.push({ role: 'assistant', content: partial, ...(stopThinkContent && { thinkContent: stopThinkContent }) });
-        finalizeLiveMessage(liveDiv, partial, partial, translateEnabled ? null : sourceLangSelect.value);
+        // 剝除 think 區塊，避免 <think> 標籤被 renderMarkdown 當作純文字渲染
+        const stopCleanReply = partial
+          .replace(/<think>[\s\S]*?<\/think>/gi, '')
+          .replace(/<think>[\s\S]*/gi, '')
+          .replace(/<result>|<\/result>/gi, '').trim();
+        if (currentSession) currentSession.messages.push({ role: 'assistant', content: stopCleanReply, ...(stopThinkContent && { thinkContent: stopThinkContent }) });
+        finalizeLiveMessage(liveDiv, partial, stopCleanReply, translateEnabled ? null : sourceLangSelect.value);
         await saveCurrentSession();
         await loadHistory();
       } else {
