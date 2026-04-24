@@ -1644,14 +1644,27 @@ document.addEventListener('DOMContentLoaded', async () => {
     selectedKnowledge = [];
     renderKnowledgeChips();
 
-    // 顯示訊息：純 /page 無附帶文字時，顯示頁面標題
+    // 長輸入（貼入代碼/大量文字）自動轉 text file 走 pipeline 分段分析
+    const LARGE_INPUT_LIMIT = 6000;
+    let longInputFile = null;
+    let apiMessage = finalMessage;
+    if (!pageFile && !currentImages.length && message.length > LARGE_INPUT_LIMIT) {
+      const b64 = btoa(unescape(encodeURIComponent(message)));
+      longInputFile = { dataUrl: `data:text/plain;base64,${b64}`, fileType: 'text', fileName: '輸入內容.txt' };
+      apiMessage = ''; // 內容已在 file，無需重複附在訊息
+    }
+
+    // 顯示訊息
     const displayMessage = isPageOnly
       ? `📄 ${pageTitle?.slice(0, 40) || '讀取頁面'}`
-      : message;
+      : longInputFile
+        ? `📋 長輸入（${(message.length / 1000).toFixed(1)}k 字）`
+        : message;
 
     const userMessage = { role: 'user', content: displayMessage };
     const snapshotImages = [...currentImages]; // 快照，避免 clearImageData 後遺失
     if (pageFile) snapshotImages.unshift(pageFile); // 長頁 file 插到最前
+    if (longInputFile) snapshotImages.unshift(longInputFile); // 長輸入 file
     if (snapshotImages.length > 0) {
       userMessage.images = snapshotImages.map(i => i.dataUrl); // backward compat
       userMessage.fileInfos = snapshotImages.map(i => ({ fileType: i.fileType || 'image', fileName: i.fileName || null }));
@@ -1660,7 +1673,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     currentSession.messages.push(userMessage);
     addMessageWithImages(displayMessage, 'user', snapshotImages);
 
-    const textMessage = finalMessage;
+    const textMessage = apiMessage;
 
     messageInput.value = '';
     messageInput.style.height = 'auto';
