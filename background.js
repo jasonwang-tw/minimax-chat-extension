@@ -29,14 +29,14 @@ chrome.runtime.onInstalled.addListener(({ reason }) => {
       settings: { model: MODEL_NAME, maxHistory: MAX_HISTORY },
       defaultPrompts: DEFAULT_PROMPTS,
       replyModes: DEFAULT_REPLY_MODES,
-      customCommands: [],
       autoMemoryEnabled: false,
       syncSettings: DEFAULT_SYNC_SETTINGS
     });
     chrome.storage.local.set({
       vocabulary: [],
       categories: { memory: [], knowledge: [], vocabulary: [] },
-      syncAuth: {}
+      syncAuth: {},
+      customCommands: []
     });
   }
 
@@ -82,7 +82,7 @@ chrome.runtime.onStartup.addListener(async () => {
 
 // 資料變動即時自動備份（debounce 5 秒，避免連續觸發）
 let _autoBackupTimer = null;
-const AUTO_BACKUP_KEYS_SYNC = new Set(['memories', 'apiKey', 'geminiApiKey', 'braveApiKey', 'exaApiKey', 'settings', 'defaultPrompts', 'customCommands', 'globalPrompt']);
+const AUTO_BACKUP_KEYS_SYNC = new Set(['memories', 'apiKey', 'geminiApiKey', 'braveApiKey', 'exaApiKey', 'settings', 'defaultPrompts', 'globalPrompt']);
 const AUTO_BACKUP_KEYS_LOCAL = new Set(['vocabulary', 'knowledgeBase', 'chatSessions']);
 
 chrome.storage.onChanged.addListener((changes, area) => {

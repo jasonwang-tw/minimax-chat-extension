@@ -97,7 +97,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     customCommands.push({
       id: `cmd_${Date.now()}`,
       trigger: '/cmd',
-      name: '新指令',
+      name: '指令說明',
       type: 'template',
       template: '{input}'
     });
@@ -106,8 +106,12 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   saveCommandsBtn?.addEventListener('click', async () => {
     customCommands = collectCommandsFromDom(customCommandsList);
-    await chrome.storage.sync.set({ customCommands });
-    showMessage('自訂指令已儲存', 'success');
+    try {
+      await chrome.storage.local.set({ customCommands });
+      showMessage('自訂指令已儲存', 'success');
+    } catch (err) {
+      showMessage('儲存失敗：內容超出儲存限制，請縮短模板內容', 'error');
+    }
   });
 
   testBtn?.addEventListener('click', async () => {
@@ -204,8 +208,20 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   async function loadCustomCommands() {
-    const { customCommands: stored } = await chrome.storage.sync.get(['customCommands']);
-    customCommands = Array.isArray(stored) ? stored : [];
+    const { customCommands: localStored } = await chrome.storage.local.get(['customCommands']);
+    if (Array.isArray(localStored) && localStored.length > 0) {
+      customCommands = localStored;
+    } else {
+      // 遷移：從 sync 救回舊資料
+      const { customCommands: syncStored } = await chrome.storage.sync.get(['customCommands']);
+      if (Array.isArray(syncStored) && syncStored.length > 0) {
+        customCommands = syncStored;
+        await chrome.storage.local.set({ customCommands: syncStored });
+        await chrome.storage.sync.remove(['customCommands']);
+      } else {
+        customCommands = [];
+      }
+    }
     renderCustomCommands();
   }
 
@@ -446,18 +462,14 @@ document.addEventListener('DOMContentLoaded', async () => {
         <div class="reply-mode-header">
           <div style="display:flex;gap:6px;flex:1;align-items:center">
             <span style="color:#aaa;font-size:12px">/</span>
-            <input type="text" class="cmd-trigger mode-name" value="${escapeVal((command.trigger || '/').replace(/^\/+/, ''))}" placeholder="指令名稱" style="max-width:100px">
-            <input type="text" class="cmd-name mode-name" value="${escapeVal(command.name || '')}" placeholder="顯示名稱">
-            <select class="cmd-type" style="font-size:12px;padding:2px 4px;background:var(--bg-card,#2d2d2d);color:var(--text-primary,#fff);border:1px solid var(--border,#444);border-radius:4px">
-              <option value="template" ${command.type === 'template' ? 'selected' : ''}>模板</option>
-              <option value="action" ${command.type === 'action' ? 'selected' : ''}>動作</option>
-            </select>
+            <input type="text" class="cmd-trigger mode-name" value="${escapeVal((command.trigger || '/').replace(/^\/+/, ''))}" placeholder="指令名稱">
+            <input type="text" class="cmd-name mode-name" value="${escapeVal(command.name || '')}" placeholder="指令說明">
           </div>
           <button class="btn-mode-delete" data-index="${index}" title="刪除指令" type="button">
             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
           </button>
         </div>
-        <textarea class="cmd-template mode-prompt" rows="2" placeholder="輸入模板內容，可使用 {input} 佔位">${escapeVal(command.template || '')}</textarea>
+        <textarea class="cmd-template mode-prompt" rows="2" placeholder="輸入提示詞模板。{input} 會被替換成指令後方輸入的文字，例如：請將以下內容翻譯成英文：{input}">${escapeVal(command.template || '')}</textarea>
       `;
       item.querySelector('.btn-mode-delete').addEventListener('click', () => {
         customCommands.splice(index, 1);
@@ -471,8 +483,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     return Array.from(container.querySelectorAll('.reply-mode-item')).map((item) => ({
       id: item.dataset.id,
       trigger: `/${(item.querySelector('.cmd-trigger').value || 'cmd').replace(/^\/+/, '').trim() || 'cmd'}`,
-      name: item.querySelector('.cmd-name').value.trim() || '未命名指令',
-      type: item.querySelector('.cmd-type').value,
+      name: item.querySelector('.cmd-name').value.trim() || '指令說明',
+      type: 'template',
       template: item.querySelector('.cmd-template').value.trim()
     }));
   }

@@ -7,7 +7,6 @@ const SYNC_BACKUP_KEYS = [
   'globalPrompt',
   'defaultPrompts',
   'replyModes',
-  'customCommands',
   'autoMemoryEnabled',
   'syncSettings',
   'memories',
@@ -15,10 +14,10 @@ const SYNC_BACKUP_KEYS = [
 ];
 
 const LOCAL_BACKUP_KEYS = [
+  'customCommands',
   'knowledgeBase',
-  'vocabulary',
-  'chatSessions',
-  'sessionSummaries'
+  'vocabulary'
+  // chatSessions / sessionSummaries 為對話紀錄，資料量大，不納入備份
 ];
 
 export const SETTINGS_BACKUP_SCHEMA_VERSION = 1;
@@ -42,15 +41,13 @@ export async function collectSettingsBackupPayload() {
       globalPrompt: syncData.globalPrompt || '',
       defaultPrompts: isPlainObject(syncData.defaultPrompts) ? syncData.defaultPrompts : {},
       replyModes: Array.isArray(syncData.replyModes) ? syncData.replyModes : [],
-      customCommands: Array.isArray(syncData.customCommands) ? syncData.customCommands : [],
+      customCommands: Array.isArray(localData.customCommands) ? localData.customCommands : [],
       autoMemoryEnabled: !!syncData.autoMemoryEnabled,
       syncSettings: sanitizeSyncSettingsForBackup(syncData.syncSettings || {}),
       memories: Array.isArray(syncData.memories) ? syncData.memories : [],
       categories: isPlainObject(syncData.categories) ? syncData.categories : { memory: [], knowledge: [], vocabulary: [] },
       knowledgeBase: Array.isArray(localData.knowledgeBase) ? localData.knowledgeBase : [],
-      vocabulary: Array.isArray(localData.vocabulary) ? localData.vocabulary : [],
-      chatSessions: Array.isArray(localData.chatSessions) ? localData.chatSessions : [],
-      sessionSummaries: isPlainObject(localData.sessionSummaries) ? localData.sessionSummaries : {}
+      vocabulary: Array.isArray(localData.vocabulary) ? localData.vocabulary : []
     }
   };
 }
@@ -74,7 +71,6 @@ export async function restoreSettingsBackupPayload(payload) {
     globalPrompt: typeof settings.globalPrompt === 'string' ? settings.globalPrompt : '',
     defaultPrompts: isPlainObject(settings.defaultPrompts) ? settings.defaultPrompts : {},
     replyModes: Array.isArray(settings.replyModes) ? settings.replyModes : [],
-    customCommands: Array.isArray(settings.customCommands) ? settings.customCommands : [],
     autoMemoryEnabled: !!settings.autoMemoryEnabled,
     syncSettings: sanitizeSyncSettingsForBackup(settings.syncSettings || {}),
     memories: Array.isArray(settings.memories) ? settings.memories : [],
@@ -82,10 +78,9 @@ export async function restoreSettingsBackupPayload(payload) {
   };
 
   const nextLocalSettings = {
+    customCommands: Array.isArray(settings.customCommands) ? settings.customCommands : [],
     knowledgeBase: Array.isArray(settings.knowledgeBase) ? settings.knowledgeBase : [],
-    vocabulary: Array.isArray(settings.vocabulary) ? settings.vocabulary : [],
-    chatSessions: Array.isArray(settings.chatSessions) ? settings.chatSessions : [],
-    sessionSummaries: isPlainObject(settings.sessionSummaries) ? settings.sessionSummaries : {}
+    vocabulary: Array.isArray(settings.vocabulary) ? settings.vocabulary : []
   };
 
   await Promise.all([

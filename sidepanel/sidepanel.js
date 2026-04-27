@@ -100,6 +100,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   const historySearchInput = document.getElementById('historySearch');
   const historyClearSearchBtn = document.getElementById('historyClearSearch');
   const commandPalette = document.getElementById('commandPalette');
+  const commandChip = document.getElementById('commandChip');
+  const commandChipLabel = document.getElementById('commandChipLabel');
+  const commandChipRemove = document.getElementById('commandChipRemove');
   const pageContextChip = document.getElementById('pageContextChip');
   const pageContextLabel = document.getElementById('pageContextLabel');
   const pageContextRemove = document.getElementById('pageContextRemove');
@@ -138,6 +141,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   const knowledgeTagList = document.getElementById('knowledgeTagList');
   const knowledgeTagFilters = document.getElementById('knowledgeTagFilters');
   // 搜尋工具列元素
+  const tocBtn = document.getElementById('tocBtn');
+  const tocPanel = document.getElementById('tocPanel');
+  const tocList = document.getElementById('tocList');
+  const tocClose = document.getElementById('tocClose');
   const sessionSearchBtn = document.getElementById('sessionSearchBtn');
   const sessionSearchBar = document.getElementById('sessionSearchBar');
   const sessionSearchInput = document.getElementById('sessionSearchInput');
@@ -187,6 +194,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   let sessions = [];
   let currentSession = null;
   let isLoading = false;
+  let pendingCommand = null; // { cmd, icon } — 選取但尚未送出的指令
   let translateEnabled = false;
   let batchSelectMode = false;
   let selectedIds = new Set();
@@ -231,9 +239,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (changes.geminiApiKey || changes.apiKey) {
         checkApiKey();
       }
-      if (changes.customCommands) {
-        loadCustomCommands();
-      }
+      // customCommands 已移至 local storage，不在此監聽
       // 右鍵選單從 background 寫入 sync，sidepanel 透過此監聽同步
       if (changes.memories) {
         memories = changes.memories.newValue || [];
@@ -243,8 +249,11 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
     }
 
-    // local area：大型資料（知識庫、單字簿、sessions、總結）
+    // local area：大型資料（知識庫、單字簿、sessions、總結、自訂指令）
     if (area === 'local') {
+      if (changes.customCommands) {
+        loadCustomCommands();
+      }
       if (changes.vocabulary) {
         if (vocabularyModal && !vocabularyModal.classList.contains('hidden')) {
           renderVocabularyList(changes.vocabulary.newValue || []);
@@ -324,6 +333,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       currentPort = null;
       currentLiveDiv = null;
       currentRawContent = '';
+      messageInput.disabled = false;
       setStreamingMode(false);
       messageQueue = [];
       updateQueueIndicator();
@@ -377,11 +387,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         e.preventDefault();
         const active = commandPalette.querySelector('.command-item.active') || items[0];
         if (active) {
-          // 從 data 屬性取得 trigger，找到對應的 cmd 物件
           const trigger = active.querySelector('.command-item-trigger')?.textContent;
           const cmd = getAllCommands().find(c => c.trigger === trigger);
           const query = messageInput.value;
-          if (cmd) applyCommand(cmd, query, true); // tabComplete=true
+          if (cmd) applyCommand(cmd, query);
           return;
         }
       }
@@ -457,6 +466,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   // Page context chip 移除
+  commandChipRemove.addEventListener('click', () => { clearCommandChip(); messageInput.focus(); });
   pageContextRemove.addEventListener('click', clearPageContext);
 
   // Suggestion chips（空白頁預設提示）
@@ -544,6 +554,45 @@ document.addEventListener('DOMContentLoaded', async () => {
       renderKnowledgeList();
     }
   });
+
+  // TOC
+  function buildToc() {
+    const headings = chatMessages.querySelectorAll('h1, h2, h3, h4');
+    tocList.innerHTML = '';
+    if (headings.length === 0) {
+      tocList.innerHTML = '<div class="toc-empty">此對話沒有標題</div>';
+      return;
+    }
+    headings.forEach(h => {
+      const level = parseInt(h.tagName[1], 10);
+      const btn = document.createElement('button');
+      btn.className = `toc-item toc-h${level}`;
+      btn.textContent = h.textContent;
+      btn.addEventListener('click', () => {
+        const offset = h.getBoundingClientRect().top
+          - chatMessages.getBoundingClientRect().top
+          + chatMessages.scrollTop - 20;
+        chatMessages.scrollTo({ top: offset, behavior: 'smooth' });
+      });
+      tocList.appendChild(btn);
+    });
+  }
+
+  function openToc() {
+    buildToc();
+    tocPanel.classList.remove('hidden');
+    tocBtn.classList.add('active');
+  }
+
+  function closeToc() {
+    tocPanel.classList.add('hidden');
+    tocBtn.classList.remove('active');
+  }
+
+  tocBtn.addEventListener('click', () => {
+    tocPanel.classList.contains('hidden') ? openToc() : closeToc();
+  });
+  tocClose.addEventListener('click', closeToc);
 
   // Session Search
   let sessionSearchMatches = []; // 每個元素為 <mark> DOM 節點
@@ -678,6 +727,10 @@ document.addEventListener('DOMContentLoaded', async () => {
       } else {
         closeSessionSearch();
       }
+    }
+    if ((e.ctrlKey || e.metaKey) && e.altKey && e.key.toLowerCase() === 't') {
+      e.preventDefault();
+      tocPanel.classList.contains('hidden') ? openToc() : closeToc();
     }
   });
 
@@ -857,18 +910,53 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   // ── Lightbox ──────────────────────────────────────────
+  const lightboxPrev = document.getElementById('lightboxPrev');
+  const lightboxNext = document.getElementById('lightboxNext');
+  const lightboxCounter = document.getElementById('lightboxCounter');
+  let _lbImages = [];
+  let _lbIndex = 0;
+
   function openLightbox(src) {
+    _lbImages = Array.from(chatMessages.querySelectorAll('.message-image')).map(el => el.src);
+    _lbIndex = _lbImages.indexOf(src);
+    if (_lbIndex === -1) { _lbImages = [src]; _lbIndex = 0; }
     lightboxImg.src = src;
     lightbox.classList.remove('hidden');
+    updateLightboxNav();
   }
+
   function closeLightbox() {
     lightbox.classList.add('hidden');
     lightboxImg.src = '';
+    _lbImages = [];
   }
+
+  function updateLightboxNav() {
+    const total = _lbImages.length;
+    lightboxPrev.classList.toggle('hidden', total <= 1);
+    lightboxNext.classList.toggle('hidden', total <= 1);
+    lightboxCounter.textContent = total > 1 ? `${_lbIndex + 1} / ${total}` : '';
+    lightboxPrev.style.opacity = _lbIndex === 0 ? '0.3' : '1';
+    lightboxNext.style.opacity = _lbIndex === total - 1 ? '0.3' : '1';
+  }
+
+  function lightboxGo(delta) {
+    const next = _lbIndex + delta;
+    if (next < 0 || next >= _lbImages.length) return;
+    _lbIndex = next;
+    lightboxImg.src = _lbImages[_lbIndex];
+    updateLightboxNav();
+  }
+
+  lightboxPrev.addEventListener('click', (e) => { e.stopPropagation(); lightboxGo(-1); });
+  lightboxNext.addEventListener('click', (e) => { e.stopPropagation(); lightboxGo(1); });
   lightboxClose.addEventListener('click', closeLightbox);
   lightboxOverlay.addEventListener('click', closeLightbox);
   document.addEventListener('keydown', (e) => {
+    if (lightbox.classList.contains('hidden')) return;
     if (e.key === 'Escape') closeLightbox();
+    if (e.key === 'ArrowLeft') lightboxGo(-1);
+    if (e.key === 'ArrowRight') lightboxGo(1);
   });
   // 使用事件委派：chatMessages 內所有 .message-image 均可點擊
   chatMessages.addEventListener('click', (e) => {
@@ -1494,7 +1582,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   function updateSendButton() {
-    const hasContent = messageInput.value.trim() || currentImages.length > 0 || pageContext;
+    const hasContent = messageInput.value.trim() || currentImages.length > 0 || pageContext || pendingCommand;
     sendBtn.disabled = !hasContent && !isLoading;
   }
 
@@ -1843,6 +1931,31 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // ── 發送訊息 ────────────────────────────────────────────
   async function handleSend() {
+    // 有待執行指令時，用輸入框文字作為 args 執行
+    let commandDisplayLabel = null;
+    if (pendingCommand) {
+      const { cmd } = pendingCommand;
+      const args = messageInput.value.trim();
+      clearCommandChip();
+      messageInput.value = '';
+      messageInput.style.height = 'auto';
+      updateSendButton();
+      if (cmd.type === 'template') {
+        const filled = cmd.template.replace('{input}', args);
+        if (!filled.trim()) { messageInput.focus(); return; }
+        // 記錄縮減顯示標籤
+        commandDisplayLabel = cmd.trigger + (args ? ` · ${args}` : '');
+        messageInput.value = filled;
+        messageInput.style.height = 'auto';
+        messageInput.style.height = Math.min(messageInput.scrollHeight, 120) + 'px';
+        updateSendButton();
+        // 讓正常發送流程繼續帶著 filled 內容送出
+      } else {
+        executeAction(cmd.trigger, args);
+        return;
+      }
+    }
+
     const message = messageInput.value.trim();
     if (!message && !currentImages.length && !pageContext) return;
 
@@ -1918,11 +2031,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     // 顯示訊息
-    const displayMessage = isPageOnly
-      ? `📄 ${pageTitle?.slice(0, 40) || '讀取頁面'}`
-      : longInputFile
-        ? `📋 長輸入（${(message.length / 1000).toFixed(1)}k 字）`
-        : message;
+    const displayMessage = commandDisplayLabel
+      ? commandDisplayLabel
+      : isPageOnly
+        ? `📄 ${pageTitle?.slice(0, 40) || '讀取頁面'}`
+        : longInputFile
+          ? `📋 長輸入（${(message.length / 1000).toFixed(1)}k 字）`
+          : message;
 
     const userMessage = { role: 'user', content: displayMessage };
     const snapshotImages = [...currentImages]; // 快照，避免 clearImageData 後遺失
@@ -2453,8 +2568,20 @@ document.addEventListener('DOMContentLoaded', async () => {
   ];
 
   async function loadCustomCommands() {
-    const { customCommands: stored } = await chrome.storage.sync.get(['customCommands']);
-    customCommands = stored || [];
+    const { customCommands: localStored } = await chrome.storage.local.get(['customCommands']);
+    if (localStored && localStored.length > 0) {
+      customCommands = localStored;
+      return;
+    }
+    // 遷移：從 sync 救回舊資料
+    const { customCommands: syncStored } = await chrome.storage.sync.get(['customCommands']);
+    if (syncStored && syncStored.length > 0) {
+      customCommands = syncStored;
+      await chrome.storage.local.set({ customCommands: syncStored });
+      await chrome.storage.sync.remove(['customCommands']);
+    } else {
+      customCommands = [];
+    }
   }
 
   function getAllCommands() {
@@ -2506,32 +2633,26 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   function applyCommand(cmd, inputVal, tabComplete = false) {
     hideCommandPalette();
-    // 擷取 trigger 之後的 args
     const args = inputVal.slice(cmd.trigger.length).trim();
+    showCommandChip(cmd, args);
+  }
 
-    if (cmd.type === 'template') {
-      const filled = cmd.template.replace('{input}', args);
-      messageInput.value = filled;
-      messageInput.style.height = 'auto';
-      messageInput.style.height = Math.min(messageInput.scrollHeight, 120) + 'px';
-      updateSendButton();
-      messageInput.focus();
-      return;
-    }
-
-    // 有 argHint 的指令（/search、/remember）：Tab 只補全 trigger，讓使用者繼續輸入參數
-    if (tabComplete && cmd.argHint) {
-      messageInput.value = cmd.trigger + ' ';
-      messageInput.style.height = 'auto';
-      updateSendButton();
-      messageInput.focus();
-      return;
-    }
-
-    // action 類型：直接執行
-    messageInput.value = '';
+  function showCommandChip(cmd, prefillArgs = '') {
+    pendingCommand = { cmd };
+    commandChipLabel.textContent = cmd.trigger + (prefillArgs ? ' ' + prefillArgs : '');
+    commandChip.classList.remove('hidden');
+    // 把 prefillArgs 填入輸入框讓使用者繼續編輯（template 以外的補充文字）
+    messageInput.value = prefillArgs;
+    messageInput.style.height = 'auto';
+    messageInput.style.height = Math.min(messageInput.scrollHeight, 120) + 'px';
     updateSendButton();
-    executeAction(cmd.trigger, args);
+    messageInput.focus();
+  }
+
+  function clearCommandChip() {
+    pendingCommand = null;
+    commandChip.classList.add('hidden');
+    commandChipLabel.textContent = '';
   }
 
   function executeAction(trigger, args) {
@@ -4184,10 +4305,28 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // 4. inline 樣式（bold / italic / del）
     function applyInline(s) {
+      // 文法標籤：**Faulty:** 格式需在 bold 前處理，否則 ** 會先被消耗
+      s = s.replace(/\*\*Faulty[：:]\*\*/g,
+        '<span class="grammar-label grammar-faulty">Faulty：</span>');
+      s = s.replace(/\*\*Correct[：:]\*\*/g,
+        '<span class="grammar-label grammar-correct">Correct：</span>');
       s = s.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>');
       s = s.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
       s = s.replace(/\*([^\s].*?[^\s])\*/g, '<em>$1</em>');
       s = s.replace(/~~(.+?)~~/g, '<del>$1</del>');
+      // 文法標籤：Faulty（錯誤）：/ Correct（正確）：
+      s = s.replace(/Faulty[（(][^）)]*[）)][\s]*[：:]/g,
+        '<span class="grammar-label grammar-faulty">$&</span>');
+      s = s.replace(/Correct[（(][^）)]*[）)][\s]*[：:]/g,
+        '<span class="grammar-label grammar-correct">$&</span>');
+      s = s.replace(/^(問題)[：:]/,
+        '<span class="grammar-note-label">$1</span>：');
+      s = s.replace(/^(說明)[：:]/,
+        '<span class="grammar-note-label">$1</span>：');
+      // 填空底線（3個以上底線）
+      s = s.replace(/_{3,}/g, '<span class="fill-blank"></span>');
+      // （全形括號中文）淡色
+      s = s.replace(/（[^）\n]+）/g, '<span class="zh-translation">$&</span>');
       return s;
     }
 
@@ -4260,19 +4399,40 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (/^---+$/.test(line.trim())) { flushLists(); out.push('<hr>'); continue; }
 
       // unordered list
-      const ulm = line.match(/^[\-\*\+] (.+)/);
+      const ulm = line.match(/^\s*[\-\*\+] (.+)/);
       if (ulm) {
-        if (inOl) { out.push('</ol>'); inOl = false; }
-        if (!inUl) { out.push('<ul>'); inUl = true; }
-        out.push(`<li>${applyInline(ulm[1])}</li>`); continue;
+        const liContent = ulm[1].replace(/^&gt;\s+/, '');
+        // 偵測選擇題選項行：開頭為 a. / (a) 且含有 b. 選項
+        if (/^[（(]?a[.)）]\s/.test(liContent) && /\s+[b-e][.）)]/i.test(liContent)) {
+          flushLists();
+          const parts = liContent.split(/\s+(?=[b-e][.）)])/i);
+          out.push('<div class="quiz-options">');
+          for (const part of parts) {
+            const trimmed = part.trim();
+            const lm = trimmed.match(/^([a-e])[.)）]\s*/i);
+            if (lm) {
+              const content = trimmed.slice(lm[0].length);
+              out.push(`<span class="quiz-option"><span class="quiz-option-badge">${lm[1].toLowerCase()}</span>${applyInline(content)}</span>`);
+            } else {
+              out.push(`<span class="quiz-option">${applyInline(trimmed)}</span>`);
+            }
+          }
+          out.push('</div>');
+        } else {
+          if (inOl) { out.push('</ol>'); inOl = false; }
+          if (!inUl) { out.push('<ul>'); inUl = true; }
+          out.push(`<li>${applyInline(liContent)}</li>`);
+        }
+        continue;
       }
 
       // ordered list
-      const olm = line.match(/^\d+\. (.+)/);
+      const olm = line.match(/^\s*(\d+)\. (.+)/);
       if (olm) {
+        const num = parseInt(olm[1], 10);
         if (inUl) { out.push('</ul>'); inUl = false; }
-        if (!inOl) { out.push('<ol>'); inOl = true; }
-        out.push(`<li>${applyInline(olm[1])}</li>`); continue;
+        if (!inOl) { out.push(num > 1 ? `<ol start="${num}">` : '<ol>'); inOl = true; }
+        out.push(`<li>${applyInline(olm[2])}</li>`); continue;
       }
 
       flushLists();

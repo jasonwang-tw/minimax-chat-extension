@@ -177,6 +177,40 @@ npm run build:css
 
 ## Changelog
 
+## [1.17.0] - 2026-04-27
+### Added
+- **TOC（目錄）面板**：右側工具列新增 TOC 按鈕，點擊或使用 `Ctrl+Alt+T` 開啟/收合，自動掃描對話中的 h1-h4 標題並生成可點擊目錄，點擊後平滑捲動至對應標題（留 20px 間距）
+- **燈箱左右導航**：開啟圖片燈箱時，可點擊左右箭頭按鈕或按鍵盤方向鍵切換 session 內所有圖片，顯示當前圖片計數（X / Y）
+- **Quiz 選項渲染**：Markdown 清單中格式為 `a) ... b) ... c) ...` 的選項自動渲染為橫排 badge 樣式，ABCDE 各有對應顏色標記
+- **Grammar 標籤渲染**：`**Faulty:**` / `**Correct:**` 及其中文變體自動渲染為對應顏色標籤（紅/綠），`問題：` / `說明：` 標籤單獨高亮
+- **填空底線樣式**：`___` 渲染為視覺化底線空格；中文括號翻譯 `（...）` 以較淡顏色顯示
+- **鍵盤快捷鍵設定頁**：設定介面新增「鍵盤快捷鍵」區塊，列出所有快捷鍵對照表（含 `kbd` 樣式）
+
+### Changed
+- Markdown 清單項目移除多餘的 `>` 引用符號前綴
+- 有序清單跨空行後使用 `start` 屬性維持正確序號（避免全部重置為 1）
+- TOC 快捷鍵改為 `Ctrl+Alt+T`（避免 Chrome 攔截 `Ctrl+T`）
+
+### Fixed
+- 備份範圍新增 `customCommands`（改從 `local` 存取）、`vocabulary`，移除對話紀錄以避免 payload 過大
+
+## [1.16.3] - 2026-04-25
+### Fixed
+- WordPress 備份失敗（payload too large）：移除 `chatSessions`、`sessionSummaries` 出備份範圍（對話紀錄不需雲端備份）
+- 備份時 `customCommands` 從 `sync`（空）改讀 `local`，還原時寫入 `local`
+
+## [1.16.2] - 2026-04-25
+### Fixed
+- 自訂指令模板過長時儲存失敗且無錯誤提示：將 `customCommands` 從 `chrome.storage.sync`（8KB 限制）遷移至 `chrome.storage.local`（10MB），並加上 try-catch 顯示明確錯誤訊息
+
+## [1.16.1] - 2026-04-25
+### Changed
+- 自訂指令移除無效的「動作」類型下拉選單，`type` 固定為 `template`
+- 觸發詞（Trigger）輸入框：固定寬度 110px，外框統一使用明顯樣式
+- 顯示名稱（Name）輸入框：與觸發詞輸入框同樣明顯外框（`border: 1px solid rgba(255,255,255,0.25)`，背景 `rgba(255,255,255,0.07)`）
+- 模板 textarea：`min-height: 100px`，外框樣式同步更新
+- 模板 textarea placeholder 更新為具體使用範例，說明 `{input}` 佔位符用途
+
 ## [1.16.0] - 2026-04-24
 ### Added
 - **對話內搜尋功能**：在右側工具列新增搜尋 icon，點擊或使用 `Ctrl+F` / `Cmd+F` 開啟搜尋列

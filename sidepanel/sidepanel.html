@@ -93,6 +93,16 @@
               <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
             </button>
           </div>
+          <!-- TOC Panel -->
+          <div id="tocPanel" class="toc-panel hidden">
+            <div class="toc-panel-header">
+              <span class="toc-panel-title">目錄</span>
+              <button id="tocClose" class="session-search-close" title="關閉">
+                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+              </button>
+            </div>
+            <div id="tocList" class="toc-list"></div>
+          </div>
           <div id="chatMessages" class="chat-messages"></div>
 
           <!-- Empty State -->
@@ -118,6 +128,9 @@
 
         <!-- Right Toolbar -->
         <div id="chatToolbar" class="chat-toolbar">
+          <button id="tocBtn" class="chat-toolbar-btn" title="目錄">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="15" y2="12"/><line x1="3" y1="18" x2="12" y2="18"/></svg>
+          </button>
           <button id="sessionSearchBtn" class="chat-toolbar-btn" title="搜尋對話">
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
           </button>
@@ -174,6 +187,14 @@
             <option value="vi">越南文</option>
           </select>
         </div>
+      </div>
+
+      <!-- 指令 Chip -->
+      <div id="commandChip" class="command-chip hidden">
+        <span id="commandChipLabel"></span>
+        <button id="commandChipRemove" class="btn-chip-remove" title="取消指令">
+          <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
       </div>
 
       <!-- 頁面上下文 Chip -->
@@ -341,10 +362,17 @@
   <!-- Lightbox -->
   <div id="lightbox" class="lightbox hidden">
     <div class="lightbox-overlay" id="lightboxOverlay"></div>
+    <button id="lightboxPrev" class="lightbox-nav lightbox-prev">
+      <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+    </button>
     <img id="lightboxImg" class="lightbox-img" src="" alt="">
+    <button id="lightboxNext" class="lightbox-nav lightbox-next">
+      <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+    </button>
     <button id="lightboxClose" class="lightbox-close">
       <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
     </button>
+    <span id="lightboxCounter" class="lightbox-counter"></span>
   </div>
 
   <!-- Memory Modal -->
