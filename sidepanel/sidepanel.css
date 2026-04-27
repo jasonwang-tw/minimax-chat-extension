@@ -2929,7 +2929,58 @@ mark {
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
-  cursor: help;
+  cursor: pointer;
+}
+
+.kb-item.expanded .kb-item-summary {
+  display: none;
+}
+
+.kb-item-summary-full {
+  font-size: 11px;
+  color: var(--text-secondary);
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.kb-item-summary-full.hidden {
+  display: none;
+}
+
+.kb-expand-btn {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 3px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: color 0.15s, background 0.15s, opacity 0.15s;
+}
+
+.kb-item:hover .kb-expand-btn,
+.kb-item.expanded .kb-expand-btn {
+  opacity: 1;
+}
+
+.kb-expand-btn:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.kb-expand-btn svg {
+  transition: transform 0.2s;
+}
+
+.kb-item.expanded .kb-expand-btn svg {
+  transform: rotate(180deg);
 }
 
 .kb-item-tags {
