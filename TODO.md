@@ -51,3 +51,60 @@
 - Spaces feature (Phase 1: tab-based space switching)
 - 財經功能：/stock、/twstock、/news slash commands
 - 自動化功能：daily Gmail digest via chrome.alarms + chrome.identity
+
+---
+
+## 部落格助手（jasonsbase-blog 實裝計畫）
+
+### 目標
+
+將 `jasonsbase-blog` skill 的工作流程實裝到 APP 內，讓使用者在側邊欄直接完成文章創作到發布的完整流程。
+
+### 範圍說明
+
+- **可實裝（~70%）**：搜尋研究、Q&A 問答、文章生成、WP 發布、REST 可寫的 SEO meta
+- **不可實裝**：WP-CLI/SSH 操作（SEOPress focus keyword、快取強制修復）→ 改為**產生 WP-CLI 指令**讓使用者手動貼上終端機執行
+
+---
+
+### Phase 1 — 核心入口與模式選擇
+
+- [ ] **自訂指令 `/blog`**：觸發部落格助手，顯示模式選單（A/B/C/D/E/T + 文章優化）
+- [ ] **模式 Router**：解析使用者輸入，判斷 A/B/C/D/E/T 或文章優化流程，設定對應 system prompt
+- [ ] **Q&A 問答流程**：以多輪對話形式提出 5 題，收集回答後進入生成階段
+
+### Phase 2 — WP 文章 CRUD API
+
+- [ ] **background.js 新增 `WP_POST_CREATE` handler**：`POST /wp-json/wp/v2/posts`（含 title、content、status、meta）
+- [ ] **background.js 新增 `WP_POST_READ` handler**：`GET /wp-json/wp/v2/posts/{id}?context=edit` 取得文章原始內容
+- [ ] **background.js 新增 `WP_POST_UPDATE` handler**：`PUT /wp-json/wp/v2/posts/{id}`（更新 content + meta）
+- [ ] **WP Auth 複用**：直接使用現有 `syncAuth.wordpress.apiToken` + `baseUrl`，不需重新登入
+- [ ] **分類/標籤 API**：`GET /wp-json/wp/v2/categories`、`/tags`，供發布時選擇或建立
+
+### Phase 3 — 文章生成邏輯
+
+- [ ] **各模式 system prompt**：A/B/C 技術文、D 雜談、E 經驗分享、T 旅遊記，各模式文章結構、SEO 規格、語氣規定注入 system prompt
+- [ ] **文章預覽**：生成後在聊天介面顯示 Markdown 預覽，確認後再發布
+- [ ] **SEOPress meta 寫入**（REST 可存取欄位）：發布時同步寫入 `_seopress_titles_title`、`_seopress_titles_desc`
+- [ ] **WP-CLI 指令產生**（不可 SSH 的欄位）：發布後自動產生 `_seopress_analysis_target_kw` 設定指令，供使用者手動執行
+
+### Phase 4 — 既有文章優化流程
+
+- [ ] **URL/PostID 解析**：偵測輸入為 URL 或數字 → 走「既有文章優化」分支
+- [ ] **缺口分析**：讀取文章內容後，逐項檢查 FAQ、實作章節、SEO 標題、內部連結、目錄完整性
+- [ ] **選擇性更新**：列出分析結果供使用者確認，勾選要補充的項目後執行更新
+
+### Phase 5 — 圖片生成（選做）
+
+- [ ] **精選圖片生成**：整合 Gemini Flash Image（Nano Banana 2），依文章主題生成封面圖
+- [ ] **圖片上傳 WP Media**：`POST /wp-json/wp/v2/media`，上傳後設定為文章 `featured_media`
+- [ ] **alt text 自動填入**：上傳時自動設定 alt text（含 SEO 關鍵字）
+
+---
+
+### 技術備註
+
+- WP auth token 來源：`chrome.storage.local` 的 `syncAuth.wordpress`（現有）
+- 文章搜尋依賴：Brave API（快訊/新聞）+ Exa API（深度技術文）→ 均已整合
+- 發布後 SEOPress 需在 WordPress 後台重新整理編輯頁讓其重新分析（無法自動觸發）
+- WP-CLI 指令應以 code block 格式顯示在聊天視窗，方便複製
