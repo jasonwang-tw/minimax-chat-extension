@@ -214,6 +214,16 @@
         </div>
 
         <div class="sync-provider-card">
+          <h3>本機備份</h3>
+          <p class="hint" style="margin-bottom:12px">將所有設定（含提示詞）匯出為 JSON 檔，或從本機 JSON 檔還原。不需雲端帳號，可直接驗證備份內容。</p>
+          <div class="sync-action-row">
+            <button id="exportSettingsBtn" class="btn-secondary">匯出設定 (JSON)</button>
+            <button id="importSettingsBtn" class="btn-secondary">從本機還原</button>
+            <input type="file" id="importSettingsInput" accept=".json" style="display:none">
+          </div>
+        </div>
+
+        <div class="sync-provider-card">
           <h3>WordPress 備援同步</h3>
           <p class="hint" style="margin-bottom:12px">透過 jasonsbase.com 登入，同步設定、長期記憶、知識庫、單字簿與 Session 內容。</p>
           <div class="sync-action-row">
@@ -276,7 +286,7 @@
       <section class="section" id="sec-about">
         <h2>關於</h2>
         <div class="about-info">
-          <p><strong>版本:</strong> 1.17.1</p>
+          <p><strong>版本:</strong> 1.18.0</p>
           <p><strong>對話模型:</strong> MiniMax-M2.7</p>
           <p><strong>圖片模型:</strong> Gemini 2.5 Flash-lite</p>
           <p>MiniMax AI Chat Chrome Extension 設定頁。</p>
@@ -288,7 +298,7 @@
     </div>
   </div>
 
-  <script src="options.js"></script>
+  <script type="module" src="options.js"></script>
 </body>
 
 </html>

@@ -1,3 +1,5 @@
+import { collectSettingsBackupPayload, restoreSettingsBackupPayload } from '../sync/settings-backup.js';
+
 const MINIMAX_API_URL = 'https://api.minimax.io/v1/chat/completions';
 const TEST_MODEL = 'MiniMax-M2.7';
 const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash-lite:generateContent';
@@ -34,6 +36,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   const disconnectGoogleDriveBtn = document.getElementById('disconnectGoogleDriveBtn');
   const wpBaseUrlInput = null; // 已硬編碼為 jasonsbase.com，移除輸入欄位
   const connectWordPressBtn = document.getElementById('connectWordPressBtn');
+  const exportSettingsBtn = document.getElementById('exportSettingsBtn');
+  const importSettingsBtn = document.getElementById('importSettingsBtn');
+  const importSettingsInput = document.getElementById('importSettingsInput');
   const backupWordPressBtn = document.getElementById('backupWordPressBtn');
   const restoreWordPressBtn = document.getElementById('restoreWordPressBtn');
   const disconnectWordPressBtn = document.getElementById('disconnectWordPressBtn');
@@ -248,6 +253,50 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     await refreshSyncStatus();
   }
+
+  exportSettingsBtn?.addEventListener('click', async () => {
+    try {
+      const payload = await collectSettingsBackupPayload();
+      const json = JSON.stringify(payload, null, 2);
+      const blob = new Blob([json], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `minimax-settings-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      showMessage('設定已匯出為 JSON 檔', 'success');
+    } catch (err) {
+      showMessage(`匯出失敗：${err.message}`, 'error');
+    }
+  });
+
+  importSettingsBtn?.addEventListener('click', () => importSettingsInput?.click());
+
+  importSettingsInput?.addEventListener('change', async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    importSettingsInput.value = '';
+
+    const reader = new FileReader();
+    reader.onload = async (evt) => {
+      try {
+        const payload = JSON.parse(evt.target.result);
+        await restoreSettingsBackupPayload(payload);
+        showMessage('設定已從本機 JSON 還原', 'success');
+        await loadSettings();
+        await loadPrompts();
+        await loadCustomCommands();
+        await loadMemorySection();
+      } catch (err) {
+        showMessage(`還原失敗：${err.message}`, 'error');
+      }
+    };
+    reader.onerror = () => showMessage('檔案讀取失敗', 'error');
+    reader.readAsText(file, 'utf-8');
+  });
 
   saveSyncSettingsBtn?.addEventListener('click', async () => {
     const resp = await sendRuntimeMessage({

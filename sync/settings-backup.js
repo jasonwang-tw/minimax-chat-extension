@@ -57,8 +57,21 @@ export async function restoreSettingsBackupPayload(payload) {
     throw new Error('Invalid backup payload');
   }
 
-  const settings = payload.settings;
-  if (!settings || typeof settings !== 'object') {
+  // 支援多種 response 結構：
+  // 1. { schemaVersion, kind, settings: {...} }  ← 標準格式
+  // 2. { payload: { schemaVersion, settings: {...} } }  ← WP plugin 包一層
+  // 3. { settings: {...} }  ← 只有 settings wrapper
+  // 4. { apiKey, globalPrompt, defaultPrompts, ... }  ← 舊格式（settings 直接在頂層）
+  let settings;
+  if (payload.settings && typeof payload.settings === 'object') {
+    settings = payload.settings;
+  } else if (payload.payload && typeof payload.payload === 'object') {
+    const inner = payload.payload;
+    settings = (inner.settings && typeof inner.settings === 'object') ? inner.settings : inner;
+  } else if (typeof payload.globalPrompt === 'string' || typeof payload.apiKey === 'string') {
+    // 舊格式：payload 本身就是 settings
+    settings = payload;
+  } else {
     throw new Error('Backup payload does not contain settings');
   }
 

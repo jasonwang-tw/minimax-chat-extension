@@ -177,6 +177,13 @@ npm run build:css
 
 ## Changelog
 
+## [1.18.0] - 2026-04-27
+### Added
+- **本機備份（匯出/匯入 JSON）**：設定頁新增「本機備份」區塊，可將所有設定（含提示詞）匯出為 JSON 檔，或從本機 JSON 檔還原，無需雲端帳號
+### Fixed
+- **備份還原防呆**：`restoreSettingsBackupPayload` 新增多種 response 結構支援（標準格式、WP plugin 包一層、舊格式頂層），避免提示詞因結構不符而被靜默覆蓋成空字串
+- **options.js 改為 ES module**：改用 `import` 直接引用 `settings-backup.js`，移除對 background message 的依賴
+
 ## [1.17.1] - 2026-04-27
 ### Changed
 - 優化 queue panel 視覺樣式：加入左右邊框、上方圓角（15px）、最大寬度 92%、水平置中
