@@ -924,11 +924,11 @@ const AGENT_TOOLS_SEARCH = [
     type: 'function',
     function: {
       name: 'web_search',
-      description: '搜尋網路上的最新資訊、新聞、當前事件、最新版本、即時狀態。當問題涉及近期發生的事件、最新資料或需要即時更新的資訊時使用。',
+      description: '搜尋網路上的最新資訊、新聞、當前事件、最新版本、即時狀態。除非使用者明確指定時間範圍，否則搜尋關鍵字應加入當前年份以優先取得最新結果。',
       parameters: {
         type: 'object',
         properties: {
-          query: { type: 'string', description: '搜尋關鍵字，20字以內' }
+          query: { type: 'string', description: '搜尋關鍵字，20字以內，應包含年份以確保結果時效性' }
         },
         required: ['query']
       }
@@ -938,11 +938,11 @@ const AGENT_TOOLS_SEARCH = [
     type: 'function',
     function: {
       name: 'deep_search',
-      description: '深度搜尋技術文件、學術研究、詳細資料。適合需要深入技術資訊的問題。',
+      description: '深度搜尋技術文件、學術研究、詳細資料。適合需要深入技術資訊的問題。除非使用者指定，否則優先取得最新版本資料。',
       parameters: {
         type: 'object',
         properties: {
-          query: { type: 'string', description: '搜尋關鍵字' }
+          query: { type: 'string', description: '搜尋關鍵字，應包含年份以確保結果時效性' }
         },
         required: ['query']
       }
@@ -1010,7 +1010,12 @@ async function streamAgentChat(message, history, translateConfig, model, systemP
   else if (chatDefaultPrompt) modePrompt = chatDefaultPrompt;
   else if (systemPrompt) modePrompt = systemPrompt;
 
-  const finalSystemPrompt = [memoryContext, globalPrompt, modePrompt].filter(Boolean).join('\n\n');
+  // 注入當前日期，確保搜尋優先抓近期資料
+  const now = new Date();
+  const dateStr = `${now.getFullYear()}年${now.getMonth() + 1}月${now.getDate()}日`;
+  const dateContext = `當前日期：${dateStr}。搜尋資訊時，除非使用者明確指定時間範圍，否則一律以接近當前日期的資訊為準。`;
+
+  const finalSystemPrompt = [dateContext, memoryContext, globalPrompt, modePrompt].filter(Boolean).join('\n\n');
   const fixedChars = (finalSystemPrompt?.length || 0) + message.length;
   const historyBudget = Math.max(0, MAX_CONTEXT_CHARS - fixedChars);
   const { history: compressedHistory, summary } = await compressHistoryIfNeeded(sessionId, history || [], apiKey, useModel, historyBudget);
