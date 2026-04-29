@@ -1097,66 +1097,21 @@ async function streamAgentChat(message, history, translateConfig, model, systemP
       continue;
     }
 
-    // 無 tool_calls
+    // 無 tool_calls：這是最終回答
     if (!toolsExecuted) {
       // AI 判斷不需工具 → 回退正常 streaming
       return streamMiniMaxChat(message, history, translateConfig, model, systemPrompt, memoryContext, port, sessionId);
     }
 
-    // 工具已執行完畢 → 進行串流最終回答
-    break;
+    // 工具執行完畢後的最終回答：清除 XML/think 後直接送出
+    const finalReply = contentStr
+      .replace(/<minimax:tool_call>[\s\S]*?<\/minimax:tool_call>/g, '')
+      .replace(/<think>[\s\S]*?<\/think>/gi, '')
+      .replace(/<result>[\s\S]*?<\/result>/gi, '')
+      .trim();
+    port.postMessage({ type: 'done', reply: finalReply });
+    return;
   }
-
-  if (!toolsExecuted) return;
-
-  // 串流最終回答（messages 含所有 tool results）
-  const streamResp = await fetch(MINIMAX_API_URL, {
-    method: 'POST',
-    headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: useModel, messages, stream: true })
-  });
-
-  if (!streamResp.ok) {
-    const err = await streamResp.json().catch(() => ({}));
-    throw new Error(err.error?.message || `API 錯誤: ${streamResp.status}`);
-  }
-
-  const reader = streamResp.body.getReader();
-  const decoder = new TextDecoder();
-  let sseBuffer = '';
-  let fullContent = '';
-
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      sseBuffer += decoder.decode(value, { stream: true });
-      const lines = sseBuffer.split('\n');
-      sseBuffer = lines.pop();
-      for (const line of lines) {
-        if (!line.startsWith('data: ')) continue;
-        const d = line.slice(6).trim();
-        if (d === '[DONE]') continue;
-        try {
-          const json = JSON.parse(d);
-          const delta = json.choices?.[0]?.delta?.content || '';
-          if (delta) {
-            fullContent += delta;
-            port.postMessage({ type: 'chunk', text: delta, full: fullContent });
-          }
-        } catch {}
-      }
-    }
-  } finally {
-    reader.releaseLock();
-  }
-
-  const cleaned = fullContent
-    .replace(/<think>[\s\S]*?<\/think>/gi, '')
-    .replace(/<result>[\s\S]*?<\/result>/gi, '')
-    .trim();
-
-  port.postMessage({ type: 'done', reply: cleaned || fullContent });
 }
 
 // 處理聊天訊息
