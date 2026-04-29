@@ -950,6 +950,25 @@ const AGENT_TOOLS_SEARCH = [
   }
 ];
 
+// ── XML 工具呼叫解析（MiniMax M2.7 使用 XML 格式而非 OpenAI tool_calls）──
+function parseXmlToolCalls(content) {
+  if (!content || typeof content !== 'string') return null;
+  const blockMatch = content.match(/<minimax:tool_call>([\s\S]*?)<\/minimax:tool_call>/);
+  if (!blockMatch) return null;
+  const calls = [];
+  const invokeRe = /<invoke name="([^"]+)">([\s\S]*?)<\/invoke>/g;
+  let m;
+  while ((m = invokeRe.exec(blockMatch[1])) !== null) {
+    const name = m[1];
+    const args = {};
+    const paramRe = /<parameter name="([^"]+)">([\s\S]*?)<\/parameter>/g;
+    let p;
+    while ((p = paramRe.exec(m[2])) !== null) args[p[1]] = p[2].trim();
+    calls.push({ name, args });
+  }
+  return calls.length > 0 ? calls : null;
+}
+
 // ── Tool 執行路由 ─────────────────────────────────────────────
 async function handleToolCall(name, args) {
   if (name === 'web_search') {
@@ -1022,24 +1041,53 @@ async function streamAgentChat(message, history, translateConfig, model, systemP
 
     const data = await resp.json();
     const msg = data.choices?.[0]?.message;
-    const tcs = msg?.tool_calls;
 
-    // 有 tool_calls → 執行工具後繼續
-    if (tcs && tcs.length > 0) {
+    // 取得 content 字串（支援 array 或 string 格式）
+    const contentStr = Array.isArray(msg?.content)
+      ? msg.content.filter(b => b.type === 'text').map(b => b.text).join('\n')
+      : (typeof msg?.content === 'string' ? msg.content : '');
+
+    // 優先檢查 OpenAI format tool_calls，再 fallback 到 XML format
+    const openAIToolCalls = msg?.tool_calls?.length > 0 ? msg.tool_calls : null;
+    const xmlToolCalls = openAIToolCalls ? null : parseXmlToolCalls(contentStr);
+    const hasToolCalls = !!(openAIToolCalls || xmlToolCalls);
+
+    if (hasToolCalls) {
       toolsExecuted = true;
-      messages.push(msg);
 
-      for (const tc of tcs) {
-        const name = tc.function?.name || tc.name || '';
-        let args = {};
-        try { args = JSON.parse(tc.function?.arguments || tc.arguments || '{}'); } catch {}
+      if (openAIToolCalls) {
+        // OpenAI format：直接 append 原始 message
+        messages.push(msg);
+        for (const tc of openAIToolCalls) {
+          const name = tc.function?.name || tc.name || '';
+          let args = {};
+          try { args = JSON.parse(tc.function?.arguments || tc.arguments || '{}'); } catch {}
+          port.postMessage({ type: 'tool_start', tool: name, query: args.query || '' });
+          let result;
+          try { result = await handleToolCall(name, args); } catch (e) { result = { error: e.message }; }
+          port.postMessage({ type: 'tool_done', tool: name });
+          messages.push({ role: 'tool', tool_call_id: tc.id || '', content: JSON.stringify(result) });
+        }
+      } else {
+        // XML format：清除 XML block 後 append assistant message，結果以 user 訊息注入
+        const cleanContent = contentStr
+          .replace(/<minimax:tool_call>[\s\S]*?<\/minimax:tool_call>/g, '')
+          .replace(/<think>[\s\S]*?<\/think>/gi, '')
+          .trim();
+        if (cleanContent) messages.push({ role: 'assistant', content: cleanContent });
 
-        port.postMessage({ type: 'tool_start', tool: name, query: args.query || '' });
-        let result;
-        try { result = await handleToolCall(name, args); } catch (e) { result = { error: e.message }; }
-        port.postMessage({ type: 'tool_done', tool: name });
-
-        messages.push({ role: 'tool', tool_call_id: tc.id || '', content: JSON.stringify(result) });
+        const resultParts = [];
+        for (const tc of xmlToolCalls) {
+          port.postMessage({ type: 'tool_start', tool: tc.name, query: tc.args.query || '' });
+          let result;
+          try { result = await handleToolCall(tc.name, tc.args); } catch (e) { result = { error: e.message }; }
+          port.postMessage({ type: 'tool_done', tool: tc.name });
+          const snippets = result.results
+            ? result.results.map((r, i) => `[${i + 1}] ${r.title}\n${r.snippet}\n來源：${r.url}`).join('\n\n')
+            : (result.error || '無搜尋結果');
+          resultParts.push(`[工具 ${tc.name} 搜尋「${tc.args.query || ''}」的結果]\n${snippets}`);
+        }
+        messages.push({ role: 'user', content: resultParts.join('\n\n---\n\n') });
       }
       continue;
     }
