@@ -352,7 +352,9 @@ document.addEventListener('DOMContentLoaded', async () => {
           .replace(/<think>[\s\S]*?<\/think>/gi, '')
           .replace(/<think>[\s\S]*/gi, '')
           .replace(/<result>|<\/result>/gi, '').trim();
-        if (currentSession) currentSession.messages.push({ role: 'assistant', content: stopCleanReply, ...(stopThinkContent && { thinkContent: stopThinkContent }) });
+        const stopSearchLog = _agentSearchLog.length > 0 ? [..._agentSearchLog] : null;
+        if (currentSession) currentSession.messages.push({ role: 'assistant', content: stopCleanReply, ...(stopThinkContent && { thinkContent: stopThinkContent }), ...(stopSearchLog && { searchLog: stopSearchLog }) });
+        if (stopSearchLog && liveDiv) liveDiv.parentNode?.insertBefore(buildSearchHistoryEl(stopSearchLog), liveDiv);
         finalizeLiveMessage(liveDiv, partial, stopCleanReply, translateEnabled ? null : sourceLangSelect.value);
         await saveCurrentSession();
         await loadHistory();
@@ -1862,6 +1864,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     currentSession.messages.forEach(msg => {
       // 歷史訊息不知道當時語言設定，用內容自動偵測
       const ttsLang = detectLang(msg.content);
+      if (msg.role === 'assistant' && msg.searchLog?.length > 0) {
+        chatMessages.appendChild(buildSearchHistoryEl(msg.searchLog));
+      }
       const imgs = msg.images || (msg.image ? [msg.image] : null);
       if (imgs && imgs.length > 0) {
         const fileInfos = msg.fileInfos || null;
@@ -2164,9 +2169,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         const reply = msg.reply;
         const doneThinkMatch = !translateEnabled && rawContent.match(/<think>([\s\S]*?)<\/think>/i);
         const thinkContent = doneThinkMatch ? doneThinkMatch[1].trim() : undefined;
-        currentSession.messages.push({ role: 'assistant', content: reply, ...(thinkContent && { thinkContent }) });
-        if (_agentSearchLog.length > 0) {
-          liveDiv.parentNode.insertBefore(buildSearchHistoryEl(_agentSearchLog), liveDiv);
+        const savedSearchLog = _agentSearchLog.length > 0 ? [..._agentSearchLog] : null;
+        currentSession.messages.push({ role: 'assistant', content: reply, ...(thinkContent && { thinkContent }), ...(savedSearchLog && { searchLog: savedSearchLog }) });
+        if (savedSearchLog) {
+          liveDiv.parentNode.insertBefore(buildSearchHistoryEl(savedSearchLog), liveDiv);
         }
         finalizeLiveMessage(liveDiv, rawContent, reply, replyLang);
         clearAgentStatus();
