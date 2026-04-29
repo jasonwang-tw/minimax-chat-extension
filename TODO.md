@@ -79,12 +79,14 @@
    └─ 無 tool_calls → 串流最終回答
 ```
 
-### Phase 1 — Agent Loop 基礎建設（P0）
+### Phase 1 — Agent Loop 基礎建設（P0）✅ 已完成 v1.19.1
 
-- [ ] **`agentLoop()`**：取代現有直接 API 呼叫，支援多輪 tool call → execute → 回傳循環
-- [ ] **`handleToolCall(name, args)`**：統一工具執行入口，依 name 路由到對應 handler
-- [ ] **Streaming 分離**：有 tool_calls 時暫停 stream，顯示「工具執行中...」，最終回答再恢復串流
-- [ ] **sidepanel.js UI**：工具執行狀態標示（顯示正在調用哪個工具名稱）
+- [x] **`agentLoop()`**：`streamAgentChat()` 全程非串流 loop，支援多輪 tool call → execute → 回傳
+- [x] **`handleToolCall(name, args)`**：統一工具執行入口，Brave/Exa 互為 fallback
+- [x] **`parseXmlToolCalls()`**：解析 MiniMax M2.7 XML 格式工具呼叫（`<minimax:tool_call>`）
+- [x] **sidepanel.js UI**：`tool_start`/`tool_done` 狀態標示（🔍 搜尋網路 / 🔎 深度搜尋）
+- [x] **skipTools 機制**：圖片、翻譯模式、頁面 context 自動回退正常 streaming
+- [x] **當前日期注入**：system prompt 注入日期，搜尋優先取得近期資訊
 
 ### Phase 2 — 設定與記憶工具（P1）
 

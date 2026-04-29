@@ -177,6 +177,14 @@ npm run build:css
 
 ## Changelog
 
+## [1.19.1] - 2026-04-29
+### Fixed
+- Agent Loop 改為全程非串流，防止最終回答在 streaming 中再次觸發 `<minimax:tool_call>` 導致 XML 原文顯示並停止回覆
+- 新增 `parseXmlToolCalls()`：正確解析 MiniMax M2.7 的 XML 格式工具呼叫（`<minimax:tool_call><invoke>`），不再依賴 OpenAI `tool_calls` JSON 格式
+- 搜尋來源強制附 Markdown 超連結，修正 AI 只列來源名稱不附 URL 的問題
+### Added
+- Agent system prompt 注入當前日期，搜尋時優先取得近期資訊；工具描述要求關鍵字帶入年份
+
 ## [1.19.0] - 2026-04-29
 ### Added
 - AI Agent Tool Use Phase 1：AI 可自主決定是否呼叫搜尋工具
