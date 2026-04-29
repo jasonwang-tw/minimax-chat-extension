@@ -724,13 +724,17 @@ chrome.runtime.onConnect.addListener(port => {
   });
 });
 
-async function streamHandleMessage({ message, history, images, image, mode, translateConfig, model, systemPrompt, memoryContext, sessionId }, port) {
+async function streamHandleMessage({ message, history, images, image, mode, translateConfig, model, systemPrompt, memoryContext, sessionId, skipTools }, port) {
   const fileList = images && images.length > 0
     ? images
     : (image ? [{ dataUrl: image, mode: mode || 'upload', fileType: 'image' }] : null);
 
   if (!fileList || fileList.length === 0) {
-    await streamMiniMaxChat(message, history, translateConfig, model, systemPrompt, memoryContext, port, sessionId);
+    if (skipTools || translateConfig?.enabled) {
+      await streamMiniMaxChat(message, history, translateConfig, model, systemPrompt, memoryContext, port, sessionId);
+    } else {
+      await streamAgentChat(message, history, translateConfig, model, systemPrompt, memoryContext, port, sessionId);
+    }
     return;
   }
 
@@ -894,6 +898,194 @@ async function streamMiniMaxChat(message, history, translateConfig, model, syste
         if (data === '[DONE]') continue;
         try {
           const json = JSON.parse(data);
+          const delta = json.choices?.[0]?.delta?.content || '';
+          if (delta) {
+            fullContent += delta;
+            port.postMessage({ type: 'chunk', text: delta, full: fullContent });
+          }
+        } catch {}
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const cleaned = fullContent
+    .replace(/<think>[\s\S]*?<\/think>/gi, '')
+    .replace(/<result>[\s\S]*?<\/result>/gi, '')
+    .trim();
+
+  port.postMessage({ type: 'done', reply: cleaned || fullContent });
+}
+
+// ── Agent Tools 定義 ─────────────────────────────────────────
+const AGENT_TOOLS_SEARCH = [
+  {
+    type: 'function',
+    function: {
+      name: 'web_search',
+      description: '搜尋網路上的最新資訊、新聞、當前事件、最新版本、即時狀態。當問題涉及近期發生的事件、最新資料或需要即時更新的資訊時使用。',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: '搜尋關鍵字，20字以內' }
+        },
+        required: ['query']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'deep_search',
+      description: '深度搜尋技術文件、學術研究、詳細資料。適合需要深入技術資訊的問題。',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: '搜尋關鍵字' }
+        },
+        required: ['query']
+      }
+    }
+  }
+];
+
+// ── Tool 執行路由 ─────────────────────────────────────────────
+async function handleToolCall(name, args) {
+  if (name === 'web_search') {
+    const r = await braveSearch(args.query);
+    if (r.success) return { results: r.results, provider: r.provider };
+    const fallback = await exaSearch(args.query);
+    return fallback.success ? { results: fallback.results, provider: fallback.provider } : { error: r.error };
+  }
+  if (name === 'deep_search') {
+    const r = await exaSearch(args.query);
+    if (r.success) return { results: r.results, provider: r.provider };
+    const fallback = await braveSearch(args.query);
+    return fallback.success ? { results: fallback.results, provider: fallback.provider } : { error: r.error };
+  }
+  return { error: `未知工具: ${name}` };
+}
+
+// ── Agent 對話（帶 Tool Use）──────────────────────────────────
+async function streamAgentChat(message, history, translateConfig, model, systemPrompt, memoryContext, port, sessionId) {
+  const { apiKey, defaultPrompts, globalPrompt: storedGlobal } = await chrome.storage.sync.get(['apiKey', 'defaultPrompts', 'globalPrompt']);
+  if (!apiKey) throw new Error('請先在設定頁面輸入 API Key');
+
+  // 決定可用工具
+  const { braveApiKey, exaApiKey } = await chrome.storage.sync.get(['braveApiKey', 'exaApiKey']);
+  const tools = [];
+  if (braveApiKey || exaApiKey) tools.push(AGENT_TOOLS_SEARCH[0]); // web_search
+  if (exaApiKey) tools.push(AGENT_TOOLS_SEARCH[1]);                 // deep_search
+
+  // 無工具可用 → 直接使用正常 streaming
+  if (tools.length === 0) {
+    return streamMiniMaxChat(message, history, translateConfig, model, systemPrompt, memoryContext, port, sessionId);
+  }
+
+  const useModel = model || MODEL_NAME;
+  const globalPrompt = storedGlobal?.trim() || '';
+  const chatDefaultPrompt = defaultPrompts?.chat?.trim() || '';
+  let modePrompt = '';
+  if (chatDefaultPrompt && systemPrompt) modePrompt = `${chatDefaultPrompt}\n\n${systemPrompt}`;
+  else if (chatDefaultPrompt) modePrompt = chatDefaultPrompt;
+  else if (systemPrompt) modePrompt = systemPrompt;
+
+  const finalSystemPrompt = [memoryContext, globalPrompt, modePrompt].filter(Boolean).join('\n\n');
+  const fixedChars = (finalSystemPrompt?.length || 0) + message.length;
+  const historyBudget = Math.max(0, MAX_CONTEXT_CHARS - fixedChars);
+  const { history: compressedHistory, summary } = await compressHistoryIfNeeded(sessionId, history || [], apiKey, useModel, historyBudget);
+  if (summary) port.postMessage({ type: 'compressed' });
+
+  const effectiveSystemPrompt = summary
+    ? `${finalSystemPrompt ? finalSystemPrompt + '\n\n' : ''}[對話前段摘要]\n${summary}`
+    : finalSystemPrompt;
+
+  const messages = buildMessages(message, compressedHistory, translateConfig, effectiveSystemPrompt, globalPrompt);
+
+  let toolsExecuted = false;
+  const MAX_ITER = 6;
+
+  for (let iter = 0; iter < MAX_ITER; iter++) {
+    const resp = await fetch(MINIMAX_API_URL, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: useModel, messages, tools })
+    });
+
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      const rawMsg = err.error?.message || err.base_resp?.status_msg || '';
+      if (rawMsg.toLowerCase().includes('context window')) throw new Error('對話內容過長，請點擊「+」開啟新對話');
+      throw new Error(rawMsg || `API 錯誤: ${resp.status}`);
+    }
+
+    const data = await resp.json();
+    const msg = data.choices?.[0]?.message;
+    const tcs = msg?.tool_calls;
+
+    // 有 tool_calls → 執行工具後繼續
+    if (tcs && tcs.length > 0) {
+      toolsExecuted = true;
+      messages.push(msg);
+
+      for (const tc of tcs) {
+        const name = tc.function?.name || tc.name || '';
+        let args = {};
+        try { args = JSON.parse(tc.function?.arguments || tc.arguments || '{}'); } catch {}
+
+        port.postMessage({ type: 'tool_start', tool: name, query: args.query || '' });
+        let result;
+        try { result = await handleToolCall(name, args); } catch (e) { result = { error: e.message }; }
+        port.postMessage({ type: 'tool_done', tool: name });
+
+        messages.push({ role: 'tool', tool_call_id: tc.id || '', content: JSON.stringify(result) });
+      }
+      continue;
+    }
+
+    // 無 tool_calls
+    if (!toolsExecuted) {
+      // AI 判斷不需工具 → 回退正常 streaming
+      return streamMiniMaxChat(message, history, translateConfig, model, systemPrompt, memoryContext, port, sessionId);
+    }
+
+    // 工具已執行完畢 → 進行串流最終回答
+    break;
+  }
+
+  if (!toolsExecuted) return;
+
+  // 串流最終回答（messages 含所有 tool results）
+  const streamResp = await fetch(MINIMAX_API_URL, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model: useModel, messages, stream: true })
+  });
+
+  if (!streamResp.ok) {
+    const err = await streamResp.json().catch(() => ({}));
+    throw new Error(err.error?.message || `API 錯誤: ${streamResp.status}`);
+  }
+
+  const reader = streamResp.body.getReader();
+  const decoder = new TextDecoder();
+  let sseBuffer = '';
+  let fullContent = '';
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      sseBuffer += decoder.decode(value, { stream: true });
+      const lines = sseBuffer.split('\n');
+      sseBuffer = lines.pop();
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const d = line.slice(6).trim();
+        if (d === '[DONE]') continue;
+        try {
+          const json = JSON.parse(d);
           const delta = json.choices?.[0]?.delta?.content || '';
           if (delta) {
             fullContent += delta;

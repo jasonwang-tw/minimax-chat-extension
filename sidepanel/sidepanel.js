@@ -2074,28 +2074,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     const memoryContext = buildMemoryBlock();
     const replyLang = translateEnabled ? null : sourceLangSelect.value;
 
-    // ── 自動搜尋（有 Search API Key 且純文字訊息時觸發）──────
-    // 有頁面內容時跳過自動搜尋：使用者問的是當前頁面，外部搜尋結果會干擾 context
-    let augmentedMessage = textMessage;
-    if (message && !snapshotImages.length && !translateEnabled && !hadPageContext) {
-      const { braveApiKey, exaApiKey } = await chrome.storage.sync.get(['braveApiKey', 'exaApiKey']);
-      if (braveApiKey || exaApiKey) {
-        setStatus('🔍 分析問題...');
-        const autoResult = await chrome.runtime.sendMessage({ type: 'AUTO_SEARCH', data: { message } });
-        if (autoResult.needed && autoResult.results?.length) {
-          const snippets = autoResult.results.map((r, i) =>
-            `[${i + 1}] ${r.title}\n${r.snippet}\n來源：${r.url}`
-          ).join('\n\n');
-          augmentedMessage = `【自動網路搜尋：${autoResult.query}（${autoResult.provider}）】\n${snippets}\n\n---\n${textMessage}`;
-          const queryLabel = autoResult.rawQuery && autoResult.rawQuery !== autoResult.query
-            ? `${autoResult.rawQuery} → ${autoResult.query}`
-            : autoResult.query;
-          setStatus(`🔍 已搜尋：${queryLabel}`, false, 4000);
-        } else {
-          clearStatus();
-        }
-      }
-    }
+    // Agent Loop 接管搜尋決策，skipTools 時回退正常 streaming
+    const augmentedMessage = textMessage;
+    const skipTools = !!(snapshotImages.length || translateEnabled || hadPageContext);
 
     // 建立即時串流訊息 div
     typingIndicator.classList.add('hidden');
@@ -2145,6 +2126,15 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
       if (msg.type === 'compressed') {
         setStatus('歷史對話已自動壓縮，保留最近輪次', false, 3000);
+        return;
+      }
+      if (msg.type === 'tool_start') {
+        const label = msg.tool === 'deep_search' ? '🔎 深度搜尋' : '🔍 搜尋網路';
+        setStatus(`${label}：${msg.query}`);
+        return;
+      }
+      if (msg.type === 'tool_done') {
+        clearStatus();
         return;
       }
       if (msg.type === 'chunk') {
@@ -2228,7 +2218,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         model: currentModel,
         systemPrompt,
         memoryContext,
-        sessionId: currentSession?.id
+        sessionId: currentSession?.id,
+        skipTools
       }
     });
   }

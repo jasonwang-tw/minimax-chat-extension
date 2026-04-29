@@ -177,6 +177,17 @@ npm run build:css
 
 ## Changelog
 
+## [1.19.0] - 2026-04-29
+### Added
+- AI Agent Tool Use Phase 1：AI 可自主決定是否呼叫搜尋工具
+  - `streamAgentChat()` agent loop：非串流偵測 tool_calls → 執行工具 → 串流最終回答
+  - 工具定義：`web_search`（Brave 主 / Exa 備）、`deep_search`（Exa 主 / Brave 備）
+  - `handleToolCall()` 統一工具執行路由，含自動 fallback
+  - sidepanel 工具執行狀態：`🔍 搜尋網路：query` / `🔎 深度搜尋：query`
+### Changed
+- 移除 sidepanel AUTO_SEARCH 前置判斷，改由 AI Agent 在 background 自行決策
+- 有圖片、翻譯模式、頁面 context 時自動 skipTools，回退正常 streaming
+
 ## [1.18.1] - 2026-04-27
 ### Changed
 - 知識庫摘要改為可展開/收合：預設顯示 2 行截斷，點擊摘要或 chevron 按鈕展開完整內容，展開後箭頭旋轉 180° 指示狀態
