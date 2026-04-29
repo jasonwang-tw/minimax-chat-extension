@@ -1018,6 +1018,44 @@ textarea:disabled {
   color: var(--danger);
 }
 
+.agent-status-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  padding: 5px 16px 7px;
+  animation: fadeIn 0.15s ease;
+}
+
+.agent-status-dot {
+  flex-shrink: 0;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--primary, #ec2970);
+  animation: agentPulse 1.4s ease-in-out infinite;
+}
+
+.agent-status-text {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.agent-status-timer {
+  flex-shrink: 0;
+  font-size: 11px;
+  opacity: 0.55;
+  font-variant-numeric: tabular-nums;
+}
+
+@keyframes agentPulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.35; transform: scale(0.75); }
+}
+
 .image-preview {
   margin-bottom: 8px;
 }

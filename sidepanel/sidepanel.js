@@ -2,6 +2,10 @@
 
 let currentImages = [];  // [{ dataUrl, mode, fileType, fileName }]  目前附加的檔案（圖片/PDF/文字）
 let statusNoticeEl = null; // 聊天區底部的狀態通知元素
+let agentStatusEl = null;  // Agent Loop 狀態列
+let _agentTimer = null;
+let _agentStartTime = 0;
+let _agentIter = 0;
 let pendingRegionMode = null; // 區域截圖完成後要套用的 mode（null = 'region'）
 let currentModel = 'MiniMax-M2.7';  // 目前選擇的模型
 let historySearchQuery = '';  // 歷史紀錄搜尋關鍵字
@@ -2128,13 +2132,19 @@ document.addEventListener('DOMContentLoaded', async () => {
         setStatus('歷史對話已自動壓縮，保留最近輪次', false, 3000);
         return;
       }
+      if (msg.type === 'agent_thinking') {
+        _agentIter = msg.iter;
+        if (!agentStatusEl) startAgentStatus();
+        updateAgentStatus(`第 ${msg.iter} 輪，AI 分析中...`);
+        return;
+      }
       if (msg.type === 'tool_start') {
         const label = msg.tool === 'deep_search' ? '🔎 深度搜尋' : '🔍 搜尋網路';
-        setStatus(`${label}：${msg.query}`);
+        updateAgentStatus(`第 ${_agentIter} 輪 · ${label}：${msg.query}`);
         return;
       }
       if (msg.type === 'tool_done') {
-        clearStatus();
+        updateAgentStatus(`第 ${_agentIter} 輪，AI 分析結果中...`);
         return;
       }
       if (msg.type === 'chunk') {
@@ -2150,6 +2160,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         const thinkContent = doneThinkMatch ? doneThinkMatch[1].trim() : undefined;
         currentSession.messages.push({ role: 'assistant', content: reply, ...(thinkContent && { thinkContent }) });
         finalizeLiveMessage(liveDiv, rawContent, reply, replyLang);
+        clearAgentStatus();
         clearStatus();
         port.disconnect();
         resetLoading();
@@ -2192,6 +2203,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (msg.type === 'error') {
         liveDiv.remove();
         addMessage(`錯誤: ${msg.message}`, 'error');
+        clearAgentStatus();
         clearStatus();
         port.disconnect();
         resetLoading();
@@ -2201,6 +2213,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     port.onDisconnect.addListener(async () => {
       // 僅處理非主動停止的意外斷線（主動停止已在 click handler 清理完畢）
       if (!isLoading) return;
+      clearAgentStatus();
       clearStatus();
       liveDiv.remove();
       const errMsg = chrome.runtime.lastError?.message;
@@ -2307,6 +2320,43 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (duration > 0) setTimeout(() => { if (statusNoticeEl) { statusNoticeEl.remove(); statusNoticeEl = null; } }, duration);
   }
   function clearStatus() { setStatus(''); }
+
+  // ── Agent Loop 狀態列（持續顯示於聊天區底部，帶秒數計時）───────────
+  function _createAgentStatusEl() {
+    if (agentStatusEl) return;
+    agentStatusEl = document.createElement('div');
+    agentStatusEl.className = 'agent-status-bar';
+    agentStatusEl.innerHTML =
+      '<span class="agent-status-dot"></span>' +
+      '<span class="agent-status-text">AI 分析中...</span>' +
+      '<span class="agent-status-timer">0s</span>';
+    chatMessages.appendChild(agentStatusEl);
+    scrollToBottom();
+  }
+
+  function startAgentStatus() {
+    _agentStartTime = Date.now();
+    _agentIter = 1;
+    _createAgentStatusEl();
+    _agentTimer = setInterval(() => {
+      if (!agentStatusEl) return;
+      const elapsed = Math.floor((Date.now() - _agentStartTime) / 1000);
+      agentStatusEl.querySelector('.agent-status-timer').textContent = elapsed + 's';
+    }, 1000);
+  }
+
+  function updateAgentStatus(text) {
+    if (!agentStatusEl) _createAgentStatusEl();
+    agentStatusEl.querySelector('.agent-status-text').textContent = text;
+    scrollToBottom();
+  }
+
+  function clearAgentStatus() {
+    if (_agentTimer) { clearInterval(_agentTimer); _agentTimer = null; }
+    if (agentStatusEl) { agentStatusEl.remove(); agentStatusEl = null; }
+    _agentStartTime = 0;
+    _agentIter = 0;
+  }
 
   // 將流程結果寫入 chat 末端（非短暫底部提示）
   function addProcessStatusMessage(text, isError = false) {

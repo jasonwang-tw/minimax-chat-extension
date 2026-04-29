@@ -1031,6 +1031,7 @@ async function streamAgentChat(message, history, translateConfig, model, systemP
   const MAX_ITER = 6;
 
   for (let iter = 0; iter < MAX_ITER; iter++) {
+    port.postMessage({ type: 'agent_thinking', iter: iter + 1 });
     const resp = await fetch(MINIMAX_API_URL, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
