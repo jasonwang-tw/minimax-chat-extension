@@ -1013,7 +1013,7 @@ async function streamAgentChat(message, history, translateConfig, model, systemP
   // 注入當前日期，確保搜尋優先抓近期資料
   const now = new Date();
   const dateStr = `${now.getFullYear()}年${now.getMonth() + 1}月${now.getDate()}日`;
-  const dateContext = `當前日期：${dateStr}。搜尋資訊時，除非使用者明確指定時間範圍，否則一律以接近當前日期的資訊為準。`;
+  const dateContext = `當前日期：${dateStr}。搜尋資訊時，除非使用者明確指定時間範圍，否則一律以接近當前日期的資訊為準。回答中引用網路搜尋結果時，來源必須以 Markdown 超連結格式標注，例如：[標題](https://example.com)，不可只寫來源名稱而不附 URL。`;
 
   const finalSystemPrompt = [dateContext, memoryContext, globalPrompt, modePrompt].filter(Boolean).join('\n\n');
   const fixedChars = (finalSystemPrompt?.length || 0) + message.length;
