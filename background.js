@@ -1071,7 +1071,7 @@ async function streamAgentChat(message, history, translateConfig, model, systemP
           port.postMessage({ type: 'tool_start', tool: name, query: args.query || '' });
           let result;
           try { result = await handleToolCall(name, args); } catch (e) { result = { error: e.message }; }
-          port.postMessage({ type: 'tool_done', tool: name });
+          port.postMessage({ type: 'tool_done', tool: name, count: result.results?.length ?? null });
           messages.push({ role: 'tool', tool_call_id: tc.id || '', content: JSON.stringify(result) });
         }
       } else {
@@ -1087,7 +1087,7 @@ async function streamAgentChat(message, history, translateConfig, model, systemP
           port.postMessage({ type: 'tool_start', tool: tc.name, query: tc.args.query || '' });
           let result;
           try { result = await handleToolCall(tc.name, tc.args); } catch (e) { result = { error: e.message }; }
-          port.postMessage({ type: 'tool_done', tool: tc.name });
+          port.postMessage({ type: 'tool_done', tool: tc.name, count: result.results?.length ?? null });
           const snippets = result.results
             ? result.results.map((r, i) => `[${i + 1}] ${r.title}\n${r.snippet}\n來源：${r.url}`).join('\n\n')
             : (result.error || '無搜尋結果');

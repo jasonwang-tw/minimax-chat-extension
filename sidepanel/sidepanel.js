@@ -6,6 +6,7 @@ let agentStatusEl = null;  // Agent Loop 狀態列
 let _agentTimer = null;
 let _agentStartTime = 0;
 let _agentIter = 0;
+let _agentSearchLog = [];  // 方案 B：搜尋歷程記錄 [{ tool, query, count }]
 let pendingRegionMode = null; // 區域截圖完成後要套用的 mode（null = 'region'）
 let currentModel = 'MiniMax-M2.7';  // 目前選擇的模型
 let historySearchQuery = '';  // 歷史紀錄搜尋關鍵字
@@ -2083,6 +2084,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const skipTools = !!(snapshotImages.length || translateEnabled || hadPageContext);
 
     // 建立即時串流訊息 div
+    _agentSearchLog = [];
     typingIndicator.classList.add('hidden');
     const liveDiv = createLiveMessageDiv();
     currentLiveDiv = liveDiv;
@@ -2141,10 +2143,14 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (msg.type === 'tool_start') {
         const label = msg.tool === 'deep_search' ? '🔎 深度搜尋' : '🔍 搜尋網路';
         updateAgentStatus(`第 ${_agentIter} 輪 · ${label}：${msg.query}`);
+        _agentSearchLog.push({ tool: msg.tool, query: msg.query, count: null });
         return;
       }
       if (msg.type === 'tool_done') {
         updateAgentStatus(`第 ${_agentIter} 輪，AI 分析結果中...`);
+        if (_agentSearchLog.length > 0) {
+          _agentSearchLog[_agentSearchLog.length - 1].count = msg.count;
+        }
         return;
       }
       if (msg.type === 'chunk') {
@@ -2159,6 +2165,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         const doneThinkMatch = !translateEnabled && rawContent.match(/<think>([\s\S]*?)<\/think>/i);
         const thinkContent = doneThinkMatch ? doneThinkMatch[1].trim() : undefined;
         currentSession.messages.push({ role: 'assistant', content: reply, ...(thinkContent && { thinkContent }) });
+        if (_agentSearchLog.length > 0) {
+          liveDiv.parentNode.insertBefore(buildSearchHistoryEl(_agentSearchLog), liveDiv);
+        }
         finalizeLiveMessage(liveDiv, rawContent, reply, replyLang);
         clearAgentStatus();
         clearStatus();
@@ -2356,6 +2365,24 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (agentStatusEl) { agentStatusEl.remove(); agentStatusEl = null; }
     _agentStartTime = 0;
     _agentIter = 0;
+  }
+
+  function buildSearchHistoryEl(log) {
+    const total = log.length;
+    const items = log.map(e => {
+      const icon = e.tool === 'deep_search' ? '🔎' : '🔍';
+      const label = e.tool === 'deep_search' ? '深度搜尋' : '搜尋';
+      const countStr = e.count != null ? `<span class="agent-sh-count">${e.count} 筆</span>` : '';
+      return `<li><span class="agent-sh-icon">${icon}</span><span class="agent-sh-label">${label}</span><span class="agent-sh-query">「${escapeHtml(e.query)}」</span>${countStr}</li>`;
+    }).join('');
+    const div = document.createElement('div');
+    div.className = 'agent-search-history';
+    div.innerHTML =
+      `<details class="agent-search-details">` +
+      `<summary><span class="agent-sh-summary-text">已執行 ${total} 次搜尋</span><span class="agent-sh-chevron">▾</span></summary>` +
+      `<ul class="agent-search-log">${items}</ul>` +
+      `</details>`;
+    return div;
   }
 
   // 將流程結果寫入 chat 末端（非短暫底部提示）
