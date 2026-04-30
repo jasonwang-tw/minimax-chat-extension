@@ -3,6 +3,7 @@ import { collectSettingsBackupPayload, restoreSettingsBackupPayload } from '../s
 const MINIMAX_API_URL = 'https://api.minimax.io/v1/chat/completions';
 const TEST_MODEL = 'MiniMax-M2.7';
 const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash-lite:generateContent';
+const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
 const DEFAULT_WORDPRESS_BASE_URL = 'https://jasonsbase.com';
 
 document.addEventListener('DOMContentLoaded', async () => {
@@ -14,6 +15,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   const toggleBraveKeyBtn = document.getElementById('toggleBraveKey');
   const exaApiKeyInput = document.getElementById('exaApiKey');
   const toggleExaKeyBtn = document.getElementById('toggleExaKey');
+  const openrouterApiKeyInput = document.getElementById('openrouterApiKey');
+  const toggleOpenrouterKeyBtn = document.getElementById('toggleOpenrouterKey');
+  const openrouterModelSelect = document.getElementById('openrouterModel');
+  const openrouterCustomModelGroup = document.getElementById('openrouterCustomModelGroup');
+  const openrouterCustomModelInput = document.getElementById('openrouterCustomModel');
+  const testOpenrouterBtn = document.getElementById('testOpenrouterBtn');
   const saveBtn = document.getElementById('saveBtn');
   const testBtn = document.getElementById('testBtn');
   const testGeminiBtn = document.getElementById('testGeminiBtn');
@@ -60,6 +67,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   bindPasswordToggle(toggleGeminiKeyBtn, geminiApiKeyInput);
   bindPasswordToggle(toggleBraveKeyBtn, braveApiKeyInput);
   bindPasswordToggle(toggleExaKeyBtn, exaApiKeyInput);
+  bindPasswordToggle(toggleOpenrouterKeyBtn, openrouterApiKeyInput);
+
+  openrouterModelSelect?.addEventListener('change', () => {
+    const isCustom = openrouterModelSelect.value === 'custom';
+    openrouterCustomModelGroup.style.display = isCustom ? '' : 'none';
+  });
 
   saveBtn?.addEventListener('click', async () => {
     const apiKey = apiKeyInput.value.trim();
@@ -68,11 +81,17 @@ document.addEventListener('DOMContentLoaded', async () => {
       return;
     }
 
+    const openrouterModel = openrouterModelSelect.value === 'custom'
+      ? openrouterCustomModelInput.value.trim()
+      : openrouterModelSelect.value;
+
     await chrome.storage.sync.set({
       apiKey,
       geminiApiKey: geminiApiKeyInput.value.trim(),
       braveApiKey: braveApiKeyInput.value.trim(),
-      exaApiKey: exaApiKeyInput.value.trim()
+      exaApiKey: exaApiKeyInput.value.trim(),
+      openrouterApiKey: openrouterApiKeyInput.value.trim(),
+      openrouterModel: openrouterModel
     });
     showMessage('API 設定已儲存', 'success');
   });
@@ -188,20 +207,78 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   });
 
+  testOpenrouterBtn?.addEventListener('click', async () => {
+    const key = openrouterApiKeyInput.value.trim();
+    if (!key) {
+      showMessage('請先輸入 OpenRouter API Key', 'error');
+      return;
+    }
+    const rawModel = openrouterModelSelect.value === 'custom'
+      ? openrouterCustomModelInput.value.trim()
+      : openrouterModelSelect.value;
+    if (!rawModel) {
+      showMessage('請先選擇或輸入 OpenRouter 模型', 'error');
+      return;
+    }
+
+    testOpenrouterBtn.disabled = true;
+    testOpenrouterBtn.textContent = '測試中...';
+    try {
+      const response = await fetch(OPENROUTER_API_URL, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${key}`,
+          'Content-Type': 'application/json',
+          'HTTP-Referer': chrome.runtime.getURL(''),
+          'X-Title': 'MiniMax AI Chat'
+        },
+        body: JSON.stringify({
+          model: rawModel,
+          max_tokens: 16,
+          messages: [{ role: 'user', content: 'Hi' }]
+        })
+      });
+
+      if (response.ok) {
+        const data = await response.json().catch(() => ({}));
+        const modelUsed = data.model || rawModel;
+        showMessage(`OpenRouter 連線成功（${modelUsed}）`, 'success');
+      } else {
+        const error = await response.json().catch(() => ({}));
+        showMessage(`OpenRouter 測試失敗：${error.error?.message || response.status}`, 'error');
+      }
+    } catch (error) {
+      showMessage(`OpenRouter 測試失敗：${error.message}`, 'error');
+    } finally {
+      testOpenrouterBtn.disabled = false;
+      testOpenrouterBtn.textContent = '測試 OpenRouter 連線';
+    }
+  });
+
   async function loadSettings() {
-    const { apiKey, geminiApiKey, braveApiKey, exaApiKey, settings } = await chrome.storage.sync.get([
-      'apiKey',
-      'geminiApiKey',
-      'braveApiKey',
-      'exaApiKey',
-      'settings'
-    ]);
+    const { apiKey, geminiApiKey, braveApiKey, exaApiKey, settings, openrouterApiKey, openrouterModel } =
+      await chrome.storage.sync.get([
+        'apiKey', 'geminiApiKey', 'braveApiKey', 'exaApiKey', 'settings',
+        'openrouterApiKey', 'openrouterModel'
+      ]);
 
     apiKeyInput.value = apiKey || '';
     geminiApiKeyInput.value = geminiApiKey || '';
     braveApiKeyInput.value = braveApiKey || '';
     exaApiKeyInput.value = exaApiKey || '';
     maxHistorySelect.value = String(settings?.maxHistory || 50);
+
+    openrouterApiKeyInput.value = openrouterApiKey || '';
+    if (openrouterModel) {
+      const exists = Array.from(openrouterModelSelect.options).some(o => o.value === openrouterModel);
+      if (exists) {
+        openrouterModelSelect.value = openrouterModel;
+      } else {
+        openrouterModelSelect.value = 'custom';
+        openrouterCustomModelInput.value = openrouterModel;
+        openrouterCustomModelGroup.style.display = '';
+      }
+    }
   }
 
   async function loadPrompts() {

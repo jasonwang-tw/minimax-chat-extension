@@ -3,6 +3,7 @@
 import { SyncService, DEFAULT_SYNC_SETTINGS } from './sync/sync-service.js';
 
 const MINIMAX_API_URL = 'https://api.minimax.io/v1/chat/completions';
+const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
 const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash-lite:generateContent';
 const MODEL_NAME = 'MiniMax-M2.7';
 const MAX_HISTORY = 50;
@@ -82,7 +83,7 @@ chrome.runtime.onStartup.addListener(async () => {
 
 // 資料變動即時自動備份（debounce 5 秒，避免連續觸發）
 let _autoBackupTimer = null;
-const AUTO_BACKUP_KEYS_SYNC = new Set(['memories', 'apiKey', 'geminiApiKey', 'braveApiKey', 'exaApiKey', 'settings', 'defaultPrompts', 'globalPrompt']);
+const AUTO_BACKUP_KEYS_SYNC = new Set(['memories', 'apiKey', 'geminiApiKey', 'braveApiKey', 'exaApiKey', 'openrouterApiKey', 'openrouterModel', 'settings', 'defaultPrompts', 'globalPrompt']);
 const AUTO_BACKUP_KEYS_LOCAL = new Set(['vocabulary', 'knowledgeBase', 'chatSessions']);
 
 chrome.storage.onChanged.addListener((changes, area) => {
@@ -840,10 +841,13 @@ async function streamTextFilesPipeline(textFiles, userMessage, history, translat
 }
 
 async function streamMiniMaxChat(message, history, translateConfig, model, systemPrompt, memoryContext, port, sessionId) {
-  const { apiKey, defaultPrompts, globalPrompt: storedGlobal } = await chrome.storage.sync.get(['apiKey', 'defaultPrompts', 'globalPrompt']);
-  if (!apiKey) throw new Error('請先在設定頁面輸入 API Key');
+  const { apiKey, defaultPrompts, globalPrompt: storedGlobal, openrouterApiKey, openrouterModel } =
+    await chrome.storage.sync.get(['apiKey', 'defaultPrompts', 'globalPrompt', 'openrouterApiKey', 'openrouterModel']);
 
-  const useModel = model || MODEL_NAME;
+  const useOpenRouter = !!(openrouterApiKey && openrouterModel);
+  if (!useOpenRouter && !apiKey) throw new Error('請先在設定頁面輸入 API Key');
+
+  const useModel = useOpenRouter ? openrouterModel : (model || MODEL_NAME);
   const globalPrompt = storedGlobal?.trim() || '';
   const chatDefaultPrompt = defaultPrompts?.chat?.trim() || '';
   let modePrompt = '';
@@ -855,7 +859,8 @@ async function streamMiniMaxChat(message, history, translateConfig, model, syste
 
   const fixedChars = (finalSystemPrompt?.length || 0) + message.length;
   const historyBudget = Math.max(0, MAX_CONTEXT_CHARS - fixedChars);
-  const { history: compressedHistory, summary } = await compressHistoryIfNeeded(sessionId, history || [], apiKey, useModel, historyBudget);
+  const compressKey = useOpenRouter ? openrouterApiKey : apiKey;
+  const { history: compressedHistory, summary } = await compressHistoryIfNeeded(sessionId, history || [], compressKey, useModel, historyBudget);
 
   if (summary) port.postMessage({ type: 'compressed' });
 
@@ -865,9 +870,15 @@ async function streamMiniMaxChat(message, history, translateConfig, model, syste
 
   const messages = buildMessages(message, compressedHistory, translateConfig, effectiveSystemPrompt, globalPrompt);
 
-  const response = await fetch(MINIMAX_API_URL, {
+  const chatUrl = useOpenRouter ? OPENROUTER_API_URL : MINIMAX_API_URL;
+  const chatKey = useOpenRouter ? openrouterApiKey : apiKey;
+  const extraHeaders = useOpenRouter
+    ? { 'HTTP-Referer': 'chrome-extension://minimax-chat', 'X-Title': 'MiniMax AI Chat' }
+    : {};
+
+  const response = await fetch(chatUrl, {
     method: 'POST',
-    headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    headers: { 'Authorization': `Bearer ${chatKey}`, 'Content-Type': 'application/json', ...extraHeaders },
     body: JSON.stringify({ model: useModel, messages, stream: true })
   });
 
@@ -988,8 +999,11 @@ async function handleToolCall(name, args) {
 
 // ── Agent 對話（帶 Tool Use）──────────────────────────────────
 async function streamAgentChat(message, history, translateConfig, model, systemPrompt, memoryContext, port, sessionId) {
-  const { apiKey, defaultPrompts, globalPrompt: storedGlobal } = await chrome.storage.sync.get(['apiKey', 'defaultPrompts', 'globalPrompt']);
-  if (!apiKey) throw new Error('請先在設定頁面輸入 API Key');
+  const { apiKey, defaultPrompts, globalPrompt: storedGlobal, openrouterApiKey, openrouterModel } =
+    await chrome.storage.sync.get(['apiKey', 'defaultPrompts', 'globalPrompt', 'openrouterApiKey', 'openrouterModel']);
+
+  const useOpenRouter = !!(openrouterApiKey && openrouterModel);
+  if (!useOpenRouter && !apiKey) throw new Error('請先在設定頁面輸入 API Key');
 
   // 決定可用工具
   const { braveApiKey, exaApiKey } = await chrome.storage.sync.get(['braveApiKey', 'exaApiKey']);
@@ -1002,7 +1016,13 @@ async function streamAgentChat(message, history, translateConfig, model, systemP
     return streamMiniMaxChat(message, history, translateConfig, model, systemPrompt, memoryContext, port, sessionId);
   }
 
-  const useModel = model || MODEL_NAME;
+  const useModel = useOpenRouter ? openrouterModel : (model || MODEL_NAME);
+  const agentKey = useOpenRouter ? openrouterApiKey : apiKey;
+  const agentUrl = useOpenRouter ? OPENROUTER_API_URL : MINIMAX_API_URL;
+  const agentExtraHeaders = useOpenRouter
+    ? { 'HTTP-Referer': 'chrome-extension://minimax-chat', 'X-Title': 'MiniMax AI Chat' }
+    : {};
+
   const globalPrompt = storedGlobal?.trim() || '';
   const chatDefaultPrompt = defaultPrompts?.chat?.trim() || '';
   let modePrompt = '';
@@ -1018,7 +1038,7 @@ async function streamAgentChat(message, history, translateConfig, model, systemP
   const finalSystemPrompt = [dateContext, memoryContext, globalPrompt, modePrompt].filter(Boolean).join('\n\n');
   const fixedChars = (finalSystemPrompt?.length || 0) + message.length;
   const historyBudget = Math.max(0, MAX_CONTEXT_CHARS - fixedChars);
-  const { history: compressedHistory, summary } = await compressHistoryIfNeeded(sessionId, history || [], apiKey, useModel, historyBudget);
+  const { history: compressedHistory, summary } = await compressHistoryIfNeeded(sessionId, history || [], agentKey, useModel, historyBudget);
   if (summary) port.postMessage({ type: 'compressed' });
 
   const effectiveSystemPrompt = summary
@@ -1032,9 +1052,9 @@ async function streamAgentChat(message, history, translateConfig, model, systemP
 
   for (let iter = 0; iter < MAX_ITER; iter++) {
     port.postMessage({ type: 'agent_thinking', iter: iter + 1 });
-    const resp = await fetch(MINIMAX_API_URL, {
+    const resp = await fetch(agentUrl, {
       method: 'POST',
-      headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      headers: { 'Authorization': `Bearer ${agentKey}`, 'Content-Type': 'application/json', ...agentExtraHeaders },
       body: JSON.stringify({ model: useModel, messages, tools })
     });
 

@@ -177,6 +177,12 @@ npm run build:css
 
 ## Changelog
 
+## [1.20.0] - 2026-04-30
+### Added
+- 設定頁面新增 OpenRouter 整合：API Key 輸入、模型選擇（Claude、GPT-4o、Gemini、Llama、DeepSeek、Mistral）、自訂模型 ID、測試連線按鈕
+- 設定 OpenRouter 後，文字對話（含 Agent 搜尋模式）自動切換至 OpenRouter，取代 MiniMax
+- OpenRouter 設定加入自動備份範圍
+
 ## [1.19.1] - 2026-04-29
 ### Fixed
 - Agent Loop 改為全程非串流，防止最終回答在 streaming 中再次觸發 `<minimax:tool_call>` 導致 XML 原文顯示並停止回覆
