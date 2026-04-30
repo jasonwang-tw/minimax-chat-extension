@@ -89,13 +89,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   });
 
-  await loadSettings();
-  await loadPrompts();
-  await loadCustomCommands();
-  await loadCustomModels();
-  await loadMemorySection();
-  await loadSyncSection();
-
+  // ── Event listener 全部先綁定，不受 await 失敗影響 ────────
   bindPasswordToggle(toggleKeyBtn, apiKeyInput);
   bindPasswordToggle(toggleGeminiKeyBtn, geminiApiKeyInput);
   bindPasswordToggle(toggleBraveKeyBtn, braveApiKeyInput);
@@ -711,5 +705,15 @@ document.addEventListener('DOMContentLoaded', async () => {
       });
     });
   }
+
+  // ── 資料載入（所有 listener 綁定完成後才執行）──────────────
+  Promise.all([
+    loadSettings().catch(console.error),
+    loadPrompts().catch(console.error),
+    loadCustomCommands().catch(console.error),
+    loadCustomModels().catch(console.error),
+    loadMemorySection().catch(console.error),
+    loadSyncSection().catch(console.error),
+  ]);
 
 });
