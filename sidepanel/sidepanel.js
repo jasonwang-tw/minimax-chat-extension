@@ -261,6 +261,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     { label: 'GPT-4o',            modelId: 'openai/gpt-4o' },
     { label: 'GPT-4o mini',       modelId: 'openai/gpt-4o-mini' },
     { label: 'Gemini 2.0 Flash',  modelId: 'google/gemini-2.0-flash-001' },
+    { label: 'Grok 3',            modelId: 'x-ai/grok-3' },
+    { label: 'Grok 3 Mini',       modelId: 'x-ai/grok-3-mini' },
     { label: 'DeepSeek Chat v3',  modelId: 'deepseek/deepseek-chat-v3-0324' },
     { label: 'Llama 3.3 70B',     modelId: 'meta-llama/llama-3.3-70b-instruct' },
   ];
