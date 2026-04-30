@@ -7,6 +7,7 @@ const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
 const DEFAULT_WORDPRESS_BASE_URL = 'https://jasonsbase.com';
 
 document.addEventListener('DOMContentLoaded', async () => {
+  console.log('[Options] DOMContentLoaded fired');
   const apiKeyInput = document.getElementById('apiKey');
   const toggleKeyBtn = document.getElementById('toggleKey');
   const geminiApiKeyInput = document.getElementById('geminiApiKey');
@@ -89,6 +90,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   });
 
+  console.log('[Options] DOM queries done, binding listeners');
   // ── Event listener 全部先綁定，不受 await 失敗影響 ────────
   bindPasswordToggle(toggleKeyBtn, apiKeyInput);
   bindPasswordToggle(toggleGeminiKeyBtn, geminiApiKeyInput);
@@ -101,7 +103,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     renderCustomModels();
   });
 
+  console.log('[Options] saveBtn element:', saveBtn);
   saveBtn?.addEventListener('click', async () => {
+    console.log('[Options] saveBtn clicked');
     customModels = collectCustomModelsFromDom();
     try {
       await chrome.storage.sync.set({
@@ -369,7 +373,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   async function loadSyncSection() {
-    googleRedirectUriEl.textContent = chrome.identity.getRedirectURL('google-drive-sync');
+    console.log('[Options] loadSyncSection start, googleRedirectUriEl:', googleRedirectUriEl);
+    try {
+      googleRedirectUriEl.textContent = chrome.identity.getRedirectURL('google-drive-sync');
+    } catch(e) { console.error('[Options] getRedirectURL error:', e); }
 
     const settingsResp = await sendRuntimeMessage({ type: 'GET_SYNC_SETTINGS' });
     if (settingsResp.success && settingsResp.data) {
@@ -706,6 +713,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
+  console.log('[Options] All listeners bound, starting data load');
   // ── 資料載入（所有 listener 綁定完成後才執行）──────────────
   Promise.all([
     loadSettings().catch(console.error),
