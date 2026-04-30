@@ -949,6 +949,115 @@ body {
   padding: 4px 6px 6px 6px;
 }
 
+.input-right-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+/* 模型選擇器 */
+.model-picker {
+  position: relative;
+}
+
+.btn-model-picker {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px 8px;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 8px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+  max-width: 90px;
+  overflow: hidden;
+}
+
+.btn-model-picker:hover {
+  color: var(--text-primary);
+  background: rgba(255,255,255,0.09);
+  border-color: rgba(255,255,255,0.14);
+}
+
+.btn-model-picker .model-picker-chevron {
+  flex-shrink: 0;
+  transition: transform 0.2s;
+}
+
+.btn-model-picker.open .model-picker-chevron {
+  transform: rotate(180deg);
+}
+
+#modelPickerLabel {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.model-picker-dropdown {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  right: 0;
+  background: var(--bg-dark);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 10px;
+  padding: 5px;
+  min-width: 190px;
+  max-height: 220px;
+  overflow-y: auto;
+  z-index: 200;
+  box-shadow: 0 -4px 24px rgba(0,0,0,0.35);
+}
+
+.model-picker-dropdown.hidden { display: none; }
+
+.model-picker-item {
+  display: flex;
+  flex-direction: column;
+  padding: 7px 10px;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: background 0.12s;
+  border: none;
+  background: none;
+  width: 100%;
+  text-align: left;
+  gap: 1px;
+}
+
+.model-picker-item:hover {
+  background: rgba(255,255,255,0.06);
+}
+
+.model-picker-item.active {
+  background: rgba(236,41,112,0.12);
+}
+
+.model-picker-item-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.model-picker-item.active .model-picker-item-label {
+  color: var(--primary);
+}
+
+.model-picker-item-sub {
+  font-size: 10px;
+  color: var(--text-secondary);
+  font-family: ui-monospace, monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 170px;
+}
+
 @media (max-width: 480px) {
   .input-bottom-bar {
     flex-direction: column;

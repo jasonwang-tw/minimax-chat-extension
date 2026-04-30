@@ -28,19 +28,19 @@
     <div class="settings-layout">
       <aside class="toc-sidebar">
         <nav class="toc">
-          <a href="#sec-api">API 設定</a>
-          <a href="#sec-chat">對話設定</a>
-          <a href="#sec-prompts">提示詞</a>
-          <a href="#sec-commands">自訂指令</a>
-          <a href="#sec-memory">長期記憶</a>
-          <a href="#sec-sync">同步</a>
-          <a href="#sec-shortcuts">鍵盤快捷鍵</a>
-          <a href="#sec-about">關於</a>
+          <a href="#" data-page="sec-api" class="active">API 設定</a>
+          <a href="#" data-page="sec-chat">對話設定</a>
+          <a href="#" data-page="sec-prompts">提示詞</a>
+          <a href="#" data-page="sec-commands">自訂指令</a>
+          <a href="#" data-page="sec-memory">長期記憶</a>
+          <a href="#" data-page="sec-sync">同步</a>
+          <a href="#" data-page="sec-shortcuts">鍵盤快捷鍵</a>
+          <a href="#" data-page="sec-about">關於</a>
         </nav>
       </aside>
 
       <main class="main">
-      <section class="section" id="sec-api">
+      <section class="section active" id="sec-api">
         <h2>API 設定</h2>
         <div class="form-group">
           <label for="apiKey">MiniMax API Key</label>
@@ -141,47 +141,10 @@
           </div>
 
           <div class="form-group">
-            <label for="openrouterModel">對話模型</label>
-            <select id="openrouterModel">
-              <option value="">── 請選擇模型 ──</option>
-              <optgroup label="Anthropic">
-                <option value="anthropic/claude-opus-4-5">Claude Opus 4.5</option>
-                <option value="anthropic/claude-sonnet-4-5">Claude Sonnet 4.5</option>
-                <option value="anthropic/claude-3.5-sonnet">Claude 3.5 Sonnet</option>
-                <option value="anthropic/claude-3-haiku">Claude 3 Haiku</option>
-              </optgroup>
-              <optgroup label="OpenAI">
-                <option value="openai/gpt-4.1">GPT-4.1</option>
-                <option value="openai/gpt-4o">GPT-4o</option>
-                <option value="openai/gpt-4o-mini">GPT-4o Mini</option>
-              </optgroup>
-              <optgroup label="Google">
-                <option value="google/gemini-2.0-flash-001">Gemini 2.0 Flash</option>
-                <option value="google/gemini-2.5-flash-preview-05-20">Gemini 2.5 Flash Preview</option>
-              </optgroup>
-              <optgroup label="Meta">
-                <option value="meta-llama/llama-3.3-70b-instruct">Llama 3.3 70B Instruct</option>
-                <option value="meta-llama/llama-3.1-8b-instruct">Llama 3.1 8B Instruct</option>
-              </optgroup>
-              <optgroup label="DeepSeek">
-                <option value="deepseek/deepseek-chat-v3-0324">DeepSeek Chat v3</option>
-                <option value="deepseek/deepseek-r1">DeepSeek R1</option>
-              </optgroup>
-              <optgroup label="Mistral">
-                <option value="mistralai/mistral-large">Mistral Large</option>
-                <option value="mistralai/mistral-small">Mistral Small</option>
-              </optgroup>
-              <optgroup label="其他">
-                <option value="custom">自訂模型 ID...</option>
-              </optgroup>
-            </select>
-            <p class="hint">選擇要透過 OpenRouter 使用的模型。</p>
-          </div>
-
-          <div class="form-group" id="openrouterCustomModelGroup" style="display:none">
-            <label for="openrouterCustomModel">自訂模型 ID</label>
-            <input type="text" id="openrouterCustomModel" placeholder="例如：qwen/qwen-2.5-72b-instruct">
-            <p class="hint">輸入完整的 OpenRouter 模型 ID（格式：provider/model-name）。</p>
+            <label>自訂模型清單</label>
+            <p class="hint" style="margin-bottom:10px">在側邊欄輸入列可切換模型。填入顯示名稱與 OpenRouter 模型 ID，可無限新增。</p>
+            <div id="customModelsList" class="custom-models-list"></div>
+            <button id="addCustomModelBtn" class="btn-secondary btn-add-mode" style="margin-top:8px">+ 新增模型</button>
           </div>
 
           <button id="testOpenrouterBtn" class="btn-secondary">測試 OpenRouter 連線</button>
@@ -361,17 +324,18 @@
       <section class="section" id="sec-about">
         <h2>關於</h2>
         <div class="about-info">
-          <p><strong>版本:</strong> 1.20.0</p>
+          <p><strong>版本:</strong> 1.21.0</p>
           <p><strong>對話模型:</strong> MiniMax-M2.7</p>
           <p><strong>圖片模型:</strong> Gemini 2.5 Flash-lite</p>
           <p>MiniMax AI Chat Chrome Extension 設定頁。</p>
         </div>
       </section>
 
-      <div id="message" class="message hidden"></div>
       </main>
     </div>
   </div>
+
+  <div id="toast-container"></div>
 
   <script type="module" src="options.js"></script>
 </body>

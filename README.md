@@ -177,6 +177,15 @@ npm run build:css
 
 ## Changelog
 
+## [1.21.0] - 2026-04-30
+### Added
+- 側邊欄輸入列新增模型選擇器（pill button）：點擊切換 MiniMax 或任意自訂 OpenRouter 模型
+- 設定頁面 OpenRouter 自訂模型清單：可無限新增（顯示名稱 + 模型 ID），取代原本的下拉選單
+### Changed
+- 設定頁面 TOC 改為多頁切換（fade in/out 動畫），不再用錨點捲動
+- 設定儲存成功／失敗訊息改為右下角浮動 Toast，不再 scroll 頂部
+- background.js 路由邏輯改為依 model ID 判斷 provider，不再讀 openrouterModel 設定
+
 ## [1.20.0] - 2026-04-30
 ### Added
 - 設定頁面新增 OpenRouter 整合：API Key 輸入、模型選擇（Claude、GPT-4o、Gemini、Llama、DeepSeek、Mistral）、自訂模型 ID、測試連線按鈕

@@ -226,6 +226,74 @@ document.addEventListener('DOMContentLoaded', async () => {
   let annPreviewState = null;
   let annTextPos = { x: 0, y: 0 };
 
+  // 模型選擇器
+  const modelPickerBtn = document.getElementById('modelPickerBtn');
+  const modelPickerLabel = document.getElementById('modelPickerLabel');
+  const modelPickerDropdown = document.getElementById('modelPickerDropdown');
+
+  await initModelPicker();
+
+  modelPickerBtn?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const isOpen = !modelPickerDropdown.classList.contains('hidden');
+    modelPickerDropdown.classList.toggle('hidden', isOpen);
+    modelPickerBtn.classList.toggle('open', !isOpen);
+  });
+
+  document.addEventListener('click', () => {
+    modelPickerDropdown?.classList.add('hidden');
+    modelPickerBtn?.classList.remove('open');
+  });
+
+  // 設定變更時刷新模型清單
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === 'sync' && (changes.customModels || changes.openrouterApiKey)) {
+      initModelPicker();
+    }
+  });
+
+  async function initModelPicker() {
+    const { openrouterApiKey, customModels } = await chrome.storage.sync.get(['openrouterApiKey', 'customModels']);
+    const models = [{ label: 'MiniMax', modelId: 'MiniMax-M2.7', sub: 'MiniMax-M2.7' }];
+
+    if (openrouterApiKey && Array.isArray(customModels)) {
+      customModels.forEach(m => {
+        if (m.modelId) models.push({ label: m.label || m.modelId, modelId: m.modelId, sub: m.modelId });
+      });
+    }
+    renderModelPicker(models);
+  }
+
+  function renderModelPicker(models) {
+    modelPickerDropdown.innerHTML = '';
+    const currentValid = models.some(m => m.modelId === currentModel);
+    if (!currentValid && models.length > 0) {
+      currentModel = models[0].modelId;
+      modelPickerLabel.textContent = models[0].label;
+    }
+    models.forEach(m => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = `model-picker-item${currentModel === m.modelId ? ' active' : ''}`;
+      btn.innerHTML = `<span class="model-picker-item-label">${escSp(m.label)}</span>${m.sub !== m.label ? `<span class="model-picker-item-sub">${escSp(m.sub)}</span>` : ''}`;
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        currentModel = m.modelId;
+        modelPickerLabel.textContent = m.label;
+        modelPickerDropdown.classList.add('hidden');
+        modelPickerBtn.classList.remove('open');
+        modelPickerDropdown.querySelectorAll('.model-picker-item').forEach(el => el.classList.toggle('active', el === btn));
+      });
+      modelPickerDropdown.appendChild(btn);
+    });
+    const active = models.find(m => m.modelId === currentModel);
+    if (active) modelPickerLabel.textContent = active.label;
+  }
+
+  function escSp(str) {
+    return String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
   // 載入記憶、自訂指令、知識庫
   await loadMemories();
   await migrateCategoriesIfNeeded();

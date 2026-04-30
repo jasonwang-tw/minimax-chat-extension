@@ -17,9 +17,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   const toggleExaKeyBtn = document.getElementById('toggleExaKey');
   const openrouterApiKeyInput = document.getElementById('openrouterApiKey');
   const toggleOpenrouterKeyBtn = document.getElementById('toggleOpenrouterKey');
-  const openrouterModelSelect = document.getElementById('openrouterModel');
-  const openrouterCustomModelGroup = document.getElementById('openrouterCustomModelGroup');
-  const openrouterCustomModelInput = document.getElementById('openrouterCustomModel');
+  const customModelsListEl = document.getElementById('customModelsList');
+  const addCustomModelBtn = document.getElementById('addCustomModelBtn');
   const testOpenrouterBtn = document.getElementById('testOpenrouterBtn');
   const saveBtn = document.getElementById('saveBtn');
   const testBtn = document.getElementById('testBtn');
@@ -55,11 +54,45 @@ document.addEventListener('DOMContentLoaded', async () => {
   const googleRedirectUriEl = document.getElementById('googleRedirectUri');
 
   let customCommands = [];
-  let messageTimer = null;
+  let customModels = [];
+  let currentPage = 'sec-api';
+
+  // ── TOC 多頁導覽 ─────────────────────────────────────────
+  const tocLinks = document.querySelectorAll('.toc a[data-page]');
+  const allSections = document.querySelectorAll('.section[id]');
+
+  function switchPage(pageId) {
+    if (pageId === currentPage) return;
+    const currentEl = document.getElementById(currentPage);
+    const nextEl = document.getElementById(pageId);
+    if (!nextEl) return;
+
+    if (currentEl) {
+      currentEl.classList.add('fading-out');
+      currentEl.classList.remove('active');
+      setTimeout(() => {
+        currentEl.classList.remove('fading-out');
+        nextEl.classList.add('active');
+      }, 150);
+    } else {
+      nextEl.classList.add('active');
+    }
+
+    currentPage = pageId;
+    tocLinks.forEach(l => l.classList.toggle('active', l.dataset.page === pageId));
+  }
+
+  tocLinks.forEach(link => {
+    link.addEventListener('click', (e) => {
+      e.preventDefault();
+      switchPage(link.dataset.page);
+    });
+  });
 
   await loadSettings();
   await loadPrompts();
   await loadCustomCommands();
+  await loadCustomModels();
   await loadMemorySection();
   await loadSyncSection();
 
@@ -69,9 +102,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   bindPasswordToggle(toggleExaKeyBtn, exaApiKeyInput);
   bindPasswordToggle(toggleOpenrouterKeyBtn, openrouterApiKeyInput);
 
-  openrouterModelSelect?.addEventListener('change', () => {
-    const isCustom = openrouterModelSelect.value === 'custom';
-    openrouterCustomModelGroup.style.display = isCustom ? '' : 'none';
+  addCustomModelBtn?.addEventListener('click', () => {
+    customModels.push({ id: `model_${Date.now()}`, label: '', modelId: '' });
+    renderCustomModels();
   });
 
   saveBtn?.addEventListener('click', async () => {
@@ -81,17 +114,14 @@ document.addEventListener('DOMContentLoaded', async () => {
       return;
     }
 
-    const openrouterModel = openrouterModelSelect.value === 'custom'
-      ? openrouterCustomModelInput.value.trim()
-      : openrouterModelSelect.value;
-
+    customModels = collectCustomModelsFromDom();
     await chrome.storage.sync.set({
       apiKey,
       geminiApiKey: geminiApiKeyInput.value.trim(),
       braveApiKey: braveApiKeyInput.value.trim(),
       exaApiKey: exaApiKeyInput.value.trim(),
       openrouterApiKey: openrouterApiKeyInput.value.trim(),
-      openrouterModel: openrouterModel
+      customModels
     });
     showMessage('API 設定已儲存', 'success');
   });
@@ -213,11 +243,10 @@ document.addEventListener('DOMContentLoaded', async () => {
       showMessage('請先輸入 OpenRouter API Key', 'error');
       return;
     }
-    const rawModel = openrouterModelSelect.value === 'custom'
-      ? openrouterCustomModelInput.value.trim()
-      : openrouterModelSelect.value;
+    const liveModels = collectCustomModelsFromDom();
+    const rawModel = liveModels[0]?.modelId?.trim() || '';
     if (!rawModel) {
-      showMessage('請先選擇或輸入 OpenRouter 模型', 'error');
+      showMessage('請先在自訂模型清單中新增至少一個模型', 'error');
       return;
     }
 
@@ -256,10 +285,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   async function loadSettings() {
-    const { apiKey, geminiApiKey, braveApiKey, exaApiKey, settings, openrouterApiKey, openrouterModel } =
+    const { apiKey, geminiApiKey, braveApiKey, exaApiKey, settings, openrouterApiKey } =
       await chrome.storage.sync.get([
-        'apiKey', 'geminiApiKey', 'braveApiKey', 'exaApiKey', 'settings',
-        'openrouterApiKey', 'openrouterModel'
+        'apiKey', 'geminiApiKey', 'braveApiKey', 'exaApiKey', 'settings', 'openrouterApiKey'
       ]);
 
     apiKeyInput.value = apiKey || '';
@@ -267,18 +295,50 @@ document.addEventListener('DOMContentLoaded', async () => {
     braveApiKeyInput.value = braveApiKey || '';
     exaApiKeyInput.value = exaApiKey || '';
     maxHistorySelect.value = String(settings?.maxHistory || 50);
-
     openrouterApiKeyInput.value = openrouterApiKey || '';
-    if (openrouterModel) {
-      const exists = Array.from(openrouterModelSelect.options).some(o => o.value === openrouterModel);
-      if (exists) {
-        openrouterModelSelect.value = openrouterModel;
-      } else {
-        openrouterModelSelect.value = 'custom';
-        openrouterCustomModelInput.value = openrouterModel;
-        openrouterCustomModelGroup.style.display = '';
-      }
+  }
+
+  async function loadCustomModels() {
+    const { customModels: stored, openrouterModel } = await chrome.storage.sync.get(['customModels', 'openrouterModel']);
+
+    if (Array.isArray(stored) && stored.length > 0) {
+      customModels = stored;
+    } else if (openrouterModel) {
+      // 遷移：舊的單一 openrouterModel 轉成清單
+      customModels = [{ id: `model_${Date.now()}`, label: openrouterModel.split('/').pop(), modelId: openrouterModel }];
+    } else {
+      customModels = [];
     }
+    renderCustomModels();
+  }
+
+  function renderCustomModels() {
+    customModelsListEl.innerHTML = '';
+    customModels.forEach((m, idx) => {
+      const item = document.createElement('div');
+      item.className = 'custom-model-item';
+      item.dataset.id = m.id;
+      item.innerHTML = `
+        <input type="text" class="custom-model-label mode-name" value="${escapeVal(m.label)}" placeholder="顯示名稱（如 Claude 3.5）">
+        <input type="text" class="custom-model-id mode-name" value="${escapeVal(m.modelId)}" placeholder="模型 ID（anthropic/claude-3.5-sonnet）">
+        <button class="btn-mode-delete" data-index="${idx}" type="button" title="刪除">
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
+        </button>
+      `;
+      item.querySelector('.btn-mode-delete').addEventListener('click', () => {
+        customModels.splice(idx, 1);
+        renderCustomModels();
+      });
+      customModelsListEl.appendChild(item);
+    });
+  }
+
+  function collectCustomModelsFromDom() {
+    return Array.from(customModelsListEl.querySelectorAll('.custom-model-item')).map(item => ({
+      id: item.dataset.id || `model_${Date.now()}`,
+      label: item.querySelector('.custom-model-label').value.trim(),
+      modelId: item.querySelector('.custom-model-id').value.trim()
+    })).filter(m => m.modelId);
   }
 
   async function loadPrompts() {
@@ -631,24 +691,15 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   function showMessage(text, type) {
-    if (messageTimer) clearTimeout(messageTimer);
-
-    const existing = document.getElementById('inlineMsg');
-    if (existing) existing.remove();
-
-    const targetSection = document.querySelector('.section');
-    const banner = document.createElement('div');
-    banner.id = 'inlineMsg';
-    banner.style.cssText =
-      'padding:12px 16px;border-radius:8px;font-size:14px;text-align:center;' +
-      'margin-bottom:16px;width:100%;box-sizing:border-box;' +
-      (type === 'success'
-        ? 'background:rgba(16,185,129,0.15);color:#10B981;border:1px solid #10B981;'
-        : 'background:rgba(239,68,68,0.15);color:#EF4444;border:1px solid #EF4444;');
-    banner.textContent = text;
-    targetSection.prepend(banner);
-    banner.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    messageTimer = setTimeout(() => banner.remove(), 3000);
+    const container = document.getElementById('toast-container');
+    const toast = document.createElement('div');
+    toast.className = `toast ${type}`;
+    toast.textContent = text;
+    container.appendChild(toast);
+    setTimeout(() => {
+      toast.classList.add('fading-out');
+      setTimeout(() => toast.remove(), 250);
+    }, 3000);
   }
 
   function sendRuntimeMessage(payload) {
@@ -663,17 +714,4 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
-  const tocLinks = document.querySelectorAll('.toc a');
-  const sections = document.querySelectorAll('.section[id]');
-  const observer = new IntersectionObserver((entries) => {
-    entries.forEach((entry) => {
-      if (!entry.isIntersecting) return;
-      const id = entry.target.id;
-      tocLinks.forEach((link) => {
-        link.classList.toggle('active', link.getAttribute('href') === `#${id}`);
-      });
-    });
-  }, { rootMargin: '-40px 0px -60% 0px', threshold: 0 });
-
-  sections.forEach((section) => observer.observe(section));
 });

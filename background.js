@@ -83,7 +83,7 @@ chrome.runtime.onStartup.addListener(async () => {
 
 // 資料變動即時自動備份（debounce 5 秒，避免連續觸發）
 let _autoBackupTimer = null;
-const AUTO_BACKUP_KEYS_SYNC = new Set(['memories', 'apiKey', 'geminiApiKey', 'braveApiKey', 'exaApiKey', 'openrouterApiKey', 'openrouterModel', 'settings', 'defaultPrompts', 'globalPrompt']);
+const AUTO_BACKUP_KEYS_SYNC = new Set(['memories', 'apiKey', 'geminiApiKey', 'braveApiKey', 'exaApiKey', 'openrouterApiKey', 'customModels', 'settings', 'defaultPrompts', 'globalPrompt']);
 const AUTO_BACKUP_KEYS_LOCAL = new Set(['vocabulary', 'knowledgeBase', 'chatSessions']);
 
 chrome.storage.onChanged.addListener((changes, area) => {
@@ -841,13 +841,14 @@ async function streamTextFilesPipeline(textFiles, userMessage, history, translat
 }
 
 async function streamMiniMaxChat(message, history, translateConfig, model, systemPrompt, memoryContext, port, sessionId) {
-  const { apiKey, defaultPrompts, globalPrompt: storedGlobal, openrouterApiKey, openrouterModel } =
-    await chrome.storage.sync.get(['apiKey', 'defaultPrompts', 'globalPrompt', 'openrouterApiKey', 'openrouterModel']);
+  const { apiKey, defaultPrompts, globalPrompt: storedGlobal, openrouterApiKey } =
+    await chrome.storage.sync.get(['apiKey', 'defaultPrompts', 'globalPrompt', 'openrouterApiKey']);
 
-  const useOpenRouter = !!(openrouterApiKey && openrouterModel);
+  const requestedModel = model || MODEL_NAME;
+  const useOpenRouter = !!(openrouterApiKey && requestedModel !== MODEL_NAME);
   if (!useOpenRouter && !apiKey) throw new Error('請先在設定頁面輸入 API Key');
 
-  const useModel = useOpenRouter ? openrouterModel : (model || MODEL_NAME);
+  const useModel = requestedModel;
   const globalPrompt = storedGlobal?.trim() || '';
   const chatDefaultPrompt = defaultPrompts?.chat?.trim() || '';
   let modePrompt = '';
@@ -999,10 +1000,11 @@ async function handleToolCall(name, args) {
 
 // ── Agent 對話（帶 Tool Use）──────────────────────────────────
 async function streamAgentChat(message, history, translateConfig, model, systemPrompt, memoryContext, port, sessionId) {
-  const { apiKey, defaultPrompts, globalPrompt: storedGlobal, openrouterApiKey, openrouterModel } =
-    await chrome.storage.sync.get(['apiKey', 'defaultPrompts', 'globalPrompt', 'openrouterApiKey', 'openrouterModel']);
+  const { apiKey, defaultPrompts, globalPrompt: storedGlobal, openrouterApiKey } =
+    await chrome.storage.sync.get(['apiKey', 'defaultPrompts', 'globalPrompt', 'openrouterApiKey']);
 
-  const useOpenRouter = !!(openrouterApiKey && openrouterModel);
+  const requestedModel = model || MODEL_NAME;
+  const useOpenRouter = !!(openrouterApiKey && requestedModel !== MODEL_NAME);
   if (!useOpenRouter && !apiKey) throw new Error('請先在設定頁面輸入 API Key');
 
   // 決定可用工具
@@ -1016,7 +1018,7 @@ async function streamAgentChat(message, history, translateConfig, model, systemP
     return streamMiniMaxChat(message, history, translateConfig, model, systemPrompt, memoryContext, port, sessionId);
   }
 
-  const useModel = useOpenRouter ? openrouterModel : (model || MODEL_NAME);
+  const useModel = requestedModel;
   const agentKey = useOpenRouter ? openrouterApiKey : apiKey;
   const agentUrl = useOpenRouter ? OPENROUTER_API_URL : MINIMAX_API_URL;
   const agentExtraHeaders = useOpenRouter
