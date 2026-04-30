@@ -118,7 +118,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         openrouterApiKey: openrouterApiKeyInput.value.trim(),
         customModels
       });
-      showMessage(`API 設定已儲存（模型清單：${customModels.length} 筆）`, 'success');
+      showMessage('API 設定已儲存', 'success');
     } catch (err) {
       showMessage(`儲存失敗：${err.message}`, 'error');
     }

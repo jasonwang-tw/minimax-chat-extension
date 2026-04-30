@@ -253,41 +253,74 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   });
 
-  async function initModelPicker() {
-    const { customModels } = await chrome.storage.sync.get(['customModels']);
-    const models = [{ label: 'MiniMax', modelId: 'MiniMax-M2.7', sub: 'MiniMax-M2.7' }];
+  const PRESET_OR_MODELS = [
+    { label: 'Claude Sonnet 4.5', modelId: 'anthropic/claude-sonnet-4-5' },
+    { label: 'Claude 3.5 Sonnet', modelId: 'anthropic/claude-3.5-sonnet' },
+    { label: 'Claude 3 Haiku',    modelId: 'anthropic/claude-3-haiku' },
+    { label: 'GPT-4.1',           modelId: 'openai/gpt-4.1' },
+    { label: 'GPT-4o',            modelId: 'openai/gpt-4o' },
+    { label: 'GPT-4o mini',       modelId: 'openai/gpt-4o-mini' },
+    { label: 'Gemini 2.0 Flash',  modelId: 'google/gemini-2.0-flash-001' },
+    { label: 'DeepSeek Chat v3',  modelId: 'deepseek/deepseek-chat-v3-0324' },
+    { label: 'Llama 3.3 70B',     modelId: 'meta-llama/llama-3.3-70b-instruct' },
+  ];
 
-    if (Array.isArray(customModels)) {
-      customModels.forEach(m => {
-        if (m.modelId) models.push({ label: m.label || m.modelId, modelId: m.modelId, sub: m.modelId });
-      });
+  async function initModelPicker() {
+    const { openrouterApiKey, customModels } = await chrome.storage.sync.get(['openrouterApiKey', 'customModels']);
+    const sections = [];
+
+    // MiniMax 永遠顯示
+    sections.push({ title: null, items: [{ label: 'MiniMax', modelId: 'MiniMax-M2.7' }] });
+
+    if (openrouterApiKey) {
+      // 預設熱門模型
+      sections.push({ title: 'OpenRouter 熱門', items: PRESET_OR_MODELS });
+
+      // 使用者自訂（過濾與預設重複的）
+      const presetIds = new Set(PRESET_OR_MODELS.map(m => m.modelId));
+      const custom = (Array.isArray(customModels) ? customModels : [])
+        .filter(m => m.modelId && !presetIds.has(m.modelId))
+        .map(m => ({ label: m.label || m.modelId, modelId: m.modelId }));
+      if (custom.length > 0) sections.push({ title: '自訂', items: custom });
     }
-    renderModelPicker(models);
+
+    renderModelPicker(sections);
   }
 
-  function renderModelPicker(models) {
+  function renderModelPicker(sections) {
     modelPickerDropdown.innerHTML = '';
-    const currentValid = models.some(m => m.modelId === currentModel);
-    if (!currentValid && models.length > 0) {
-      currentModel = models[0].modelId;
-      modelPickerLabel.textContent = models[0].label;
+    const allItems = sections.flatMap(s => s.items);
+    const currentValid = allItems.some(m => m.modelId === currentModel);
+    if (!currentValid && allItems.length > 0) {
+      currentModel = allItems[0].modelId;
+      modelPickerLabel.textContent = allItems[0].label;
     }
-    models.forEach(m => {
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = `model-picker-item${currentModel === m.modelId ? ' active' : ''}`;
-      btn.innerHTML = `<span class="model-picker-item-label">${escSp(m.label)}</span>${m.sub !== m.label ? `<span class="model-picker-item-sub">${escSp(m.sub)}</span>` : ''}`;
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        currentModel = m.modelId;
-        modelPickerLabel.textContent = m.label;
-        modelPickerDropdown.classList.add('hidden');
-        modelPickerBtn.classList.remove('open');
-        modelPickerDropdown.querySelectorAll('.model-picker-item').forEach(el => el.classList.toggle('active', el === btn));
+
+    sections.forEach(({ title, items }) => {
+      if (title) {
+        const div = document.createElement('div');
+        div.className = 'model-picker-section-title';
+        div.textContent = title;
+        modelPickerDropdown.appendChild(div);
+      }
+      items.forEach(m => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = `model-picker-item${currentModel === m.modelId ? ' active' : ''}`;
+        btn.innerHTML = `<span class="model-picker-item-label">${escSp(m.label)}</span><span class="model-picker-item-sub">${escSp(m.modelId)}</span>`;
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          currentModel = m.modelId;
+          modelPickerLabel.textContent = m.label;
+          modelPickerDropdown.classList.add('hidden');
+          modelPickerBtn.classList.remove('open');
+          modelPickerDropdown.querySelectorAll('.model-picker-item').forEach(el => el.classList.toggle('active', el === btn));
+        });
+        modelPickerDropdown.appendChild(btn);
       });
-      modelPickerDropdown.appendChild(btn);
     });
-    const active = models.find(m => m.modelId === currentModel);
+
+    const active = allItems.find(m => m.modelId === currentModel);
     if (active) modelPickerLabel.textContent = active.label;
   }
 
