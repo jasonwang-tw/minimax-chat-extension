@@ -247,16 +247,16 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // 設定變更時刷新模型清單
   chrome.storage.onChanged.addListener((changes, area) => {
-    if (area === 'sync' && (changes.customModels || changes.openrouterApiKey)) {
+    if (area === 'sync' && changes.customModels) {
       initModelPicker();
     }
   });
 
   async function initModelPicker() {
-    const { openrouterApiKey, customModels } = await chrome.storage.sync.get(['openrouterApiKey', 'customModels']);
+    const { customModels } = await chrome.storage.sync.get(['customModels']);
     const models = [{ label: 'MiniMax', modelId: 'MiniMax-M2.7', sub: 'MiniMax-M2.7' }];
 
-    if (openrouterApiKey && Array.isArray(customModels)) {
+    if (Array.isArray(customModels)) {
       customModels.forEach(m => {
         if (m.modelId) models.push({ label: m.label || m.modelId, modelId: m.modelId, sub: m.modelId });
       });
