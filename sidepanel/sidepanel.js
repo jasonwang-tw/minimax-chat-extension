@@ -233,9 +233,10 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   await initModelPicker();
 
-  modelPickerBtn?.addEventListener('click', (e) => {
+  modelPickerBtn?.addEventListener('click', async (e) => {
     e.stopPropagation();
     const isOpen = !modelPickerDropdown.classList.contains('hidden');
+    if (!isOpen) await initModelPicker();  // 開啟時重新讀取最新模型清單
     modelPickerDropdown.classList.toggle('hidden', isOpen);
     modelPickerBtn.classList.toggle('open', !isOpen);
   });

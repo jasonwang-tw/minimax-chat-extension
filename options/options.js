@@ -109,15 +109,19 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   saveBtn?.addEventListener('click', async () => {
     customModels = collectCustomModelsFromDom();
-    await chrome.storage.sync.set({
-      apiKey: apiKeyInput.value.trim(),
-      geminiApiKey: geminiApiKeyInput.value.trim(),
-      braveApiKey: braveApiKeyInput.value.trim(),
-      exaApiKey: exaApiKeyInput.value.trim(),
-      openrouterApiKey: openrouterApiKeyInput.value.trim(),
-      customModels
-    });
-    showMessage('API 設定已儲存', 'success');
+    try {
+      await chrome.storage.sync.set({
+        apiKey: apiKeyInput.value.trim(),
+        geminiApiKey: geminiApiKeyInput.value.trim(),
+        braveApiKey: braveApiKeyInput.value.trim(),
+        exaApiKey: exaApiKeyInput.value.trim(),
+        openrouterApiKey: openrouterApiKeyInput.value.trim(),
+        customModels
+      });
+      showMessage(`API 設定已儲存（模型清單：${customModels.length} 筆）`, 'success');
+    } catch (err) {
+      showMessage(`儲存失敗：${err.message}`, 'error');
+    }
   });
 
   saveConversationBtn?.addEventListener('click', async () => {
