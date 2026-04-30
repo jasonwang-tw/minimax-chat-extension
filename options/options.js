@@ -108,15 +108,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   saveBtn?.addEventListener('click', async () => {
-    const apiKey = apiKeyInput.value.trim();
-    if (!apiKey) {
-      showMessage('請先輸入 MiniMax API Key', 'error');
-      return;
-    }
-
     customModels = collectCustomModelsFromDom();
     await chrome.storage.sync.set({
-      apiKey,
+      apiKey: apiKeyInput.value.trim(),
       geminiApiKey: geminiApiKeyInput.value.trim(),
       braveApiKey: braveApiKeyInput.value.trim(),
       exaApiKey: exaApiKeyInput.value.trim(),
