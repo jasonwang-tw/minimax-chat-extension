@@ -29,6 +29,7 @@
       <aside class="toc-sidebar">
         <nav class="toc">
           <a href="#" data-page="sec-api" class="active">API 設定</a>
+          <a href="#" data-page="sec-usage">使用量與費用</a>
           <a href="#" data-page="sec-chat">對話設定</a>
           <a href="#" data-page="sec-prompts">提示詞</a>
           <a href="#" data-page="sec-commands">自訂指令</a>
@@ -165,6 +166,78 @@
           </select>
         </div>
         <button id="saveConversationBtn" class="btn-primary">儲存對話設定</button>
+      </section>
+
+      <section class="section" id="sec-usage">
+        <h2>使用量與費用</h2>
+        <p class="section-desc">依 OpenRouter 回傳的 token usage 與當下快取價格估算。歷史紀錄會保留請求當時的價格，不會因日後價格變更而重算。</p>
+
+        <div class="usage-toolbar">
+          <select id="usageRange">
+            <option value="1">今日</option>
+            <option value="7" selected>近 7 天</option>
+            <option value="30">近 30 天</option>
+            <option value="all">全部</option>
+          </select>
+          <button id="refreshPricingBtn" class="btn-secondary" type="button">重新整理價格</button>
+          <button id="clearUsageBtn" class="btn-secondary danger" type="button">清除紀錄</button>
+        </div>
+
+        <div id="usageSummary" class="usage-summary"></div>
+
+        <h3 class="subheading">依模型統計</h3>
+        <div class="table-wrap">
+          <table class="usage-table">
+            <thead>
+              <tr>
+                <th>模型</th>
+                <th>請求</th>
+                <th>Input</th>
+                <th>Output</th>
+                <th>費用</th>
+              </tr>
+            </thead>
+            <tbody id="usageByModelBody"></tbody>
+          </table>
+        </div>
+
+        <h3 class="subheading">OpenRouter 費用表</h3>
+        <p id="pricingUpdatedAt" class="hint"></p>
+        <div class="pricing-controls">
+          <input type="search" id="pricingSearch" placeholder="搜尋模型名稱或 ID">
+          <select id="pricingModalityFilter">
+            <option value="all">全部輸入類型</option>
+            <option value="text">Text</option>
+            <option value="image">Image</option>
+            <option value="file">File</option>
+            <option value="audio">Audio</option>
+            <option value="video">Video</option>
+          </select>
+          <select id="pricingToolFilter">
+            <option value="all">全部 Tool Use</option>
+            <option value="supported">支援 Tool Use</option>
+            <option value="unsupported">不支援 Tool Use</option>
+          </select>
+          <div class="pricing-pager">
+            <button id="pricingPrevBtn" class="btn-secondary" type="button">上一頁</button>
+            <span id="pricingPageInfo"></span>
+            <button id="pricingNextBtn" class="btn-secondary" type="button">下一頁</button>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table class="usage-table">
+            <thead>
+              <tr>
+                <th>模型</th>
+                <th><button class="table-sort-btn" type="button" data-pricing-sort="input">Input / 1M</button></th>
+                <th><button class="table-sort-btn" type="button" data-pricing-sort="output">Output / 1M</button></th>
+                <th><button class="table-sort-btn" type="button" data-pricing-sort="request">Request</button></th>
+                <th><button class="table-sort-btn" type="button" data-pricing-sort="enabled">模型選單</button></th>
+              </tr>
+            </thead>
+            <tbody id="modelPricingBody"></tbody>
+          </table>
+        </div>
       </section>
 
       <section class="section" id="sec-prompts">

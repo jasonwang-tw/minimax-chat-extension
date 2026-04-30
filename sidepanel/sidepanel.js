@@ -231,12 +231,102 @@ document.addEventListener('DOMContentLoaded', async () => {
   const modelPickerLabel = document.getElementById('modelPickerLabel');
   const modelPickerDropdown = document.getElementById('modelPickerDropdown');
 
-  await initModelPicker();
+  const OPENROUTER_MODELS_API_URL = 'https://openrouter.ai/api/v1/models';
+  const MODEL_PRICING_CACHE_KEY = 'openrouterModelPricingCache';
+  let modelPickerSort = { key: 'name', direction: 'asc' };
+
+  function pricePerMillion(value) {
+    const n = Number(value);
+    return Number.isFinite(n) && n >= 0 ? n * 1_000_000 : null;
+  }
+
+  function formatUsdPerMillion(value) {
+    if (value === null) return '?';
+    if (value === 0) return 'Free';
+    if (value < 0.01) return `$${value.toFixed(4)}`;
+    if (value < 1) return `$${value.toFixed(2)}`;
+    return `$${value.toFixed(value >= 10 ? 0 : 2)}`;
+  }
+
+  function formatModelPrice(modelInfo) {
+    const pricing = modelInfo?.pricing;
+    if (!pricing) return null;
+    const input = pricePerMillion(pricing.prompt);
+    const output = pricePerMillion(pricing.completion);
+    if (input === null && output === null) return null;
+    if (input === 0 && output === 0) return 'Free';
+    return `輸入 ${formatUsdPerMillion(input)}/M · 輸出 ${formatUsdPerMillion(output)}/M`;
+  }
+
+  function modelPriceValue(model, key) {
+    const pricing = model?.pricing || {};
+    const value = key === 'output' ? pricing.completion : pricing.prompt;
+    return pricePerMillion(value);
+  }
+
+  function sortModelItems(items) {
+    return [...items].sort((a, b) => {
+      if (modelPickerSort.key === 'name') {
+        const result = String(a.label || a.modelId).localeCompare(String(b.label || b.modelId));
+        return modelPickerSort.direction === 'asc' ? result : -result;
+      }
+      const av = modelPriceValue(a, modelPickerSort.key);
+      const bv = modelPriceValue(b, modelPickerSort.key);
+      if (av === null && bv === null) return String(a.label || a.modelId).localeCompare(String(b.label || b.modelId));
+      if (av === null) return 1;
+      if (bv === null) return -1;
+      const result = av - bv;
+      return modelPickerSort.direction === 'asc' ? result : -result;
+    });
+  }
+
+  async function getOpenRouterPricingMap(apiKey) {
+    const now = Date.now();
+    const { [MODEL_PRICING_CACHE_KEY]: cache } = await chrome.storage.local.get([MODEL_PRICING_CACHE_KEY]);
+    if (cache?.models && now - (cache.updatedAt || 0) < 24 * 60 * 60 * 1000) {
+      return cache.models;
+    }
+
+    try {
+      const headers = apiKey ? { Authorization: `Bearer ${apiKey}` } : {};
+      const resp = await fetch(OPENROUTER_MODELS_API_URL, { headers });
+      if (!resp.ok) throw new Error(`OpenRouter models API ${resp.status}`);
+      const data = await resp.json();
+      const models = {};
+      for (const model of data.data || []) {
+        if (!model?.id) continue;
+        models[model.id] = {
+          id: model.id,
+          name: model.name || model.id,
+          pricing: model.pricing || {},
+          supportedParameters: model.supported_parameters || [],
+          inputModalities: model.architecture?.input_modalities || model.input_modalities || [],
+          contextLength: model.context_length || model.top_provider?.context_length || null,
+          updatedAt: now
+        };
+      }
+      await chrome.storage.local.set({ [MODEL_PRICING_CACHE_KEY]: { updatedAt: now, models } });
+      return models;
+    } catch (err) {
+      console.warn('Failed to load OpenRouter pricing:', err);
+      return cache?.models || {};
+    }
+  }
+
+  async function safeInitModelPicker() {
+    try {
+      await initModelPicker();
+    } catch (err) {
+      console.error('Failed to initialize model picker:', err);
+    }
+  }
+
+  await safeInitModelPicker();
 
   modelPickerBtn?.addEventListener('click', async (e) => {
     e.stopPropagation();
     const isOpen = !modelPickerDropdown.classList.contains('hidden');
-    if (!isOpen) await initModelPicker();  // 開啟時重新讀取最新模型清單
+    if (!isOpen) await safeInitModelPicker();  // 開啟時重新讀取最新模型清單
     modelPickerDropdown.classList.toggle('hidden', isOpen);
     modelPickerBtn.classList.toggle('open', !isOpen);
   });
@@ -248,42 +338,29 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // 設定變更時刷新模型清單
   chrome.storage.onChanged.addListener((changes, area) => {
-    if (area === 'sync' && changes.customModels) {
-      initModelPicker();
+    if (area === 'sync' && (changes.openrouterApiKey || changes.customModels)) {
+      safeInitModelPicker();
     }
   });
 
-  const PRESET_OR_MODELS = [
-    { label: 'Claude Sonnet 4.5', modelId: 'anthropic/claude-sonnet-4-5' },
-    { label: 'Claude 3.5 Sonnet', modelId: 'anthropic/claude-3.5-sonnet' },
-    { label: 'Claude 3 Haiku',    modelId: 'anthropic/claude-3-haiku' },
-    { label: 'GPT-4.1',           modelId: 'openai/gpt-4.1' },
-    { label: 'GPT-4o',            modelId: 'openai/gpt-4o' },
-    { label: 'GPT-4o mini',       modelId: 'openai/gpt-4o-mini' },
-    { label: 'Gemini 2.0 Flash',  modelId: 'google/gemini-2.0-flash-001' },
-    { label: 'Grok 3',            modelId: 'x-ai/grok-3' },
-    { label: 'Grok 3 Mini',       modelId: 'x-ai/grok-3-mini' },
-    { label: 'DeepSeek Chat v3',  modelId: 'deepseek/deepseek-chat-v3-0324' },
-    { label: 'Llama 3.3 70B',     modelId: 'meta-llama/llama-3.3-70b-instruct' },
-  ];
-
   async function initModelPicker() {
-    const { openrouterApiKey, customModels } = await chrome.storage.sync.get(['openrouterApiKey', 'customModels']);
+    const { openrouterApiKey, customModels } =
+      await chrome.storage.sync.get(['openrouterApiKey', 'customModels']);
+    const pricingMap = openrouterApiKey ? await getOpenRouterPricingMap(openrouterApiKey) : {};
     const sections = [];
 
     // MiniMax 永遠顯示
     sections.push({ title: null, items: [{ label: 'MiniMax', modelId: 'MiniMax-M2.7' }] });
 
     if (openrouterApiKey) {
-      // 預設熱門模型
-      sections.push({ title: 'OpenRouter 熱門', items: PRESET_OR_MODELS });
-
-      // 使用者自訂（過濾與預設重複的）
-      const presetIds = new Set(PRESET_OR_MODELS.map(m => m.modelId));
+      const enrich = m => {
+        const priceText = formatModelPrice(pricingMap[m.modelId]);
+        return { ...m, priceText: priceText || '價格未知', pricing: pricingMap[m.modelId]?.pricing || null };
+      };
       const custom = (Array.isArray(customModels) ? customModels : [])
-        .filter(m => m.modelId && !presetIds.has(m.modelId))
-        .map(m => ({ label: m.label || m.modelId, modelId: m.modelId }));
-      if (custom.length > 0) sections.push({ title: '自訂', items: custom });
+        .filter(m => m.modelId)
+        .map(m => enrich({ label: m.label || m.modelId, modelId: m.modelId }));
+      if (custom.length > 0) sections.push({ title: 'OpenRouter 已啟用', items: custom });
     }
 
     renderModelPicker(sections);
@@ -298,6 +375,32 @@ document.addEventListener('DOMContentLoaded', async () => {
       modelPickerLabel.textContent = allItems[0].label;
     }
 
+    if (sections.some(s => s.title && s.items.length > 1)) {
+      const controls = document.createElement('div');
+      controls.className = 'model-picker-sort';
+      controls.innerHTML = `
+        <span>排序</span>
+        <button type="button" data-sort-key="name">名稱</button>
+        <button type="button" data-sort-key="input">Input</button>
+        <button type="button" data-sort-key="output">Output</button>
+      `;
+      controls.querySelectorAll('button').forEach(btn => {
+        const active = btn.dataset.sortKey === modelPickerSort.key;
+        btn.classList.toggle('active', active);
+        if (active) btn.textContent += modelPickerSort.direction === 'asc' ? ' ↑' : ' ↓';
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const key = btn.dataset.sortKey;
+          modelPickerSort = {
+            key,
+            direction: modelPickerSort.key === key && modelPickerSort.direction === 'asc' ? 'desc' : 'asc'
+          };
+          renderModelPicker(sections);
+        });
+      });
+      modelPickerDropdown.appendChild(controls);
+    }
+
     sections.forEach(({ title, items }) => {
       if (title) {
         const div = document.createElement('div');
@@ -305,11 +408,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         div.textContent = title;
         modelPickerDropdown.appendChild(div);
       }
-      items.forEach(m => {
+      sortModelItems(items).forEach(m => {
         const btn = document.createElement('button');
         btn.type = 'button';
         btn.className = `model-picker-item${currentModel === m.modelId ? ' active' : ''}`;
-        btn.innerHTML = `<span class="model-picker-item-label">${escSp(m.label)}</span><span class="model-picker-item-sub">${escSp(m.modelId)}</span>`;
+        const priceLine = m.priceText ? `<span class="model-picker-item-price">${escSp(m.priceText)}</span>` : '';
+        btn.innerHTML = `<span class="model-picker-item-label">${escSp(m.label)}</span><span class="model-picker-item-sub">${escSp(m.modelId)}</span>${priceLine}`;
         btn.addEventListener('click', (e) => {
           e.stopPropagation();
           currentModel = m.modelId;
@@ -446,6 +550,8 @@ document.addEventListener('DOMContentLoaded', async () => {
       setStreamingMode(false);
       messageQueue = [];
       updateQueueIndicator();
+      clearAgentStatus();
+      _agentSearchLog = [];
       clearStatus();
       if (rawContent) {
         const partial = rawContent.trimEnd();
@@ -2271,15 +2377,27 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
       if (msg.type === 'done') {
         const reply = msg.reply;
-        const doneThinkMatch = !translateEnabled && rawContent.match(/<think>([\s\S]*?)<\/think>/i);
+        if (!reply || !String(reply).trim()) {
+          liveDiv.remove();
+          addMessage('錯誤: 模型未返回文字內容，請稍後重試或切換模型。', 'error');
+          clearAgentStatus();
+          _agentSearchLog = [];
+          clearStatus();
+          port.disconnect();
+          resetLoading();
+          return;
+        }
+        const rawForFinalize = rawContent || reply;
+        const doneThinkMatch = !translateEnabled && rawForFinalize.match(/<think>([\s\S]*?)<\/think>/i);
         const thinkContent = doneThinkMatch ? doneThinkMatch[1].trim() : undefined;
         const savedSearchLog = _agentSearchLog.length > 0 ? [..._agentSearchLog] : null;
         currentSession.messages.push({ role: 'assistant', content: reply, ...(thinkContent && { thinkContent }), ...(savedSearchLog && { searchLog: savedSearchLog }) });
         if (savedSearchLog) {
           liveDiv.parentNode.insertBefore(buildSearchHistoryEl(savedSearchLog), liveDiv);
         }
-        finalizeLiveMessage(liveDiv, rawContent, reply, replyLang);
+        finalizeLiveMessage(liveDiv, rawForFinalize, reply, replyLang);
         clearAgentStatus();
+        _agentSearchLog = [];
         clearStatus();
         port.disconnect();
         resetLoading();
@@ -2323,6 +2441,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         liveDiv.remove();
         addMessage(`錯誤: ${msg.message}`, 'error');
         clearAgentStatus();
+        _agentSearchLog = [];
         clearStatus();
         port.disconnect();
         resetLoading();
@@ -2333,6 +2452,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       // 僅處理非主動停止的意外斷線（主動停止已在 click handler 清理完畢）
       if (!isLoading) return;
       clearAgentStatus();
+      _agentSearchLog = [];
       clearStatus();
       liveDiv.remove();
       const errMsg = chrome.runtime.lastError?.message;

@@ -4,7 +4,10 @@ const MINIMAX_API_URL = 'https://api.minimax.io/v1/chat/completions';
 const TEST_MODEL = 'MiniMax-M2.7';
 const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash-lite:generateContent';
 const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
+const OPENROUTER_MODELS_API_URL = 'https://openrouter.ai/api/v1/models';
 const DEFAULT_WORDPRESS_BASE_URL = 'https://jasonsbase.com';
+const MODEL_PRICING_CACHE_KEY = 'openrouterModelPricingCache';
+const MODEL_USAGE_LEDGER_KEY = 'modelUsageLedger';
 
 document.addEventListener('DOMContentLoaded', async () => {
   console.log('[Options] DOMContentLoaded fired');
@@ -26,6 +29,19 @@ document.addEventListener('DOMContentLoaded', async () => {
   const testGeminiBtn = document.getElementById('testGeminiBtn');
   const maxHistorySelect = document.getElementById('maxHistory');
   const saveConversationBtn = document.getElementById('saveConversationBtn');
+  const usageRangeSelect = document.getElementById('usageRange');
+  const refreshPricingBtn = document.getElementById('refreshPricingBtn');
+  const clearUsageBtn = document.getElementById('clearUsageBtn');
+  const usageSummaryEl = document.getElementById('usageSummary');
+  const usageByModelBody = document.getElementById('usageByModelBody');
+  const modelPricingBody = document.getElementById('modelPricingBody');
+  const pricingUpdatedAtEl = document.getElementById('pricingUpdatedAt');
+  const pricingSearchInput = document.getElementById('pricingSearch');
+  const pricingModalityFilter = document.getElementById('pricingModalityFilter');
+  const pricingToolFilter = document.getElementById('pricingToolFilter');
+  const pricingPrevBtn = document.getElementById('pricingPrevBtn');
+  const pricingNextBtn = document.getElementById('pricingNextBtn');
+  const pricingPageInfo = document.getElementById('pricingPageInfo');
   const globalPromptInput = document.getElementById('globalPrompt');
   const promptChatInput = document.getElementById('promptChat');
   const promptImageAnalysisInput = document.getElementById('promptImageAnalysis');
@@ -56,6 +72,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   let customCommands = [];
   let customModels = [];
+  let pricingSort = { key: 'input', direction: 'asc' };
+  let pricingPage = 1;
+  const PRICING_PAGE_SIZE = 50;
   let currentPage = 'sec-api';
 
   // ── TOC 多頁導覽 ─────────────────────────────────────────
@@ -81,6 +100,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     currentPage = pageId;
     tocLinks.forEach(l => l.classList.toggle('active', l.dataset.page === pageId));
+    if (pageId === 'sec-usage') renderUsagePage();
   }
 
   tocLinks.forEach(link => {
@@ -116,6 +136,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         openrouterApiKey: openrouterApiKeyInput.value.trim(),
         customModels
       });
+      await chrome.storage.sync.remove(['openrouterModel', 'hiddenPresetModelIds']);
       showMessage('API 設定已儲存', 'success');
     } catch (err) {
       showMessage(`儲存失敗：${err.message}`, 'error');
@@ -129,6 +150,84 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
     });
     showMessage('對話設定已儲存', 'success');
+  });
+
+  usageRangeSelect?.addEventListener('change', renderUsagePage);
+  refreshPricingBtn?.addEventListener('click', async () => {
+    refreshPricingBtn.disabled = true;
+    refreshPricingBtn.textContent = '更新中...';
+    try {
+      await refreshOpenRouterPricing(true);
+      await renderUsagePage();
+      showMessage('OpenRouter 費用表已更新', 'success');
+    } catch (err) {
+      showMessage(`費用表更新失敗：${err.message}`, 'error');
+    } finally {
+      refreshPricingBtn.disabled = false;
+      refreshPricingBtn.textContent = '重新整理價格';
+    }
+  });
+  clearUsageBtn?.addEventListener('click', async () => {
+    if (!confirm('確定清除所有模型使用量與費用紀錄？')) return;
+    await chrome.storage.local.set({ [MODEL_USAGE_LEDGER_KEY]: [] });
+    await renderUsagePage();
+    showMessage('使用量紀錄已清除', 'success');
+  });
+
+  document.querySelectorAll('[data-pricing-sort]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const key = btn.dataset.pricingSort;
+      pricingSort = {
+        key,
+        direction: pricingSort.key === key && pricingSort.direction === 'asc' ? 'desc' : 'asc'
+      };
+      renderUsagePage();
+    });
+  });
+  pricingSearchInput?.addEventListener('input', () => {
+    pricingPage = 1;
+    renderUsagePage();
+  });
+  pricingModalityFilter?.addEventListener('change', () => {
+    pricingPage = 1;
+    renderUsagePage();
+  });
+  pricingToolFilter?.addEventListener('change', () => {
+    pricingPage = 1;
+    renderUsagePage();
+  });
+  pricingPrevBtn?.addEventListener('click', () => {
+    if (pricingPage <= 1) return;
+    pricingPage -= 1;
+    renderUsagePage();
+  });
+  pricingNextBtn?.addEventListener('click', () => {
+    pricingPage += 1;
+    renderUsagePage();
+  });
+  modelPricingBody?.addEventListener('click', async (e) => {
+    const btn = e.target.closest('[data-model-action]');
+    if (!btn) return;
+    const modelId = btn.dataset.modelId;
+    if (!modelId) return;
+    const { [MODEL_PRICING_CACHE_KEY]: priceCache } = await chrome.storage.local.get([MODEL_PRICING_CACHE_KEY]);
+    const modelInfo = priceCache?.models?.[modelId];
+    customModels = collectCustomModelsFromDom();
+    if (btn.dataset.modelAction === 'enable') {
+      if (!customModels.some(m => m.modelId === modelId)) {
+        customModels.push({
+          id: `model_${Date.now()}`,
+          label: modelInfo?.name || modelId,
+          modelId
+        });
+      }
+    } else if (btn.dataset.modelAction === 'remove') {
+      customModels = customModels.filter(m => m.modelId !== modelId);
+    }
+    await chrome.storage.sync.set({ customModels });
+    await chrome.storage.sync.remove(['openrouterModel', 'hiddenPresetModelIds']);
+    renderCustomModels();
+    await renderUsagePage();
   });
 
   savePromptsBtn?.addEventListener('click', async () => {
@@ -295,9 +394,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   async function loadCustomModels() {
-    const { customModels: stored, openrouterModel } = await chrome.storage.sync.get(['customModels', 'openrouterModel']);
+    const { customModels: stored, openrouterModel } =
+      await chrome.storage.sync.get(['customModels', 'openrouterModel']);
 
-    if (Array.isArray(stored) && stored.length > 0) {
+    if (Array.isArray(stored)) {
       customModels = stored;
     } else if (openrouterModel) {
       // 遷移：舊的單一 openrouterModel 轉成清單
@@ -335,6 +435,231 @@ document.addEventListener('DOMContentLoaded', async () => {
       label: item.querySelector('.custom-model-label').value.trim(),
       modelId: item.querySelector('.custom-model-id').value.trim()
     })).filter(m => m.modelId);
+  }
+
+  function usd(value, digits = 4) {
+    if (value === null || value === undefined || Number.isNaN(Number(value)) || Number(value) < 0) return '未知';
+    return `$${Number(value).toFixed(digits)}`;
+  }
+
+  function compactInt(value) {
+    return Number(value || 0).toLocaleString();
+  }
+
+  function pricePerMillion(value) {
+    const n = Number(value);
+    return Number.isFinite(n) && n >= 0 ? n * 1_000_000 : null;
+  }
+
+  function formatPricePerMillion(value) {
+    if (value === null) return '未知';
+    if (value === 0) return 'Free';
+    if (value < 0.01) return `$${value.toFixed(4)}`;
+    if (value < 1) return `$${value.toFixed(2)}`;
+    return `$${value.toFixed(value >= 10 ? 0 : 2)}`;
+  }
+
+  function pricingValue(model, key) {
+    if (key === 'enabled') {
+      const enabledModelIds = new Set((Array.isArray(customModels) ? customModels : []).map(m => m.modelId));
+      return enabledModelIds.has(model?.id) ? 1 : 0;
+    }
+    const pricing = model?.pricing || {};
+    if (key === 'input') return pricePerMillion(pricing.prompt);
+    if (key === 'output') return pricePerMillion(pricing.completion);
+    if (key === 'request') {
+      const request = Number(pricing.request);
+      return Number.isFinite(request) && request >= 0 ? request : null;
+    }
+    return null;
+  }
+
+  function getInputModalities(model) {
+    const values = model?.inputModalities
+      || model?.architecture?.input_modalities
+      || model?.architecture?.modality
+      || model?.input_modalities
+      || [];
+    const list = Array.isArray(values) ? values : String(values || '').split('+');
+    return list.map(v => String(v).trim().toLowerCase()).filter(Boolean);
+  }
+
+  function formatModalityLabel(modality) {
+    const labels = { text: 'Text', image: 'Image', file: 'File', audio: 'Audio', video: 'Video' };
+    return labels[modality] || modality;
+  }
+
+  function renderModalityBadges(model) {
+    const modalities = getInputModalities(model);
+    if (modalities.length === 0) return '';
+    return `<div class="modality-badges">${modalities.map(m => `<span>${escapeVal(formatModalityLabel(m))}</span>`).join('')}</div>`;
+  }
+
+  function supportsToolUse(model) {
+    return Array.isArray(model?.supportedParameters) && model.supportedParameters.includes('tools');
+  }
+
+  function renderCapabilityBadges(model) {
+    const toolSupported = supportsToolUse(model);
+    const className = toolSupported ? 'tool-supported' : 'tool-unsupported';
+    const label = toolSupported ? 'Tool Use' : 'No Tool Use';
+    return `<div class="capability-badges"><span class="${className}">${label}</span></div>`;
+  }
+
+  function updatePricingSortHeaders() {
+    document.querySelectorAll('[data-pricing-sort]').forEach(btn => {
+      const active = btn.dataset.pricingSort === pricingSort.key;
+      btn.classList.toggle('active', active);
+      const base = btn.textContent.replace(/\s*[↑↓]$/, '');
+      btn.textContent = active ? `${base} ${pricingSort.direction === 'asc' ? '↑' : '↓'}` : base;
+    });
+  }
+
+  function filterUsageByRange(entries) {
+    const range = usageRangeSelect?.value || '7';
+    if (range === 'all') return entries;
+    const days = Number(range);
+    const since = Date.now() - days * 24 * 60 * 60 * 1000;
+    return entries.filter(entry => Date.parse(entry.timestamp || 0) >= since);
+  }
+
+  async function refreshOpenRouterPricing(force = false) {
+    const now = Date.now();
+    const { [MODEL_PRICING_CACHE_KEY]: cache } = await chrome.storage.local.get([MODEL_PRICING_CACHE_KEY]);
+    if (!force && cache?.models && now - (cache.updatedAt || 0) < 24 * 60 * 60 * 1000) return cache;
+
+    const key = openrouterApiKeyInput.value.trim();
+    const headers = key ? { Authorization: `Bearer ${key}` } : {};
+    const resp = await fetch(OPENROUTER_MODELS_API_URL, { headers });
+    if (!resp.ok) throw new Error(`OpenRouter models API ${resp.status}`);
+    const data = await resp.json();
+    const models = {};
+    for (const model of data.data || []) {
+      if (!model?.id) continue;
+      models[model.id] = {
+        id: model.id,
+        name: model.name || model.id,
+        pricing: model.pricing || {},
+        supportedParameters: model.supported_parameters || [],
+        inputModalities: getInputModalities(model),
+        contextLength: model.context_length || model.top_provider?.context_length || null,
+        updatedAt: now
+      };
+    }
+    const next = { updatedAt: now, models };
+    await chrome.storage.local.set({ [MODEL_PRICING_CACHE_KEY]: next });
+    return next;
+  }
+
+  async function renderUsagePage() {
+    if (!usageSummaryEl || !usageByModelBody || !modelPricingBody) return;
+    const { [MODEL_USAGE_LEDGER_KEY]: ledger = [], [MODEL_PRICING_CACHE_KEY]: priceCache } =
+      await chrome.storage.local.get([MODEL_USAGE_LEDGER_KEY, MODEL_PRICING_CACHE_KEY]);
+    const entries = filterUsageByRange(Array.isArray(ledger) ? ledger : []);
+
+    const total = entries.reduce((acc, entry) => {
+      acc.requests += 1;
+      acc.promptTokens += Number(entry.promptTokens || 0);
+      acc.completionTokens += Number(entry.completionTokens || 0);
+      acc.totalTokens += Number(entry.totalTokens || 0);
+      if (entry.totalCostUsd !== null && entry.totalCostUsd !== undefined) {
+        acc.cost += Number(entry.totalCostUsd || 0);
+        acc.costKnown += 1;
+      }
+      return acc;
+    }, { requests: 0, promptTokens: 0, completionTokens: 0, totalTokens: 0, cost: 0, costKnown: 0 });
+
+    usageSummaryEl.innerHTML = `
+      <div><span>請求</span><strong>${compactInt(total.requests)}</strong></div>
+      <div><span>Input tokens</span><strong>${compactInt(total.promptTokens)}</strong></div>
+      <div><span>Output tokens</span><strong>${compactInt(total.completionTokens)}</strong></div>
+      <div><span>估算費用</span><strong>${total.costKnown ? usd(total.cost) : '未知'}</strong></div>
+    `;
+
+    const byModel = new Map();
+    for (const entry of entries) {
+      const row = byModel.get(entry.modelId) || {
+        modelId: entry.modelId,
+        modelName: entry.modelName || entry.modelId,
+        requests: 0,
+        promptTokens: 0,
+        completionTokens: 0,
+        cost: 0,
+        costKnown: 0
+      };
+      row.requests += 1;
+      row.promptTokens += Number(entry.promptTokens || 0);
+      row.completionTokens += Number(entry.completionTokens || 0);
+      if (entry.totalCostUsd !== null && entry.totalCostUsd !== undefined) {
+        row.cost += Number(entry.totalCostUsd || 0);
+        row.costKnown += 1;
+      }
+      byModel.set(entry.modelId, row);
+    }
+
+    usageByModelBody.innerHTML = Array.from(byModel.values())
+      .sort((a, b) => b.cost - a.cost)
+      .map(row => `
+        <tr>
+          <td><strong>${escapeVal(row.modelName)}</strong><br><span>${escapeVal(row.modelId)}</span></td>
+          <td>${compactInt(row.requests)}</td>
+          <td>${compactInt(row.promptTokens)}</td>
+          <td>${compactInt(row.completionTokens)}</td>
+          <td>${row.costKnown ? usd(row.cost) : '未知'}</td>
+        </tr>
+      `).join('') || '<tr><td colspan="5" class="empty-cell">尚無 OpenRouter 使用紀錄</td></tr>';
+
+    const models = priceCache?.models || {};
+    const enabledModelIds = new Set((Array.isArray(customModels) ? customModels : []).map(m => m.modelId));
+    const query = (pricingSearchInput?.value || '').trim().toLowerCase();
+    const modalityFilter = pricingModalityFilter?.value || 'all';
+    const toolFilter = pricingToolFilter?.value || 'all';
+    const allRows = Object.values(models)
+      .filter(model => model?.pricing)
+      .filter(model => {
+        if (!query) return true;
+        return String(model.name || '').toLowerCase().includes(query) || String(model.id || '').toLowerCase().includes(query);
+      })
+      .filter(model => modalityFilter === 'all' || getInputModalities(model).includes(modalityFilter))
+      .filter(model => {
+        if (toolFilter === 'all') return true;
+        const supported = supportsToolUse(model);
+        return toolFilter === 'supported' ? supported : !supported;
+      })
+      .sort((a, b) => {
+        const av = pricingValue(a, pricingSort.key);
+        const bv = pricingValue(b, pricingSort.key);
+        if (av === null && bv === null) return String(a.name || a.id).localeCompare(String(b.name || b.id));
+        if (av === null) return 1;
+        if (bv === null) return -1;
+        const diff = av - bv;
+        return pricingSort.direction === 'asc' ? diff : -diff;
+      });
+    const totalPages = Math.max(1, Math.ceil(allRows.length / PRICING_PAGE_SIZE));
+    pricingPage = Math.min(Math.max(1, pricingPage), totalPages);
+    const rows = allRows.slice((pricingPage - 1) * PRICING_PAGE_SIZE, pricingPage * PRICING_PAGE_SIZE);
+    modelPricingBody.innerHTML = rows.map(model => {
+      const pricing = model.pricing || {};
+      const enabled = enabledModelIds.has(model.id);
+      return `
+        <tr>
+          <td><strong>${escapeVal(model.name || model.id)}</strong><br><span>${escapeVal(model.id)}</span>${renderModalityBadges(model)}${renderCapabilityBadges(model)}</td>
+          <td>${formatPricePerMillion(pricePerMillion(pricing.prompt))}</td>
+          <td>${formatPricePerMillion(pricePerMillion(pricing.completion))}</td>
+          <td>${usd(Number(pricing.request || 0), 6)}</td>
+          <td><button class="btn-secondary btn-model-toggle ${enabled ? 'danger' : ''}" type="button" data-model-action="${enabled ? 'remove' : 'enable'}" data-model-id="${escapeVal(model.id)}">${enabled ? '移除' : '啟用'}</button></td>
+        </tr>
+      `;
+    }).join('') || '<tr><td colspan="5" class="empty-cell">沒有符合條件的模型，或尚未載入費用表</td></tr>';
+
+    if (pricingPageInfo) pricingPageInfo.textContent = `第 ${pricingPage} / ${totalPages} 頁，共 ${allRows.length.toLocaleString()} 個模型`;
+    if (pricingPrevBtn) pricingPrevBtn.disabled = pricingPage <= 1;
+    if (pricingNextBtn) pricingNextBtn.disabled = pricingPage >= totalPages;
+
+    pricingUpdatedAtEl.textContent = priceCache?.updatedAt
+      ? `最後更新：${new Date(priceCache.updatedAt).toLocaleString()}`
+      : '尚未載入 OpenRouter 費用表。';
+    updatePricingSortHeaders();
   }
 
   async function loadPrompts() {
@@ -425,7 +750,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         await loadSettings();
         await loadPrompts();
         await loadCustomCommands();
+        await loadCustomModels();
         await loadMemorySection();
+        await renderUsagePage();
       } catch (err) {
         showMessage(`還原失敗：${err.message}`, 'error');
       }
@@ -722,6 +1049,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     loadCustomModels().catch(console.error),
     loadMemorySection().catch(console.error),
     loadSyncSection().catch(console.error),
+    renderUsagePage().catch(console.error),
   ]);
 
 });

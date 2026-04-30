@@ -27,6 +27,19 @@ body {
   min-height: 100vh;
 }
 
+a {
+  color: var(--primary);
+  font-weight: 500;
+  text-decoration-color: rgba(236,41,112,0.55);
+  text-underline-offset: 2px;
+}
+
+a:hover,
+a:focus-visible {
+  color: #ff5f98;
+  text-decoration-color: currentColor;
+}
+
 .container {
   max-width: 1200px;
   margin: 0 auto;
@@ -454,6 +467,228 @@ input.cmd-trigger {
 .btn-add-mode {
   width: 100%;
   text-align: center;
+}
+
+/* ── 使用量與費用 ─────────────────────────────────────── */
+.usage-toolbar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+.usage-toolbar select {
+  width: auto;
+  min-width: 120px;
+}
+
+.btn-secondary.danger {
+  color: var(--primary);
+  border-color: var(--primary);
+  background: rgba(236,41,112,0.1);
+}
+
+.btn-secondary.danger:hover {
+  color: var(--text-primary);
+  background: rgba(236,41,112,0.16);
+  border-color: var(--primary);
+}
+
+.usage-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.usage-summary div {
+  background: var(--bg-darker);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 10px;
+  padding: 12px;
+}
+
+.usage-summary span {
+  display: block;
+  color: var(--text-secondary);
+  font-size: 11px;
+  margin-bottom: 6px;
+}
+
+.usage-summary strong {
+  color: var(--text-primary);
+  font-size: 16px;
+}
+
+.subheading {
+  font-size: 13px;
+  color: var(--text-primary);
+  margin: 18px 0 10px;
+}
+
+.table-wrap {
+  overflow-x: auto;
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 12px;
+}
+
+.usage-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.usage-table th,
+.usage-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  text-align: left;
+  vertical-align: top;
+  white-space: nowrap;
+}
+
+.usage-table th {
+  color: var(--text-secondary);
+  font-weight: 600;
+  background: rgba(255,255,255,0.03);
+}
+
+.table-sort-btn {
+  appearance: none;
+  background: none;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+}
+
+.table-sort-btn:hover,
+.table-sort-btn.active {
+  color: var(--primary);
+}
+
+.usage-table td {
+  color: var(--text-primary);
+}
+
+.usage-table td span {
+  color: var(--text-secondary);
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+}
+
+.usage-table tr:last-child td {
+  border-bottom: none;
+}
+
+.usage-table .empty-cell {
+  color: var(--text-secondary);
+  text-align: center;
+  font-family: inherit;
+}
+
+#pricingUpdatedAt {
+  margin-bottom: 10px;
+}
+
+.pricing-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+
+.pricing-controls input[type=search] {
+  width: min(360px, 100%);
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 12px;
+  color: var(--text-primary);
+  font-size: 14px;
+  font-family: inherit;
+  outline: none;
+  padding: 10px 14px;
+  transition: border-color 0.2s;
+}
+
+.pricing-controls input[type=search]:focus {
+  border-color: rgba(236,41,112,0.5);
+}
+
+.pricing-controls input[type=search]::placeholder {
+  color: var(--text-secondary);
+}
+
+.pricing-controls select {
+  width: auto;
+  min-width: 150px;
+}
+
+.pricing-pager {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.btn-model-toggle {
+  padding: 6px 10px;
+  min-width: 56px;
+}
+
+.modality-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.usage-table td .modality-badges span {
+  color: #d01f62;
+  background: rgba(208,31,98,0.1);
+  border: 1px solid rgba(208,31,98,0.28);
+  border-radius: 999px;
+  padding: 2px 6px;
+  font-family: inherit;
+  font-size: 10px;
+}
+
+.capability-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.usage-table td .capability-badges span {
+  border-radius: 999px;
+  padding: 2px 6px;
+  font-family: inherit;
+  font-size: 10px;
+}
+
+.usage-table td .capability-badges .tool-supported {
+  color: #10B981;
+  background: rgba(16,185,129,0.1);
+  border: 1px solid rgba(16,185,129,0.28);
+}
+
+.usage-table td .capability-badges .tool-unsupported {
+  color: #A3A3A3;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.1);
+}
+
+@media (max-width: 720px) {
+  .usage-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 /* ── TOC 快速導覽 ─────────────────────────────────────── */

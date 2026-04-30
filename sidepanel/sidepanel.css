@@ -975,8 +975,6 @@ body {
   cursor: pointer;
   transition: all 0.15s;
   white-space: nowrap;
-  max-width: 90px;
-  overflow: hidden;
 }
 
 .btn-model-picker:hover {
@@ -995,8 +993,7 @@ body {
 }
 
 #modelPickerLabel {
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .model-picker-dropdown {
@@ -1007,7 +1004,9 @@ body {
   border: 1px solid rgba(255,255,255,0.1);
   border-radius: 10px;
   padding: 5px;
-  min-width: 190px;
+  min-width: 260px;
+  width: max-content;
+  max-width: min(420px, calc(100vw - 24px));
   max-height: 220px;
   overflow-y: auto;
   z-index: 200;
@@ -1015,6 +1014,38 @@ body {
 }
 
 .model-picker-dropdown.hidden { display: none; }
+
+.model-picker-sort {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 5px 6px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  margin-bottom: 4px;
+}
+
+.model-picker-sort span {
+  color: var(--text-secondary);
+  font-size: 10px;
+  margin-right: 2px;
+}
+
+.model-picker-sort button {
+  border: 1px solid rgba(255,255,255,0.08);
+  background: rgba(255,255,255,0.04);
+  color: var(--text-secondary);
+  border-radius: 999px;
+  cursor: pointer;
+  font-size: 10px;
+  padding: 3px 7px;
+}
+
+.model-picker-sort button:hover,
+.model-picker-sort button.active {
+  color: var(--primary);
+  border-color: rgba(236,41,112,0.45);
+  background: rgba(236,41,112,0.1);
+}
 
 .model-picker-item {
   display: flex;
@@ -1052,10 +1083,14 @@ body {
   font-size: 10px;
   color: var(--text-secondary);
   font-family: ui-monospace, monospace;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.model-picker-item-price {
+  font-size: 10px;
+  color: #BDBDBD;
   white-space: nowrap;
-  max-width: 170px;
 }
 
 .model-picker-section-title {

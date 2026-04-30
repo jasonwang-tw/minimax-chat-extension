@@ -41,6 +41,12 @@
 
 ---
 
+## 待議事項
+
+- [ ] **品牌名稱重新評估**：extension 現已支援 OpenRouter（Claude、GPT-4o、Gemini 等）與 MiniMax，考慮是否將 app 名稱、description、設定頁 header 等 MiniMax 相關敘述改為更中性的名稱。方向有三：(A) 全面改品牌名稱、(B) 保留名稱但改說明文字、(C) 只改 description。目前擱置，待決策後實作。
+
+---
+
 ## 開發優先度總覽
 
 | 優先度 | 功能 | 說明 |

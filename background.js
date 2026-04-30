@@ -8,6 +8,10 @@ const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1/models/gemi
 const MODEL_NAME = 'MiniMax-M2.7';
 const MAX_HISTORY = 50;
 const MAX_CONTEXT_CHARS = 40000; // 保守估計 ~20k tokens（中英混合約 2 字元/token）
+const OPENROUTER_MODELS_API_URL = 'https://openrouter.ai/api/v1/models';
+const MODEL_PRICING_CACHE_KEY = 'openrouterModelPricingCache';
+const MODEL_USAGE_LEDGER_KEY = 'modelUsageLedger';
+const MODEL_USAGE_LEDGER_LIMIT = 1000;
 
 const DEFAULT_PROMPTS = {
   chat: '',
@@ -21,6 +25,117 @@ const DEFAULT_REPLY_MODES = [
 ];
 
 const syncService = new SyncService();
+
+function toNumber(value) {
+  const n = Number(value);
+  return Number.isFinite(n) && n >= 0 ? n : null;
+}
+
+function normalizeUsage(usage) {
+  if (!usage || typeof usage !== 'object') return null;
+  const promptTokens = Number(usage.prompt_tokens ?? usage.input_tokens ?? 0);
+  const completionTokens = Number(usage.completion_tokens ?? usage.output_tokens ?? 0);
+  const totalTokens = Number(usage.total_tokens ?? (promptTokens + completionTokens));
+  if (!promptTokens && !completionTokens && !totalTokens) return null;
+  return { promptTokens, completionTokens, totalTokens };
+}
+
+function calculateOpenRouterCost(usage, pricing) {
+  if (!usage || !pricing) return null;
+  const promptPrice = toNumber(pricing.prompt);
+  const completionPrice = toNumber(pricing.completion);
+  const requestPrice = toNumber(pricing.request);
+  if (promptPrice === null || completionPrice === null) return null;
+  const inputCostUsd = usage.promptTokens * promptPrice;
+  const outputCostUsd = usage.completionTokens * completionPrice;
+  const requestCostUsd = requestPrice ?? 0;
+  const totalCostUsd = inputCostUsd + outputCostUsd + requestCostUsd;
+  return { inputCostUsd, outputCostUsd, requestCostUsd, totalCostUsd };
+}
+
+function extractApiErrorMessage(errorData, fallbackStatus) {
+  const error = errorData?.error;
+  const nested = error?.metadata?.raw || error?.metadata?.message || error?.details || error?.cause;
+  if (typeof nested === 'string' && nested.trim()) return nested.trim();
+  if (typeof error?.message === 'string' && error.message.trim()) return error.message.trim();
+  if (typeof errorData?.base_resp?.status_msg === 'string' && errorData.base_resp.status_msg.trim()) {
+    return errorData.base_resp.status_msg.trim();
+  }
+  if (typeof errorData?.message === 'string' && errorData.message.trim()) return errorData.message.trim();
+  return fallbackStatus ? `API 錯誤: ${fallbackStatus}` : 'API 錯誤';
+}
+
+function getInputModalities(model) {
+  const values = model?.inputModalities
+    || model?.architecture?.input_modalities
+    || model?.architecture?.modality
+    || model?.input_modalities
+    || [];
+  const list = Array.isArray(values) ? values : String(values || '').split('+');
+  return list.map(v => String(v).trim().toLowerCase()).filter(Boolean);
+}
+
+async function getOpenRouterPricingMap(apiKey) {
+  const now = Date.now();
+  const { [MODEL_PRICING_CACHE_KEY]: cache } = await chrome.storage.local.get([MODEL_PRICING_CACHE_KEY]);
+  if (cache?.models && now - (cache.updatedAt || 0) < 24 * 60 * 60 * 1000) {
+    return cache.models;
+  }
+
+  try {
+    const headers = apiKey ? { Authorization: `Bearer ${apiKey}` } : {};
+    const resp = await fetch(OPENROUTER_MODELS_API_URL, { headers });
+    if (!resp.ok) throw new Error(`OpenRouter models API ${resp.status}`);
+    const data = await resp.json();
+    const models = {};
+    for (const model of data.data || []) {
+      if (!model?.id) continue;
+      models[model.id] = {
+        id: model.id,
+        name: model.name || model.id,
+        pricing: model.pricing || {},
+        supportedParameters: model.supported_parameters || [],
+        inputModalities: getInputModalities(model),
+        contextLength: model.context_length || model.top_provider?.context_length || null,
+        updatedAt: now
+      };
+    }
+    await chrome.storage.local.set({ [MODEL_PRICING_CACHE_KEY]: { updatedAt: now, models } });
+    return models;
+  } catch (err) {
+    console.warn('[Usage] 無法更新 OpenRouter 模型價格:', err?.message || err);
+    return cache?.models || {};
+  }
+}
+
+async function recordOpenRouterUsage({ modelId, usage, apiKey, sessionId, source }) {
+  const normalized = normalizeUsage(usage);
+  if (!normalized || !modelId) return;
+  const pricingMap = await getOpenRouterPricingMap(apiKey);
+  const modelInfo = pricingMap[modelId] || {};
+  const cost = calculateOpenRouterCost(normalized, modelInfo.pricing);
+  const entry = {
+    id: `usage_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    timestamp: new Date().toISOString(),
+    provider: 'openrouter',
+    modelId,
+    modelName: modelInfo.name || modelId,
+    source: source || 'chat',
+    sessionId: sessionId || null,
+    promptTokens: normalized.promptTokens,
+    completionTokens: normalized.completionTokens,
+    totalTokens: normalized.totalTokens,
+    inputCostUsd: cost?.inputCostUsd ?? null,
+    outputCostUsd: cost?.outputCostUsd ?? null,
+    requestCostUsd: cost?.requestCostUsd ?? null,
+    totalCostUsd: cost?.totalCostUsd ?? null,
+    pricing: modelInfo.pricing || null
+  };
+
+  const { [MODEL_USAGE_LEDGER_KEY]: current = [] } = await chrome.storage.local.get([MODEL_USAGE_LEDGER_KEY]);
+  const next = [entry, ...(Array.isArray(current) ? current : [])].slice(0, MODEL_USAGE_LEDGER_LIMIT);
+  await chrome.storage.local.set({ [MODEL_USAGE_LEDGER_KEY]: next });
+}
 
 // 監聽插件安裝
 chrome.runtime.onInstalled.addListener(({ reason }) => {
@@ -880,22 +995,28 @@ async function streamMiniMaxChat(message, history, translateConfig, model, syste
   const response = await fetch(chatUrl, {
     method: 'POST',
     headers: { 'Authorization': `Bearer ${chatKey}`, 'Content-Type': 'application/json', ...extraHeaders },
-    body: JSON.stringify({ model: useModel, messages, stream: true })
+    body: JSON.stringify({
+      model: useModel,
+      messages,
+      stream: true,
+      ...(useOpenRouter ? { stream_options: { include_usage: true } } : {})
+    })
   });
 
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));
-    const rawMsg = errorData.error?.message || errorData.base_resp?.status_msg || '';
+    const rawMsg = extractApiErrorMessage(errorData, response.status);
     if (rawMsg.toLowerCase().includes('context window')) {
       throw new Error('對話內容或歷史過長，已超出模型限制。請試著縮短輸入，或點擊「+」開啟新對話。');
     }
-    throw new Error(rawMsg || `API 錯誤: ${response.status}`);
+    throw new Error(rawMsg);
   }
 
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let sseBuffer = '';
   let fullContent = '';
+  let finalUsage = null;
 
   try {
     while (true) {
@@ -910,6 +1031,7 @@ async function streamMiniMaxChat(message, history, translateConfig, model, syste
         if (data === '[DONE]') continue;
         try {
           const json = JSON.parse(data);
+          if (json.usage) finalUsage = json.usage;
           const delta = json.choices?.[0]?.delta?.content || '';
           if (delta) {
             fullContent += delta;
@@ -928,6 +1050,10 @@ async function streamMiniMaxChat(message, history, translateConfig, model, syste
     .trim();
 
   port.postMessage({ type: 'done', reply: cleaned || fullContent });
+  if (useOpenRouter && finalUsage) {
+    recordOpenRouterUsage({ modelId: useModel, usage: finalUsage, apiKey: openrouterApiKey, sessionId, source: 'chat' })
+      .catch(err => console.warn('[Usage] 紀錄失敗:', err?.message || err));
+  }
 }
 
 // ── Agent Tools 定義 ─────────────────────────────────────────
@@ -1019,6 +1145,14 @@ async function streamAgentChat(message, history, translateConfig, model, systemP
   }
 
   const useModel = requestedModel;
+  if (useOpenRouter) {
+    const pricingMap = await getOpenRouterPricingMap(openrouterApiKey);
+    const supportedParameters = pricingMap[useModel]?.supportedParameters || [];
+    if (!supportedParameters.includes('tools')) {
+      return streamMiniMaxChat(message, history, translateConfig, model, systemPrompt, memoryContext, port, sessionId);
+    }
+  }
+
   const agentKey = useOpenRouter ? openrouterApiKey : apiKey;
   const agentUrl = useOpenRouter ? OPENROUTER_API_URL : MINIMAX_API_URL;
   const agentExtraHeaders = useOpenRouter
@@ -1052,6 +1186,48 @@ async function streamAgentChat(message, history, translateConfig, model, systemP
   let toolsExecuted = false;
   const MAX_ITER = 6;
 
+  function getMessageText(msg) {
+    if (Array.isArray(msg?.content)) {
+      return msg.content.filter(b => b.type === 'text').map(b => b.text).join('\n');
+    }
+    return typeof msg?.content === 'string' ? msg.content : '';
+  }
+
+  function cleanAgentReply(content) {
+    return String(content || '')
+      .replace(/<minimax:tool_call>[\s\S]*?<\/minimax:tool_call>/g, '')
+      .replace(/<think>[\s\S]*?<\/think>/gi, '')
+      .replace(/<result>[\s\S]*?<\/result>/gi, '')
+      .trim();
+  }
+
+  async function requestFinalSynthesis(reason = '') {
+    const finalMessages = [
+      ...messages,
+      {
+        role: 'user',
+        content: `請根據以上對話與工具搜尋結果，直接用繁體中文回答使用者原始問題。不要再呼叫工具，不要輸出空內容。${reason ? `\n\n補充：${reason}` : ''}`
+      }
+    ];
+    const resp = await fetch(agentUrl, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${agentKey}`, 'Content-Type': 'application/json', ...agentExtraHeaders },
+      body: JSON.stringify({ model: useModel, messages: finalMessages })
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(extractApiErrorMessage(err, resp.status));
+    }
+    const data = await resp.json();
+    if (useOpenRouter && data.usage) {
+      recordOpenRouterUsage({ modelId: useModel, usage: data.usage, apiKey: openrouterApiKey, sessionId, source: 'agent_synthesis' })
+        .catch(err => console.warn('[Usage] 紀錄失敗:', err?.message || err));
+    }
+    const reply = cleanAgentReply(getMessageText(data.choices?.[0]?.message));
+    if (!reply) throw new Error('模型完成工具搜尋後未返回文字內容，請稍後重試或切換模型。');
+    return reply;
+  }
+
   for (let iter = 0; iter < MAX_ITER; iter++) {
     port.postMessage({ type: 'agent_thinking', iter: iter + 1 });
     const resp = await fetch(agentUrl, {
@@ -1062,18 +1238,20 @@ async function streamAgentChat(message, history, translateConfig, model, systemP
 
     if (!resp.ok) {
       const err = await resp.json().catch(() => ({}));
-      const rawMsg = err.error?.message || err.base_resp?.status_msg || '';
+      const rawMsg = extractApiErrorMessage(err, resp.status);
       if (rawMsg.toLowerCase().includes('context window')) throw new Error('對話內容過長，請點擊「+」開啟新對話');
-      throw new Error(rawMsg || `API 錯誤: ${resp.status}`);
+      throw new Error(rawMsg);
     }
 
     const data = await resp.json();
+    if (useOpenRouter && data.usage) {
+      recordOpenRouterUsage({ modelId: useModel, usage: data.usage, apiKey: openrouterApiKey, sessionId, source: toolsExecuted ? 'agent_final' : 'agent' })
+        .catch(err => console.warn('[Usage] 紀錄失敗:', err?.message || err));
+    }
     const msg = data.choices?.[0]?.message;
 
     // 取得 content 字串（支援 array 或 string 格式）
-    const contentStr = Array.isArray(msg?.content)
-      ? msg.content.filter(b => b.type === 'text').map(b => b.text).join('\n')
-      : (typeof msg?.content === 'string' ? msg.content : '');
+    const contentStr = getMessageText(msg);
 
     // 優先檢查 OpenAI format tool_calls，再 fallback 到 XML format
     const openAIToolCalls = msg?.tool_calls?.length > 0 ? msg.tool_calls : null;
@@ -1127,11 +1305,16 @@ async function streamAgentChat(message, history, translateConfig, model, systemP
     }
 
     // 工具執行完畢後的最終回答：清除 XML/think 後直接送出
-    const finalReply = contentStr
-      .replace(/<minimax:tool_call>[\s\S]*?<\/minimax:tool_call>/g, '')
-      .replace(/<think>[\s\S]*?<\/think>/gi, '')
-      .replace(/<result>[\s\S]*?<\/result>/gi, '')
-      .trim();
+    let finalReply = cleanAgentReply(contentStr);
+    if (!finalReply) {
+      finalReply = await requestFinalSynthesis('上一輪模型未產生 final answer。');
+    }
+    port.postMessage({ type: 'done', reply: finalReply });
+    return;
+  }
+
+  if (toolsExecuted) {
+    const finalReply = await requestFinalSynthesis(`已達工具迭代上限 ${MAX_ITER} 輪。`);
     port.postMessage({ type: 'done', reply: finalReply });
     return;
   }
@@ -1625,8 +1808,12 @@ const LANG_NAMES = {
 
 // 保存 session 到歷史記錄
 async function saveSession(session) {
-  const { chatSessions = [] } = await chrome.storage.local.get(['chatSessions']);
-  const maxHistory = MAX_HISTORY;
+  const [{ chatSessions = [] }, { settings = {} }] = await Promise.all([
+    chrome.storage.local.get(['chatSessions']),
+    chrome.storage.sync.get(['settings'])
+  ]);
+  const configuredMaxHistory = Number(settings?.maxHistory);
+  const maxHistory = [20, 50, 100].includes(configuredMaxHistory) ? configuredMaxHistory : MAX_HISTORY;
 
   const existingIndex = chatSessions.findIndex(s => s.id === session.id);
   if (existingIndex >= 0) {
