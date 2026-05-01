@@ -177,6 +177,16 @@ npm run build:css
 
 ## Changelog
 
+## [1.22.0] - 2026-05-01
+### Added
+- 新增 OpenRouter PDF 分流：文字型 PDF 優先使用 OpenRouter PDF Inputs（Cloudflare AI parser），圖片型／掃描型 PDF 維持 Gemini 視覺分析。
+- 新增聊天附件相容層，保留舊 `images` / `fileInfos` 資料並支援統一 `attachments` 渲染。
+- 新增 OpenRouter image output 擷取與聊天內圖片顯示，支援模型回傳圖片附件與常見 image content 格式。
+- OpenRouter 費用表新增 Input / Output modalities 標示與 Output 類型篩選。
+### Changed
+- 上傳工具列按鈕由「上傳圖片」改為「上傳檔案」，反映目前支援圖片、PDF 與文字／程式碼檔。
+- 檔案分析流程會顯示使用的分析方式，並在 OpenRouter / Gemini 失敗時提供模型、parser、檔名與錯誤細節。
+
 ## [1.21.0] - 2026-04-30
 ### Added
 - 側邊欄輸入列新增模型選擇器（pill button）：點擊切換 MiniMax 或任意自訂 OpenRouter 模型

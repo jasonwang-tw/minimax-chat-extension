@@ -38,6 +38,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const pricingUpdatedAtEl = document.getElementById('pricingUpdatedAt');
   const pricingSearchInput = document.getElementById('pricingSearch');
   const pricingModalityFilter = document.getElementById('pricingModalityFilter');
+  const pricingOutputModalityFilter = document.getElementById('pricingOutputModalityFilter');
   const pricingToolFilter = document.getElementById('pricingToolFilter');
   const pricingPrevBtn = document.getElementById('pricingPrevBtn');
   const pricingNextBtn = document.getElementById('pricingNextBtn');
@@ -189,6 +190,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     renderUsagePage();
   });
   pricingModalityFilter?.addEventListener('change', () => {
+    pricingPage = 1;
+    renderUsagePage();
+  });
+  pricingOutputModalityFilter?.addEventListener('change', () => {
     pricingPage = 1;
     renderUsagePage();
   });
@@ -480,19 +485,34 @@ document.addEventListener('DOMContentLoaded', async () => {
       || model?.architecture?.modality
       || model?.input_modalities
       || [];
+    const list = Array.isArray(values) ? values : String(values || '').split('->')[0].split('+');
+    return list.map(v => String(v).trim().toLowerCase()).filter(Boolean);
+  }
+
+  function getOutputModalities(model) {
+    const values = model?.outputModalities
+      || model?.architecture?.output_modalities
+      || model?.output_modalities
+      || (typeof model?.architecture?.modality === 'string' && model.architecture.modality.includes('->')
+        ? model.architecture.modality.split('->')[1]
+        : []);
     const list = Array.isArray(values) ? values : String(values || '').split('+');
     return list.map(v => String(v).trim().toLowerCase()).filter(Boolean);
   }
 
   function formatModalityLabel(modality) {
-    const labels = { text: 'Text', image: 'Image', file: 'File', audio: 'Audio', video: 'Video' };
+    const labels = { text: 'Text', image: 'Image', file: 'File', audio: 'Audio', video: 'Video', embeddings: 'Embeddings' };
     return labels[modality] || modality;
   }
 
   function renderModalityBadges(model) {
-    const modalities = getInputModalities(model);
-    if (modalities.length === 0) return '';
-    return `<div class="modality-badges">${modalities.map(m => `<span>${escapeVal(formatModalityLabel(m))}</span>`).join('')}</div>`;
+    const inputModalities = getInputModalities(model);
+    const outputModalities = getOutputModalities(model);
+    if (inputModalities.length === 0 && outputModalities.length === 0) return '';
+    const renderRow = (label, modalities, className) => modalities.length > 0
+      ? `<div class="modality-row ${className}"><span class="modality-label">${label}</span>${modalities.map(m => `<span>${escapeVal(formatModalityLabel(m))}</span>`).join('')}</div>`
+      : '';
+    return `<div class="modality-badges">${renderRow('Input', inputModalities, 'modality-input')}${renderRow('Output', outputModalities, 'modality-output')}</div>`;
   }
 
   function supportsToolUse(model) {
@@ -542,6 +562,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         pricing: model.pricing || {},
         supportedParameters: model.supported_parameters || [],
         inputModalities: getInputModalities(model),
+        outputModalities: getOutputModalities(model),
         contextLength: model.context_length || model.top_provider?.context_length || null,
         updatedAt: now
       };
@@ -613,6 +634,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const enabledModelIds = new Set((Array.isArray(customModels) ? customModels : []).map(m => m.modelId));
     const query = (pricingSearchInput?.value || '').trim().toLowerCase();
     const modalityFilter = pricingModalityFilter?.value || 'all';
+    const outputModalityFilter = pricingOutputModalityFilter?.value || 'all';
     const toolFilter = pricingToolFilter?.value || 'all';
     const allRows = Object.values(models)
       .filter(model => model?.pricing)
@@ -621,6 +643,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         return String(model.name || '').toLowerCase().includes(query) || String(model.id || '').toLowerCase().includes(query);
       })
       .filter(model => modalityFilter === 'all' || getInputModalities(model).includes(modalityFilter))
+      .filter(model => outputModalityFilter === 'all' || getOutputModalities(model).includes(outputModalityFilter))
       .filter(model => {
         if (toolFilter === 'all') return true;
         const supported = supportsToolUse(model);

@@ -12,6 +12,8 @@ const OPENROUTER_MODELS_API_URL = 'https://openrouter.ai/api/v1/models';
 const MODEL_PRICING_CACHE_KEY = 'openrouterModelPricingCache';
 const MODEL_USAGE_LEDGER_KEY = 'modelUsageLedger';
 const MODEL_USAGE_LEDGER_LIMIT = 1000;
+const AGENT_REQUEST_TIMEOUT_MS = 45000;
+const STREAM_IDLE_TIMEOUT_MS = 60000;
 
 const DEFAULT_PROMPTS = {
   chat: '',
@@ -63,6 +65,37 @@ function extractApiErrorMessage(errorData, fallbackStatus) {
   }
   if (typeof errorData?.message === 'string' && errorData.message.trim()) return errorData.message.trim();
   return fallbackStatus ? `API 錯誤: ${fallbackStatus}` : 'API 錯誤';
+}
+
+async function fetchWithTimeout(url, options = {}, timeoutMs = AGENT_REQUEST_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } catch (err) {
+    if (err?.name === 'AbortError') {
+      throw new Error(`請求逾時（${Math.round(timeoutMs / 1000)} 秒）。模型可能暫時無回應，已中止本次 Agent 分析。`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function readStreamChunkWithTimeout(reader, timeoutMs = STREAM_IDLE_TIMEOUT_MS) {
+  let timer = null;
+  try {
+    return await Promise.race([
+      reader.read(),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => {
+          reject(new Error(`串流回覆逾時（${Math.round(timeoutMs / 1000)} 秒未收到內容）。請稍後重試或切換模型。`));
+        }, timeoutMs);
+      })
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 function getInputModalities(model) {
@@ -858,7 +891,34 @@ async function streamHandleMessage({ message, history, images, image, mode, tran
   const visualFiles = fileList.filter(f => !f.fileType || f.fileType === 'image' || f.fileType === 'pdf');
 
   if (visualFiles.length > 0) {
-    port.postMessage({ type: 'status', text: visualFiles.length > 1 ? `分析 ${visualFiles.length} 個視覺檔案中...` : '分析圖片中...' });
+    const imageFiles = visualFiles.filter(f => !f.fileType || f.fileType === 'image');
+    const pdfFiles = visualFiles.filter(f => f.fileType === 'pdf');
+    const pdfRoute = classifyPdfRoute(pdfFiles);
+    const routeDetails = describeVisualRoute(imageFiles, pdfFiles, pdfRoute, model);
+    port.postMessage({
+      type: 'agent_notice',
+      text: routeDetails,
+      level: 'info'
+    });
+
+    if (imageFiles.length === 0 && pdfFiles.length > 0 && pdfRoute === 'openrouter-pdf') {
+      try {
+        await streamOpenRouterPdfChat(message, history, textFiles, pdfFiles, translateConfig, model, systemPrompt, memoryContext, port, sessionId);
+        return;
+      } catch (err) {
+        const fileNames = formatFileNames(pdfFiles);
+        port.postMessage({
+          type: 'agent_notice',
+          text: `OpenRouter PDF 解析不可用，已改用 Gemini 視覺分析。檔案：${fileNames}。錯誤：${err.message}`,
+          level: 'warning'
+        });
+      }
+    }
+
+    const statusText = pdfFiles.length > 0 && imageFiles.length === 0
+      ? (pdfRoute === 'gemini' ? '使用 Gemini 分析掃描型 PDF 中...' : '使用 Gemini 分析 PDF 中...')
+      : (visualFiles.length > 1 ? `使用 Gemini 分析 ${visualFiles.length} 個視覺檔案中...` : '使用 Gemini 分析圖片中...');
+    port.postMessage({ type: 'status', text: statusText });
 
     let textAppend = '';
     if (textFiles.length > 0) {
@@ -888,7 +948,13 @@ async function streamHandleMessage({ message, history, images, image, mode, tran
       geminiPrompt = multiHint + (combinedMessage ? `${basePrompt}\n\n使用者問題：${combinedMessage}` : basePrompt);
     }
 
-    const geminiResult = await callGemini(geminiApiKey, visualFiles, geminiPrompt);
+    let geminiResult;
+    try {
+      geminiResult = await callGemini(geminiApiKey, visualFiles, geminiPrompt);
+    } catch (err) {
+      const files = formatFileNames(visualFiles);
+      throw new Error(`Gemini 視覺分析失敗。檔案：${files}。錯誤：${err.message}`);
+    }
     port.postMessage({ type: 'status', text: '整理回應中...' });
 
     let minimaxPrompt;
@@ -955,6 +1021,246 @@ async function streamTextFilesPipeline(textFiles, userMessage, history, translat
   await streamMiniMaxChat(mergePrompt, history, translateConfig, model, systemPrompt, memoryContext, port);
 }
 
+function getDataUrlBase64(dataUrl) {
+  const idx = String(dataUrl || '').indexOf(',');
+  return idx >= 0 ? String(dataUrl).slice(idx + 1) : '';
+}
+
+function samplePdfBinary(dataUrl, maxBase64Chars = 1200000) {
+  const base64 = getDataUrlBase64(dataUrl).slice(0, maxBase64Chars);
+  try {
+    return atob(base64);
+  } catch {
+    return '';
+  }
+}
+
+function countPdfMarker(sample, marker) {
+  return (sample.match(new RegExp(marker, 'g')) || []).length;
+}
+
+function isLikelyScannedPdf(file) {
+  const sample = samplePdfBinary(file.dataUrl);
+  if (!sample) return false;
+
+  const imageCount = countPdfMarker(sample, '/Subtype\\s*/Image');
+  const textBlocks = countPdfMarker(sample, '\\bBT\\b') + countPdfMarker(sample, '\\bET\\b');
+  const textOps = countPdfMarker(sample, '\\bTj\\b') + countPdfMarker(sample, '\\bTJ\\b') + countPdfMarker(sample, '\\bTf\\b');
+  const fontCount = countPdfMarker(sample, '/Font\\b');
+
+  return imageCount > 0 && textBlocks === 0 && textOps === 0 && fontCount === 0;
+}
+
+function classifyPdfRoute(pdfFiles) {
+  if (!pdfFiles || pdfFiles.length === 0) return null;
+  return pdfFiles.some(isLikelyScannedPdf) ? 'gemini' : 'openrouter-pdf';
+}
+
+function formatFileNames(files) {
+  const names = (files || []).map((file, i) => file.fileName || `檔案 ${i + 1}`);
+  return names.length > 0 ? names.join('、') : '未命名檔案';
+}
+
+function describeVisualRoute(imageFiles, pdfFiles, pdfRoute, model) {
+  const imageCount = imageFiles?.length || 0;
+  const pdfCount = pdfFiles?.length || 0;
+  const requestedModel = model || MODEL_NAME;
+
+  if (imageCount > 0 && pdfCount > 0) {
+    return `分析方式：圖片與 PDF 混合上傳，統一使用 Gemini 視覺分析。圖片 ${imageCount} 個、PDF ${pdfCount} 個。`;
+  }
+  if (imageCount > 0) {
+    return `分析方式：使用 Gemini image analysis。圖片 ${imageCount} 個。`;
+  }
+  if (pdfRoute === 'openrouter-pdf') {
+    return `分析方式：偵測為文字型 PDF，優先使用 OpenRouter PDF Inputs（Cloudflare AI parser）搭配模型 ${requestedModel}。PDF ${pdfCount} 個。`;
+  }
+  if (pdfRoute === 'gemini') {
+    return `分析方式：偵測為圖片型/掃描型 PDF，使用 Gemini 視覺分析。PDF ${pdfCount} 個。`;
+  }
+  return '分析方式：使用 Gemini 視覺分析。';
+}
+
+async function streamOpenRouterPdfChat(message, history, textFiles, pdfFiles, translateConfig, model, systemPrompt, memoryContext, port, sessionId) {
+  const { defaultPrompts, globalPrompt: storedGlobal, openrouterApiKey } =
+    await chrome.storage.sync.get(['defaultPrompts', 'globalPrompt', 'openrouterApiKey']);
+
+  const requestedModel = model || MODEL_NAME;
+  if (!openrouterApiKey || requestedModel === MODEL_NAME) {
+    throw new Error('請先選擇 OpenRouter 模型並設定 OpenRouter API Key');
+  }
+
+  port.postMessage({ type: 'status', text: `使用 OpenRouter Cloudflare AI 解析 PDF 中...（${formatFileNames(pdfFiles)}）` });
+
+  const globalPrompt = storedGlobal?.trim() || '';
+  const chatDefaultPrompt = defaultPrompts?.chat?.trim() || '';
+  let modePrompt = '';
+  if (chatDefaultPrompt && systemPrompt) modePrompt = `${chatDefaultPrompt}\n\n${systemPrompt}`;
+  else if (chatDefaultPrompt) modePrompt = chatDefaultPrompt;
+  else if (systemPrompt) modePrompt = systemPrompt;
+  const finalSystemPrompt = [memoryContext, globalPrompt, modePrompt].filter(Boolean).join('\n\n');
+
+  const textAppend = buildTextFilesAppend(textFiles);
+  const userText = `${message || '請分析這份 PDF。'}${textAppend}`.trim();
+  const messages = buildPdfMessages(userText, history || [], translateConfig, finalSystemPrompt, globalPrompt, pdfFiles);
+
+  const response = await fetchWithTimeout(OPENROUTER_API_URL, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${openrouterApiKey}`,
+      'Content-Type': 'application/json',
+      'HTTP-Referer': 'chrome-extension://minimax-chat',
+      'X-Title': 'MiniMax AI Chat'
+    },
+    body: JSON.stringify({
+      model: requestedModel,
+      messages,
+      plugins: [
+        {
+          id: 'file-parser',
+          pdf: { engine: 'cloudflare-ai' }
+        }
+      ]
+    })
+  }, 90000);
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    const rawMsg = extractApiErrorMessage(errorData, response.status);
+    throw new Error(`OpenRouter PDF Inputs 失敗。模型：${requestedModel}；Parser：cloudflare-ai；檔案：${formatFileNames(pdfFiles)}；HTTP ${response.status}；${rawMsg}`);
+  }
+
+  const data = await response.json();
+  const reply = getResponseText(data).trim();
+  if (!reply) {
+    throw new Error(`OpenRouter PDF Inputs 未返回文字內容。模型：${requestedModel}；Parser：cloudflare-ai；檔案：${formatFileNames(pdfFiles)}`);
+  }
+
+  port.postMessage({ type: 'chunk', text: reply, full: reply });
+  port.postMessage({ type: 'done', reply });
+
+  if (data.usage) {
+    recordOpenRouterUsage({ modelId: requestedModel, usage: data.usage, apiKey: openrouterApiKey, sessionId, source: 'pdf' })
+      .catch(err => console.warn('[Usage] 紀錄失敗:', err?.message || err));
+  }
+}
+
+function buildTextFilesAppend(textFiles) {
+  if (!textFiles || textFiles.length === 0) return '';
+  const parts = textFiles.map(f => {
+    const base64 = getDataUrlBase64(f.dataUrl);
+    let text = atob(base64);
+    const name = f.fileName || '檔案';
+    if (text.length > 6000) text = text.slice(0, 6000) + '\n...[已截斷]';
+    return `=== ${name} ===\n${text}`;
+  });
+  return '\n\n[附加文字檔案內容]\n' + parts.join('\n\n');
+}
+
+function buildPdfMessages(userText, history, translateConfig, systemPrompt, globalPrompt, pdfFiles) {
+  const messages = [];
+  if (translateConfig && translateConfig.enabled) {
+    const { sourceLang, targetLang } = translateConfig;
+    const srcName = LANG_NAMES[sourceLang] || sourceLang;
+    const tgtName = LANG_NAMES[targetLang] || targetLang;
+    const translatePrompt = `你是一位專業翻譯員。使用者會輸入${srcName}或${tgtName}的文字。
+- 如果輸入是${srcName}，請翻譯成${tgtName}
+- 如果輸入是${tgtName}，請翻譯成${srcName}
+只輸出翻譯結果，不需要解釋或額外說明。`;
+    messages.push({ role: 'system', content: globalPrompt ? `${globalPrompt}\n\n${translatePrompt}` : translatePrompt });
+  } else if (systemPrompt) {
+    messages.push({ role: 'system', content: systemPrompt });
+  }
+
+  const textOnlyHistory = (history || []).filter(item => !(item.images || item.image));
+  trimHistoryForContext(textOnlyHistory, Math.max(0, MAX_CONTEXT_CHARS - userText.length)).forEach(item => {
+    messages.push({ role: item.role, content: item.content });
+  });
+
+  messages.push({
+    role: 'user',
+    content: [
+      { type: 'text', text: userText },
+      ...pdfFiles.map((file, i) => ({
+        type: 'file',
+        file: {
+          filename: file.fileName || `document-${i + 1}.pdf`,
+          file_data: file.dataUrl
+        }
+      }))
+    ]
+  });
+  return messages;
+}
+
+function getResponseText(data) {
+  const content = data?.choices?.[0]?.message?.content;
+  if (Array.isArray(content)) {
+    return content.map(part => part.text || '').filter(Boolean).join('\n\n');
+  }
+  return typeof content === 'string' ? content : '';
+}
+
+function normalizeImageAttachment(raw, index = 0) {
+  if (!raw) return null;
+  if (typeof raw === 'string') {
+    return {
+      type: 'image',
+      name: `image-${index + 1}`,
+      mimeType: raw.startsWith('data:') ? (raw.match(/^data:([^;]+);/)?.[1] || 'image/png') : '',
+      url: raw,
+      source: 'openrouter'
+    };
+  }
+  const url = raw.url || raw.image_url?.url || raw.data_url || raw.dataUrl || raw.b64_json || raw.base64 || raw.file_data;
+  if (!url) return null;
+  const mimeType = raw.mime_type || raw.mimeType || (String(url).match(/^data:([^;]+);/)?.[1] || 'image/png');
+  const normalizedUrl = String(url).startsWith('data:') || String(url).startsWith('http')
+    ? String(url)
+    : `data:${mimeType};base64,${url}`;
+  return {
+    type: 'image',
+    name: raw.filename || raw.name || `image-${index + 1}`,
+    mimeType,
+    url: normalizedUrl,
+    source: 'openrouter'
+  };
+}
+
+function extractImageOutputAttachments(messageOrData, text = '') {
+  const msg = messageOrData?.choices?.[0]?.message || messageOrData?.choices?.[0]?.delta || messageOrData || {};
+  const attachments = [];
+  const push = raw => {
+    const attachment = normalizeImageAttachment(raw, attachments.length);
+    if (attachment && !attachments.some(a => a.url === attachment.url)) attachments.push(attachment);
+  };
+
+  if (Array.isArray(msg.images)) msg.images.forEach(push);
+  if (Array.isArray(msg.attachments)) {
+    msg.attachments
+      .filter(a => String(a.type || '').toLowerCase() === 'image' || a.url || a.data_url || a.b64_json)
+      .forEach(push);
+  }
+
+  const content = msg.content;
+  if (Array.isArray(content)) {
+    content.forEach(part => {
+      const type = String(part?.type || '').toLowerCase();
+      if (type === 'image_url' || type === 'output_image' || type === 'image') {
+        push(part.image_url || part.image || part);
+      }
+    });
+  }
+
+  const markdownImageRe = /!\[[^\]]*]\((data:image\/[^)]+|https?:\/\/[^)]+)\)/g;
+  for (const sourceText of [text, typeof content === 'string' ? content : '']) {
+    let match;
+    while ((match = markdownImageRe.exec(sourceText || '')) !== null) push(match[1]);
+  }
+
+  return attachments;
+}
+
 async function streamMiniMaxChat(message, history, translateConfig, model, systemPrompt, memoryContext, port, sessionId) {
   const { apiKey, defaultPrompts, globalPrompt: storedGlobal, openrouterApiKey } =
     await chrome.storage.sync.get(['apiKey', 'defaultPrompts', 'globalPrompt', 'openrouterApiKey']);
@@ -1017,10 +1323,11 @@ async function streamMiniMaxChat(message, history, translateConfig, model, syste
   let sseBuffer = '';
   let fullContent = '';
   let finalUsage = null;
+  let outputAttachments = [];
 
   try {
     while (true) {
-      const { done, value } = await reader.read();
+      const { done, value } = await readStreamChunkWithTimeout(reader);
       if (done) break;
       sseBuffer += decoder.decode(value, { stream: true });
       const lines = sseBuffer.split('\n');
@@ -1032,6 +1339,12 @@ async function streamMiniMaxChat(message, history, translateConfig, model, syste
         try {
           const json = JSON.parse(data);
           if (json.usage) finalUsage = json.usage;
+          if (useOpenRouter) {
+            const deltaAttachments = extractImageOutputAttachments(json, fullContent);
+            if (deltaAttachments.length > 0) {
+              outputAttachments = [...outputAttachments, ...deltaAttachments.filter(a => !outputAttachments.some(existing => existing.url === a.url))];
+            }
+          }
           const delta = json.choices?.[0]?.delta?.content || '';
           if (delta) {
             fullContent += delta;
@@ -1049,7 +1362,14 @@ async function streamMiniMaxChat(message, history, translateConfig, model, syste
     .replace(/<result>[\s\S]*?<\/result>/gi, '')
     .trim();
 
-  port.postMessage({ type: 'done', reply: cleaned || fullContent });
+  if (useOpenRouter) {
+    const textAttachments = extractImageOutputAttachments(null, cleaned || fullContent);
+    if (textAttachments.length > 0) {
+      outputAttachments = [...outputAttachments, ...textAttachments.filter(a => !outputAttachments.some(existing => existing.url === a.url))];
+    }
+  }
+
+  port.postMessage({ type: 'done', reply: cleaned || fullContent, attachments: outputAttachments });
   if (useOpenRouter && finalUsage) {
     recordOpenRouterUsage({ modelId: useModel, usage: finalUsage, apiKey: openrouterApiKey, sessionId, source: 'chat' })
       .catch(err => console.warn('[Usage] 紀錄失敗:', err?.message || err));
@@ -1141,6 +1461,11 @@ async function streamAgentChat(message, history, translateConfig, model, systemP
 
   // 無工具可用 → 直接使用正常 streaming
   if (tools.length === 0) {
+    port.postMessage({
+      type: 'agent_notice',
+      text: '未啟用搜尋工具，已改用一般對話回覆。可在設定頁加入 Brave 或 Exa API Key 啟用 Agent 搜尋。',
+      level: 'info'
+    });
     return streamMiniMaxChat(message, history, translateConfig, model, systemPrompt, memoryContext, port, sessionId);
   }
 
@@ -1149,6 +1474,11 @@ async function streamAgentChat(message, history, translateConfig, model, systemP
     const pricingMap = await getOpenRouterPricingMap(openrouterApiKey);
     const supportedParameters = pricingMap[useModel]?.supportedParameters || [];
     if (!supportedParameters.includes('tools')) {
+      port.postMessage({
+        type: 'agent_notice',
+        text: `目前模型不支援 tool use，已改用一般對話回覆。可切換支援 tools 的 OpenRouter 模型或 MiniMax。`,
+        level: 'warning'
+      });
       return streamMiniMaxChat(message, history, translateConfig, model, systemPrompt, memoryContext, port, sessionId);
     }
   }
@@ -1209,7 +1539,7 @@ async function streamAgentChat(message, history, translateConfig, model, systemP
         content: `請根據以上對話與工具搜尋結果，直接用繁體中文回答使用者原始問題。不要再呼叫工具，不要輸出空內容。${reason ? `\n\n補充：${reason}` : ''}`
       }
     ];
-    const resp = await fetch(agentUrl, {
+    const resp = await fetchWithTimeout(agentUrl, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${agentKey}`, 'Content-Type': 'application/json', ...agentExtraHeaders },
       body: JSON.stringify({ model: useModel, messages: finalMessages })
@@ -1230,11 +1560,21 @@ async function streamAgentChat(message, history, translateConfig, model, systemP
 
   for (let iter = 0; iter < MAX_ITER; iter++) {
     port.postMessage({ type: 'agent_thinking', iter: iter + 1 });
-    const resp = await fetch(agentUrl, {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${agentKey}`, 'Content-Type': 'application/json', ...agentExtraHeaders },
-      body: JSON.stringify({ model: useModel, messages, tools })
-    });
+    let resp;
+    try {
+      resp = await fetchWithTimeout(agentUrl, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${agentKey}`, 'Content-Type': 'application/json', ...agentExtraHeaders },
+        body: JSON.stringify({ model: useModel, messages, tools })
+      });
+    } catch (err) {
+      port.postMessage({
+        type: 'agent_notice',
+        text: `Agent 分析請求失敗：${err.message} 已改用一般串流回覆。`,
+        level: 'warning'
+      });
+      return streamMiniMaxChat(message, history, translateConfig, model, systemPrompt, memoryContext, port, sessionId);
+    }
 
     if (!resp.ok) {
       const err = await resp.json().catch(() => ({}));
@@ -1271,7 +1611,14 @@ async function streamAgentChat(message, history, translateConfig, model, systemP
           port.postMessage({ type: 'tool_start', tool: name, query: args.query || '' });
           let result;
           try { result = await handleToolCall(name, args); } catch (e) { result = { error: e.message }; }
-          port.postMessage({ type: 'tool_done', tool: name, count: result.results?.length ?? null });
+          if (result.error) {
+            port.postMessage({
+              type: 'agent_notice',
+              text: `${name} 執行失敗：${result.error}。系統會把錯誤交給模型，嘗試用既有上下文回覆。`,
+              level: 'warning'
+            });
+          }
+          port.postMessage({ type: 'tool_done', tool: name, count: result.results?.length ?? null, error: result.error || null });
           messages.push({ role: 'tool', tool_call_id: tc.id || '', content: JSON.stringify(result) });
         }
       } else {
@@ -1287,7 +1634,14 @@ async function streamAgentChat(message, history, translateConfig, model, systemP
           port.postMessage({ type: 'tool_start', tool: tc.name, query: tc.args.query || '' });
           let result;
           try { result = await handleToolCall(tc.name, tc.args); } catch (e) { result = { error: e.message }; }
-          port.postMessage({ type: 'tool_done', tool: tc.name, count: result.results?.length ?? null });
+          if (result.error) {
+            port.postMessage({
+              type: 'agent_notice',
+              text: `${tc.name} 執行失敗：${result.error}。系統會把錯誤交給模型，嘗試用既有上下文回覆。`,
+              level: 'warning'
+            });
+          }
+          port.postMessage({ type: 'tool_done', tool: tc.name, count: result.results?.length ?? null, error: result.error || null });
           const snippets = result.results
             ? result.results.map((r, i) => `[${i + 1}] ${r.title}\n${r.snippet}\n來源：${r.url}`).join('\n\n')
             : (result.error || '無搜尋結果');
@@ -1300,13 +1654,32 @@ async function streamAgentChat(message, history, translateConfig, model, systemP
 
     // 無 tool_calls：這是最終回答
     if (!toolsExecuted) {
-      // AI 判斷不需工具 → 回退正常 streaming
+      const directReply = cleanAgentReply(contentStr);
+      if (directReply) {
+        port.postMessage({
+          type: 'agent_notice',
+          text: 'AI 判斷這次不需要使用搜尋工具，已直接回覆。',
+          level: 'info'
+        });
+        port.postMessage({ type: 'done', reply: directReply });
+        return;
+      }
+      port.postMessage({
+        type: 'agent_notice',
+        text: 'AI 未呼叫工具且未產生有效內容，已改用一般串流回覆。',
+        level: 'warning'
+      });
       return streamMiniMaxChat(message, history, translateConfig, model, systemPrompt, memoryContext, port, sessionId);
     }
 
     // 工具執行完畢後的最終回答：清除 XML/think 後直接送出
     let finalReply = cleanAgentReply(contentStr);
     if (!finalReply) {
+      port.postMessage({
+        type: 'agent_notice',
+        text: '工具執行後模型未產生最終回答，正在改用補救整理流程。',
+        level: 'warning'
+      });
       finalReply = await requestFinalSynthesis('上一輪模型未產生 final answer。');
     }
     port.postMessage({ type: 'done', reply: finalReply });
@@ -1314,6 +1687,11 @@ async function streamAgentChat(message, history, translateConfig, model, systemP
   }
 
   if (toolsExecuted) {
+    port.postMessage({
+      type: 'agent_notice',
+      text: `工具呼叫已達 ${MAX_ITER} 輪上限，正在強制整理目前結果。`,
+      level: 'warning'
+    });
     const finalReply = await requestFinalSynthesis(`已達工具迭代上限 ${MAX_ITER} 輪。`);
     port.postMessage({ type: 'done', reply: finalReply });
     return;

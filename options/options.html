@@ -202,6 +202,7 @@
         </div>
 
         <h3 class="subheading">OpenRouter 費用表</h3>
+        <p class="hint">Modalities 依 OpenRouter 模型資料分為 Input（可理解的輸入）與 Output（可生成的輸出）。</p>
         <p id="pricingUpdatedAt" class="hint"></p>
         <div class="pricing-controls">
           <input type="search" id="pricingSearch" placeholder="搜尋模型名稱或 ID">
@@ -212,6 +213,14 @@
             <option value="file">File</option>
             <option value="audio">Audio</option>
             <option value="video">Video</option>
+          </select>
+          <select id="pricingOutputModalityFilter">
+            <option value="all">全部輸出類型</option>
+            <option value="text">Text</option>
+            <option value="image">Image</option>
+            <option value="audio">Audio</option>
+            <option value="video">Video</option>
+            <option value="embeddings">Embeddings</option>
           </select>
           <select id="pricingToolFilter">
             <option value="all">全部 Tool Use</option>
@@ -397,7 +406,7 @@
       <section class="section" id="sec-about">
         <h2>關於</h2>
         <div class="about-info">
-          <p><strong>版本:</strong> 1.21.0</p>
+          <p><strong>版本:</strong> 1.22.0</p>
           <p><strong>對話模型:</strong> MiniMax-M2.7</p>
           <p><strong>圖片模型:</strong> Gemini 2.5 Flash-lite</p>
           <p>MiniMax AI Chat Chrome Extension 設定頁。</p>

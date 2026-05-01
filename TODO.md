@@ -99,6 +99,11 @@
 - Changed background provider routing to use selected model ID rather than legacy `openrouterModel`
 - Fixed model picker refresh behavior and removed unnecessary OpenRouter key requirement for displaying custom models
 
+## Done (v1.22.x)
+
+- Added a unified chat attachment model while preserving legacy `images` / `fileInfos` compatibility.
+- Added OpenRouter image output attachment extraction and chat rendering.
+
 ---
 
 ## 待議事項

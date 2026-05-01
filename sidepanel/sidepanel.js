@@ -6,7 +6,8 @@ let agentStatusEl = null;  // Agent Loop 狀態列
 let _agentTimer = null;
 let _agentStartTime = 0;
 let _agentIter = 0;
-let _agentSearchLog = [];  // 方案 B：搜尋歷程記錄 [{ tool, query, count }]
+let _agentSearchLog = [];  // 方案 B：搜尋歷程記錄 [{ tool, query, count, error }]
+let _agentNotices = [];    // Agent fallback / tool error notices for the current reply
 let pendingRegionMode = null; // 區域截圖完成後要套用的 mode（null = 'region'）
 let currentModel = 'MiniMax-M2.7';  // 目前選擇的模型
 let historySearchQuery = '';  // 歷史紀錄搜尋關鍵字
@@ -551,7 +552,8 @@ document.addEventListener('DOMContentLoaded', async () => {
       messageQueue = [];
       updateQueueIndicator();
       clearAgentStatus();
-      _agentSearchLog = [];
+      const stopSearchLog = _agentSearchLog.length > 0 ? [..._agentSearchLog] : null;
+      const stopAgentNotices = _agentNotices.length > 0 ? [..._agentNotices] : null;
       clearStatus();
       if (rawContent) {
         const partial = rawContent.trimEnd();
@@ -562,8 +564,8 @@ document.addEventListener('DOMContentLoaded', async () => {
           .replace(/<think>[\s\S]*?<\/think>/gi, '')
           .replace(/<think>[\s\S]*/gi, '')
           .replace(/<result>|<\/result>/gi, '').trim();
-        const stopSearchLog = _agentSearchLog.length > 0 ? [..._agentSearchLog] : null;
         if (currentSession) currentSession.messages.push({ role: 'assistant', content: stopCleanReply, ...(stopThinkContent && { thinkContent: stopThinkContent }), ...(stopSearchLog && { searchLog: stopSearchLog }) });
+        if (stopAgentNotices && liveDiv) liveDiv.parentNode?.insertBefore(buildAgentNoticeEl(stopAgentNotices), liveDiv);
         if (stopSearchLog && liveDiv) liveDiv.parentNode?.insertBefore(buildSearchHistoryEl(stopSearchLog), liveDiv);
         finalizeLiveMessage(liveDiv, partial, stopCleanReply, translateEnabled ? null : sourceLangSelect.value);
         await saveCurrentSession();
@@ -571,6 +573,8 @@ document.addEventListener('DOMContentLoaded', async () => {
       } else {
         liveDiv?.remove();
       }
+      _agentSearchLog = [];
+      _agentNotices = [];
       messageInput.focus();
     } else {
       handleSend();
@@ -1026,7 +1030,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   });
 
-  // ── 上傳圖片 ──────────────────────────────────────────
+  // ── 上傳檔案 ──────────────────────────────────────────
   uploadBtn.addEventListener('click', () => {
     imageInput.click();
   });
@@ -1071,7 +1075,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   });
 
-  // OCR picker：上傳圖片
+  // OCR picker：上傳圖片/PDF
   document.getElementById('ocrUploadOpt').addEventListener('click', () => {
     ocrPicker.classList.add('hidden');
     imageInput.click();
@@ -2077,15 +2081,9 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (msg.role === 'assistant' && msg.searchLog?.length > 0) {
         chatMessages.appendChild(buildSearchHistoryEl(msg.searchLog));
       }
-      const imgs = msg.images || (msg.image ? [msg.image] : null);
-      if (imgs && imgs.length > 0) {
-        const fileInfos = msg.fileInfos || null;
-        const fileObjs = imgs.map((url, i) => ({
-          dataUrl: url,
-          fileType: fileInfos?.[i]?.fileType || 'image',
-          fileName: fileInfos?.[i]?.fileName || null
-        }));
-        addMessageWithImages(msg.content, msg.role, fileObjs, ttsLang);
+      const attachments = legacyMessageAttachments(msg);
+      if (attachments.length > 0) {
+        addMessageWithAttachments(msg.content, msg.role, attachments, ttsLang);
       } else {
         addMessage(msg.content, msg.role, ttsLang, msg.thinkContent || '');
       }
@@ -2266,10 +2264,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (snapshotImages.length > 0) {
       userMessage.images = snapshotImages.map(i => i.dataUrl); // backward compat
       userMessage.fileInfos = snapshotImages.map(i => ({ fileType: i.fileType || 'image', fileName: i.fileName || null }));
+      userMessage.attachments = filesToAttachments(snapshotImages);
     }
 
     currentSession.messages.push(userMessage);
-    addMessageWithImages(displayMessage, 'user', snapshotImages);
+    addMessageWithAttachments(displayMessage, 'user', userMessage.attachments || filesToAttachments(snapshotImages));
 
     const textMessage = apiMessage;
 
@@ -2300,6 +2299,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // 建立即時串流訊息 div
     _agentSearchLog = [];
+    _agentNotices = [];
     typingIndicator.classList.add('hidden');
     const liveDiv = createLiveMessageDiv();
     currentLiveDiv = liveDiv;
@@ -2345,6 +2345,17 @@ document.addEventListener('DOMContentLoaded', async () => {
         setStatus(msg.text);
         return;
       }
+      if (msg.type === 'agent_notice') {
+        const notice = {
+          text: msg.text || '',
+          level: msg.level === 'warning' || msg.level === 'error' ? msg.level : 'info'
+        };
+        if (notice.text) {
+          _agentNotices.push(notice);
+          setStatus(notice.text, notice.level === 'error', notice.level === 'info' ? 3500 : 6000);
+        }
+        return;
+      }
       if (msg.type === 'compressed') {
         setStatus('歷史對話已自動壓縮，保留最近輪次', false, 3000);
         return;
@@ -2362,9 +2373,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         return;
       }
       if (msg.type === 'tool_done') {
-        updateAgentStatus(`第 ${_agentIter} 輪，AI 分析結果中...`);
+        updateAgentStatus(msg.error ? `第 ${_agentIter} 輪，工具失敗，改用補救流程...` : `第 ${_agentIter} 輪，AI 分析結果中...`);
         if (_agentSearchLog.length > 0) {
           _agentSearchLog[_agentSearchLog.length - 1].count = msg.count;
+          _agentSearchLog[_agentSearchLog.length - 1].error = msg.error || null;
         }
         return;
       }
@@ -2382,6 +2394,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           addMessage('錯誤: 模型未返回文字內容，請稍後重試或切換模型。', 'error');
           clearAgentStatus();
           _agentSearchLog = [];
+          _agentNotices = [];
           clearStatus();
           port.disconnect();
           resetLoading();
@@ -2391,13 +2404,19 @@ document.addEventListener('DOMContentLoaded', async () => {
         const doneThinkMatch = !translateEnabled && rawForFinalize.match(/<think>([\s\S]*?)<\/think>/i);
         const thinkContent = doneThinkMatch ? doneThinkMatch[1].trim() : undefined;
         const savedSearchLog = _agentSearchLog.length > 0 ? [..._agentSearchLog] : null;
-        currentSession.messages.push({ role: 'assistant', content: reply, ...(thinkContent && { thinkContent }), ...(savedSearchLog && { searchLog: savedSearchLog }) });
+        const savedAgentNotices = _agentNotices.length > 0 ? [..._agentNotices] : null;
+        const savedAttachments = Array.isArray(msg.attachments) && msg.attachments.length > 0 ? msg.attachments : null;
+        currentSession.messages.push({ role: 'assistant', content: reply, ...(thinkContent && { thinkContent }), ...(savedSearchLog && { searchLog: savedSearchLog }), ...(savedAttachments && { attachments: savedAttachments }) });
+        if (savedAgentNotices) {
+          liveDiv.parentNode.insertBefore(buildAgentNoticeEl(savedAgentNotices), liveDiv);
+        }
         if (savedSearchLog) {
           liveDiv.parentNode.insertBefore(buildSearchHistoryEl(savedSearchLog), liveDiv);
         }
-        finalizeLiveMessage(liveDiv, rawForFinalize, reply, replyLang);
+        finalizeLiveMessage(liveDiv, rawForFinalize, reply, replyLang, savedAttachments);
         clearAgentStatus();
         _agentSearchLog = [];
+        _agentNotices = [];
         clearStatus();
         port.disconnect();
         resetLoading();
@@ -2442,6 +2461,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         addMessage(`錯誤: ${msg.message}`, 'error');
         clearAgentStatus();
         _agentSearchLog = [];
+        _agentNotices = [];
         clearStatus();
         port.disconnect();
         resetLoading();
@@ -2453,6 +2473,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (!isLoading) return;
       clearAgentStatus();
       _agentSearchLog = [];
+      _agentNotices = [];
       clearStatus();
       liveDiv.remove();
       const errMsg = chrome.runtime.lastError?.message;
@@ -2529,11 +2550,18 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   }
 
-  function finalizeLiveMessage(div, raw, cleanReply, lang) {
+  function finalizeLiveMessage(div, raw, cleanReply, lang, attachments = null) {
     const replyLive = div.querySelector('.reply-live');
     if (replyLive) {
       replyLive.className = '';
       replyLive.innerHTML = renderMarkdown(cleanReply);
+    }
+    if (attachments && attachments.length > 0) {
+      const attachmentHtml = renderAttachments(attachments);
+      if (attachmentHtml) {
+        const contentEl = div.querySelector('.message-content');
+        contentEl?.insertAdjacentHTML('afterbegin', attachmentHtml);
+      }
     }
     // 翻譯模式下強制隱藏思考過程區塊
     if (translateEnabled) {
@@ -2602,8 +2630,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     const items = log.map(e => {
       const icon = e.tool === 'deep_search' ? '🔎' : '🔍';
       const label = e.tool === 'deep_search' ? '深度搜尋' : '搜尋';
-      const countStr = e.count != null ? `<span class="agent-sh-count">${e.count} 筆</span>` : '';
-      return `<li><span class="agent-sh-icon">${icon}</span><span class="agent-sh-label">${label}</span><span class="agent-sh-query">「${escapeHtml(e.query)}」</span>${countStr}</li>`;
+      const countStr = e.error
+        ? `<span class="agent-sh-count error">失敗</span>`
+        : (e.count != null ? `<span class="agent-sh-count">${e.count} 筆</span>` : '');
+      const errorText = e.error ? `<div class="agent-sh-error">${escapeHtml(e.error)}</div>` : '';
+      return `<li><span class="agent-sh-icon">${icon}</span><span class="agent-sh-label">${label}</span><span class="agent-sh-query">「${escapeHtml(e.query)}」</span>${countStr}${errorText}</li>`;
     }).join('');
     const div = document.createElement('div');
     div.className = 'agent-search-history';
@@ -2612,6 +2643,17 @@ document.addEventListener('DOMContentLoaded', async () => {
       `<summary><span class="agent-sh-summary-text">已執行 ${total} 次搜尋</span><span class="agent-sh-chevron">▾</span></summary>` +
       `<ul class="agent-search-log">${items}</ul>` +
       `</details>`;
+    return div;
+  }
+
+  function buildAgentNoticeEl(notices) {
+    const filtered = (notices || []).filter(n => n?.text);
+    const div = document.createElement('div');
+    div.className = 'agent-notice-list';
+    div.innerHTML = filtered.map(n => {
+      const level = n.level === 'warning' || n.level === 'error' ? n.level : 'info';
+      return `<div class="agent-notice agent-notice-${level}">${escapeHtml(n.text)}</div>`;
+    }).join('');
     return div;
   }
 
@@ -2660,6 +2702,77 @@ document.addEventListener('DOMContentLoaded', async () => {
       </div>`;
   }
 
+  function filesToAttachments(files, source = 'upload') {
+    return (files || []).map((file, i) => {
+      const dataUrl = typeof file === 'string' ? file : file.dataUrl;
+      const fileType = typeof file === 'string' ? 'image' : (file.fileType || 'image');
+      const name = typeof file === 'string' ? `image-${i + 1}` : (file.fileName || `檔案 ${i + 1}`);
+      const mimeType = dataUrl?.match(/^data:([^;]+);/)?.[1] || (fileType === 'pdf' ? 'application/pdf' : fileType === 'image' ? 'image/*' : 'text/plain');
+      return {
+        type: fileType === 'pdf' || fileType === 'text' ? 'file' : fileType,
+        fileType,
+        name,
+        mimeType,
+        url: dataUrl,
+        source
+      };
+    }).filter(a => a.url);
+  }
+
+  function legacyMessageAttachments(msg) {
+    if (Array.isArray(msg.attachments) && msg.attachments.length > 0) return msg.attachments;
+    const imgs = msg.images || (msg.image ? [msg.image] : null);
+    if (!imgs || imgs.length === 0) return [];
+    const fileInfos = msg.fileInfos || null;
+    return imgs.map((url, i) => ({
+      dataUrl: url,
+      fileType: fileInfos?.[i]?.fileType || 'image',
+      fileName: fileInfos?.[i]?.fileName || null
+    })).map((file, i) => filesToAttachments([file], msg.role === 'assistant' ? 'assistant' : 'upload')[0]).filter(Boolean);
+  }
+
+  function normalizeAttachment(raw, index = 0) {
+    if (!raw) return null;
+    if (typeof raw === 'string') {
+      return { type: 'image', fileType: 'image', name: `image-${index + 1}`, url: raw, mimeType: raw.match(/^data:([^;]+);/)?.[1] || 'image/*', source: 'unknown' };
+    }
+    const url = raw.url || raw.dataUrl || raw.file_data || raw.data_url;
+    if (!url) return null;
+    const rawType = String(raw.type || raw.fileType || '').toLowerCase();
+    const mimeType = raw.mimeType || raw.mime_type || String(url).match(/^data:([^;]+);/)?.[1] || '';
+    const inferred = rawType || (mimeType.startsWith('image/') ? 'image' : mimeType.startsWith('audio/') ? 'audio' : mimeType.startsWith('video/') ? 'video' : 'file');
+    const fileType = raw.fileType || (inferred === 'file' && mimeType === 'application/pdf' ? 'pdf' : inferred);
+    return {
+      type: inferred,
+      fileType,
+      name: raw.name || raw.fileName || raw.filename || `attachment-${index + 1}`,
+      mimeType,
+      url,
+      source: raw.source || 'unknown'
+    };
+  }
+
+  function renderAttachments(attachments) {
+    const normalized = (attachments || []).map(normalizeAttachment).filter(Boolean);
+    if (normalized.length === 0) return '';
+    const items = normalized.map(att => {
+      const safeUrl = escapeAttr(att.url);
+      const safeName = escapeHtml(att.name || '檔案');
+      if (att.type === 'image') {
+        return `<img src="${safeUrl}" class="message-image" alt="${safeName}" title="點擊放大">`;
+      }
+      if (att.type === 'audio') {
+        return `<div class="message-media"><span class="message-file-name">${safeName}</span><audio controls src="${safeUrl}"></audio></div>`;
+      }
+      if (att.type === 'video') {
+        return `<div class="message-media"><video controls src="${safeUrl}"></video><span class="message-file-name">${safeName}</span></div>`;
+      }
+      const icon = att.fileType === 'pdf' || att.mimeType === 'application/pdf' ? FILE_SVG_PDF : FILE_SVG_DOC;
+      return `<div class="message-file">${icon}<span class="message-file-name">${safeName}</span></div>`;
+    }).join('');
+    return `<div class="message-attachments">${items}</div>`;
+  }
+
   function addMessage(content, role, ttsLang, thinkContent = '') {
     const lang = resolveTTSLang(role, ttsLang, content);
     const div = document.createElement('div');
@@ -2692,25 +2805,15 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   function addMessageWithImages(content, role, files, ttsLang) {
+    addMessageWithAttachments(content, role, filesToAttachments(files), ttsLang);
+  }
+
+  function addMessageWithAttachments(content, role, attachments, ttsLang) {
     const lang = resolveTTSLang(role, ttsLang, content);
     const div = document.createElement('div');
     div.className = `message message-${role === 'user' ? 'user' : 'assistant'}`;
     let html = `<div class="message-content">`;
-    if (files && files.length > 0) {
-      html += `<div class="message-images">`;
-      files.forEach(f => {
-        const url = typeof f === 'string' ? f : f.dataUrl;
-        const fileType = typeof f === 'string' ? 'image' : (f.fileType || 'image');
-        const fileName = typeof f === 'string' ? null : f.fileName;
-        if (fileType === 'image') {
-          html += `<img src="${url}" class="message-image" alt="圖片" title="點擊放大">`;
-        } else {
-          const icon = fileType === 'pdf' ? FILE_SVG_PDF : FILE_SVG_DOC;
-          html += `<div class="message-file">${icon}<span class="message-file-name">${escapeHtml(fileName || '檔案')}</span></div>`;
-        }
-      });
-      html += `</div>`;
-    }
+    html += renderAttachments(attachments);
     const bodyHtml = (role === 'assistant')
       ? renderMarkdown(content)
       : escapeHtml(content).replace(/\n/g, '<br>');
@@ -3068,8 +3171,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         const reply = msg.reply;
         const doneThinkMatch2 = rawContent.match(/<think>([\s\S]*?)<\/think>/i);
         const thinkContent2 = doneThinkMatch2 ? doneThinkMatch2[1].trim() : undefined;
-        currentSession.messages.push({ role: 'assistant', content: reply, ...(thinkContent2 && { thinkContent: thinkContent2 }) });
-        finalizeLiveMessage(liveDiv, rawContent, reply, replyLang);
+        const attachments = Array.isArray(msg.attachments) && msg.attachments.length > 0 ? msg.attachments : null;
+        currentSession.messages.push({ role: 'assistant', content: reply, ...(thinkContent2 && { thinkContent: thinkContent2 }), ...(attachments && { attachments }) });
+        finalizeLiveMessage(liveDiv, rawContent, reply, replyLang, attachments);
         port.disconnect();
         resetWebSearch();
         await saveCurrentSession();
@@ -4475,8 +4579,9 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
       if (msg.type === 'done') {
         const reply = msg.reply;
-        currentSession.messages.push({ role: 'assistant', content: reply });
-        finalizeLiveMessage(liveDiv, rawContent, reply);
+        const attachments = Array.isArray(msg.attachments) && msg.attachments.length > 0 ? msg.attachments : null;
+        currentSession.messages.push({ role: 'assistant', content: reply, ...(attachments && { attachments }) });
+        finalizeLiveMessage(liveDiv, rawContent, reply, undefined, attachments);
         clearStatus();
         port.disconnect();
         resetLoadingCode();
