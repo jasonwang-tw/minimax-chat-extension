@@ -201,7 +201,27 @@
           </table>
         </div>
 
-        <h3 class="subheading">OpenRouter 費用表</h3>
+        <h3 class="subheading pricing-heading">
+          OpenRouter 費用表
+          <span class="pricing-help" tabindex="0" aria-label="用途分類說明">
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+            <span class="pricing-help-popover">
+              <strong>用途分類說明</strong>
+              <span>工具 / 資料分析：工具呼叫、資料整合、查詢、文件整理。</span>
+              <span>推理：數學、邏輯、多步推導、複雜決策。</span>
+              <span>Coding：寫程式、重構、產生程式碼。</span>
+              <span>Debug：讀錯誤訊息、定位 bug、修測試、追 stack trace。</span>
+              <span>長文本對話：長上下文、長文件、多輪對話。</span>
+              <span>長程式碼：大型檔案、跨檔案理解、長 context code review。</span>
+              <span>圖片 / PDF 分析：圖片、截圖、PDF 或檔案輸入後輸出文字分析。</span>
+              <span>生圖：輸出圖片，適合圖像生成或編修類任務。</span>
+              <span>語音：支援音訊輸入或音訊輸出。</span>
+              <span>低成本文字：適合大量摘要、改寫、分類、日常對話。</span>
+              <span>免費：OpenRouter 回傳 input / output 價格為 0 的模型。</span>
+              <span>高品質通用：適合重要回答、複雜任務與需要較高可靠性的場景。</span>
+            </span>
+          </span>
+        </h3>
         <p class="hint">Modalities 依 OpenRouter 模型資料分為 Input（可理解的輸入）與 Output（可生成的輸出）。</p>
         <p id="pricingUpdatedAt" class="hint"></p>
         <div class="pricing-controls">
@@ -220,7 +240,11 @@
           <select id="pricingUseCaseFilter">
             <option value="all">全部用途</option>
             <option value="long-context">長文本對話</option>
-            <option value="analysis-tools">分析 / Tool Use</option>
+            <option value="analysis-tools">工具 / 資料分析</option>
+            <option value="reasoning">推理</option>
+            <option value="coding">Coding</option>
+            <option value="debug">Debug</option>
+            <option value="long-code">長程式碼</option>
             <option value="vision">圖片 / PDF 分析</option>
             <option value="image-gen">生圖</option>
             <option value="audio">語音</option>

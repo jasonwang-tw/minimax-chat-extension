@@ -553,9 +553,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     const outputCost = pricePerMillion(model?.pricing?.completion);
     const contextLength = Number(model?.contextLength || 0);
     const idText = `${model?.id || ''} ${model?.name || ''}`.toLowerCase();
+    const isCodeModel = /\b(code|coder|coding|devstral|codestral|qwen.*coder|deepseek.*coder|kimi.*dev|gpt-oss)\b/i.test(idText);
+    const isReasoningModel = /\b(reasoning|thinking|r1|o[34]|gpt-5|grok-4|deepseek-r1|qwq|math)\b/i.test(idText);
 
     if (contextLength >= 128000) cases.add('long-context');
     if (supportsToolUse(model) && outputModalities.includes('text')) cases.add('analysis-tools');
+    if (isReasoningModel && outputModalities.includes('text')) cases.add('reasoning');
+    if (isCodeModel && outputModalities.includes('text')) cases.add('coding');
+    if ((isCodeModel || supportsToolUse(model)) && outputModalities.includes('text')) cases.add('debug');
+    if (contextLength >= 128000 && (isCodeModel || outputModalities.includes('text'))) cases.add('long-code');
     if ((inputModalities.includes('image') || inputModalities.includes('file')) && outputModalities.includes('text')) cases.add('vision');
     if (outputModalities.includes('image')) cases.add('image-gen');
     if (outputModalities.includes('audio') || inputModalities.includes('audio')) cases.add('audio');
@@ -570,7 +576,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   function renderRecommendationBadges(model) {
     const labels = {
       'long-context': '長文本',
-      'analysis-tools': '分析/工具',
+      'analysis-tools': '工具/資料',
+      reasoning: '推理',
+      coding: 'Coding',
+      debug: 'Debug',
+      'long-code': '長程式碼',
       vision: '圖片/PDF',
       'image-gen': '生圖',
       audio: '語音',

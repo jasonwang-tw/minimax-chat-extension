@@ -527,6 +527,62 @@ input.cmd-trigger {
   margin: 18px 0 10px;
 }
 
+.pricing-heading {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pricing-help {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-secondary);
+  cursor: help;
+  outline: none;
+}
+.pricing-help:hover, .pricing-help:focus-visible {
+  color: var(--primary);
+}
+
+.pricing-help-popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 20;
+  display: none;
+  width: min(420px, calc(100vw - 48px));
+  max-height: min(420px, calc(100vh - 120px));
+  overflow-y: auto;
+  padding: 10px 12px;
+  background: var(--bg-dark);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 10px;
+  box-shadow: 0 10px 28px rgba(0,0,0,0.35);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.55;
+  white-space: normal;
+}
+.pricing-help-popover strong,
+.pricing-help-popover span {
+  display: block;
+}
+.pricing-help-popover strong {
+  color: var(--text-primary);
+  margin-bottom: 6px;
+}
+.pricing-help-popover span + span {
+  margin-top: 4px;
+}
+
+.pricing-help:hover .pricing-help-popover,
+.pricing-help:focus-visible .pricing-help-popover,
+.pricing-help:focus-within .pricing-help-popover {
+  display: block;
+}
+
 .table-wrap {
   overflow-x: auto;
   border: 1px solid rgba(255,255,255,0.06);
@@ -710,6 +766,20 @@ input.cmd-trigger {
   color: #60a5fa;
   background: rgba(96, 165, 250, 0.1);
   border-color: rgba(96, 165, 250, 0.28);
+}
+
+.usage-table td .recommendation-badges .rec-reasoning,
+.usage-table td .recommendation-badges .rec-debug {
+  color: #f472b6;
+  background: rgba(236,41,112,0.1);
+  border-color: rgba(236,41,112,0.28);
+}
+
+.usage-table td .recommendation-badges .rec-coding,
+.usage-table td .recommendation-badges .rec-long-code {
+  color: #38bdf8;
+  background: rgba(14,165,233,0.1);
+  border-color: rgba(14,165,233,0.28);
 }
 
 .usage-table td .recommendation-badges .rec-premium {
