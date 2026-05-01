@@ -39,11 +39,73 @@
 - Compression notification shown in status bar when triggered
 - Context window API error now shows friendly Chinese message
 
+## Done (v1.16.x)
+
+- Added in-chat search (`Ctrl/Cmd+F`) with highlight, match count, next/previous navigation, and Esc close
+- Added message queue while streaming: users can keep typing, queued messages run sequentially after the current response
+- Redesigned queue panel as a collapsible panel above the input area with per-item delete controls
+- Added local JSON backup export/import for settings and prompts
+- Migrated `customCommands` from `chrome.storage.sync` to `chrome.storage.local` to avoid the 8KB sync limit
+- Fixed backup restore compatibility for wrapped WordPress payloads and older top-level payload formats
+- Removed `chatSessions` and `sessionSummaries` from cloud backup payload scope to avoid WordPress payload-too-large failures
+
+## Done (v1.17.x)
+
+- Added side-panel TOC button and `Ctrl+Alt+T` shortcut; scans assistant headings and smooth-scrolls to h1-h4 sections
+- Added image lightbox left/right navigation with keyboard arrow support and image counter
+- Improved Markdown rendering for quiz choices, grammar labels, fill-in blanks, and ordered-list continuation
+- Added keyboard shortcuts section in settings page
+- Polished queue panel visual style
+
+## Done (v1.18.x)
+
+- Knowledge Base summaries are expandable/collapsible with 2-line default truncation and chevron state
+
+## Done (v1.19.x)
+
+- Completed AI Agent Tool Use Phase 1:
+  - non-streaming agent loop with final streaming answer
+  - MiniMax XML tool-call parser
+  - `web_search` / `deep_search` tool routing
+  - Brave/Exa fallback behavior
+  - current-date injection in agent system prompt
+- Removed old sidepanel `AUTO_SEARCH` pre-check from the main path; search is now decided by the agent loop in `background.js`
+- Added Agent status UI:
+  - live status row with current tool action
+  - persistent collapsible search history block above final answer
+  - result counts from `tool_done`
+- Fixed search history persistence when switching sessions
+
+## Done (v1.20.x)
+
+- Added OpenRouter integration:
+  - API key setting
+  - OpenRouter host permission
+  - chat and agent routing through OpenRouter when a non-MiniMax model is selected
+  - OpenRouter usage/cost tracking from model pricing metadata
+- Added OpenRouter settings to backup scope
+
+## Done (v1.21.x)
+
+- Added side-panel model picker pill:
+  - MiniMax default option
+  - custom OpenRouter model list
+  - model pricing/context metadata display
+  - sorting controls in picker
+- Added settings-page custom OpenRouter model management with unlimited entries
+- Added hardcoded popular OpenRouter presets including Grok 3 / Grok 3 Mini
+- Changed settings page from anchor-scroll TOC to multi-page section switching with fade animation
+- Changed settings save feedback to bottom-right floating toast
+- Changed background provider routing to use selected model ID rather than legacy `openrouterModel`
+- Fixed model picker refresh behavior and removed unnecessary OpenRouter key requirement for displaying custom models
+
 ---
 
 ## 待議事項
 
 - [ ] **品牌名稱重新評估**：extension 現已支援 OpenRouter（Claude、GPT-4o、Gemini 等）與 MiniMax，考慮是否將 app 名稱、description、設定頁 header 等 MiniMax 相關敘述改為更中性的名稱。方向有三：(A) 全面改品牌名稱、(B) 保留名稱但改說明文字、(C) 只改 description。目前擱置，待決策後實作。
+- [ ] **版本資訊整理**：README 頂部仍標示 `v1.13.0`，但 Changelog 已到 `v1.21.0`；package.json 仍是 `1.0.0`。需決定是否同步版本來源。
+- [ ] **備份範圍文件一致性**：README `Latest Sync Update` 仍提到每日 auto-backup 與 `chatSessions/sessionSummaries` 備份，但目前程式碼已改為即時備份且移除對話紀錄雲端備份。
 
 ---
 
@@ -56,7 +118,6 @@
 | 🟠 P1 | AI 設定 & 記憶工具 | 搭配 Agent Loop |
 | 🟠 P1 | MiniMax TTS 升級 | 現有 Google TTS 直接替換 |
 | 🟠 P1 | System Prompt 壓縮 | M2.7 200k token 充分利用 |
-| 🟡 P2 | AI 搜尋工具整合 | autoSearch 改由 AI 自行決策 |
 | 🟡 P2 | 任務腳本（Task Script） | 長任務腳本化，搭配 Agent |
 | 🟡 P2 | 筆記工具（MD Notes） | write/read/list note |
 | 🟡 P2 | Spaces 多空間 | tab-based 切換，搭配多窗口策略 |
@@ -120,11 +181,12 @@
 - [ ] **`save_memory(title, summary, tags)`**：AI 主動寫入長期記憶
 - [ ] **白名單管理**：AI 可寫設定限定為 `settings.model`、`globalPrompt`、`defaultPrompts`
 
-### Phase 3 — 搜尋工具整合（P2）
+### Phase 3 — 搜尋工具整合（P2）✅ 已完成 v1.19.x
 
-- [ ] **`web_search(query)`**：整合現有 Brave 搜尋，改由 AI 自行判斷何時觸發
-- [ ] **`deep_search(query)`**：整合現有 Exa 搜尋
-- [ ] 移除舊的 `autoSearch` 前置判斷，改由 AI agent 決策
+- [x] **`web_search(query)`**：整合現有 Brave 搜尋，改由 AI 自行判斷何時觸發
+- [x] **`deep_search(query)`**：整合現有 Exa 搜尋
+- [x] 移除舊的 `autoSearch` 前置判斷，改由 AI agent 決策
+- [x] 搜尋歷程 UI：每次 tool call 記錄工具類型、query、結果筆數，回答完成後保留可折疊區塊
 
 ### Phase 4 — 筆記工具（MD 筆記管理，P2）
 
