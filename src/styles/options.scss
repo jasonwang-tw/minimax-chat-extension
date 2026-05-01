@@ -454,6 +454,43 @@ select {
   border-color: rgba(96, 165, 250, 0.28);
 }
 
+.recommendation-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.usage-table td .recommendation-badges span {
+  border-radius: 999px;
+  padding: 2px 6px;
+  font-family: inherit;
+  font-size: 10px;
+  color: #fbbf24;
+  background: rgba(245, 158, 11, 0.1);
+  border: 1px solid rgba(245, 158, 11, 0.28);
+}
+
+.usage-table td .recommendation-badges .rec-low-cost,
+.usage-table td .recommendation-badges .rec-free {
+  color: #34d399;
+  background: rgba(16,185,129,0.1);
+  border-color: rgba(16,185,129,0.28);
+}
+
+.usage-table td .recommendation-badges .rec-image-gen,
+.usage-table td .recommendation-badges .rec-vision {
+  color: #60a5fa;
+  background: rgba(96, 165, 250, 0.1);
+  border-color: rgba(96, 165, 250, 0.28);
+}
+
+.usage-table td .recommendation-badges .rec-premium {
+  color: #c084fc;
+  background: rgba(168,85,247,0.12);
+  border-color: rgba(168,85,247,0.3);
+}
+
 .capability-badges {
   display: flex;
   flex-wrap: wrap;

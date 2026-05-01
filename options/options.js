@@ -39,6 +39,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const pricingSearchInput = document.getElementById('pricingSearch');
   const pricingModalityFilter = document.getElementById('pricingModalityFilter');
   const pricingOutputModalityFilter = document.getElementById('pricingOutputModalityFilter');
+  const pricingUseCaseFilter = document.getElementById('pricingUseCaseFilter');
   const pricingToolFilter = document.getElementById('pricingToolFilter');
   const pricingPrevBtn = document.getElementById('pricingPrevBtn');
   const pricingNextBtn = document.getElementById('pricingNextBtn');
@@ -194,6 +195,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     renderUsagePage();
   });
   pricingOutputModalityFilter?.addEventListener('change', () => {
+    pricingPage = 1;
+    renderUsagePage();
+  });
+  pricingUseCaseFilter?.addEventListener('change', () => {
     pricingPage = 1;
     renderUsagePage();
   });
@@ -505,6 +510,27 @@ document.addEventListener('DOMContentLoaded', async () => {
     return labels[modality] || modality;
   }
 
+  function updateOutputModalityFilter(models) {
+    if (!pricingOutputModalityFilter) return;
+    const current = pricingOutputModalityFilter.value || 'all';
+    const order = ['text', 'image', 'audio', 'video', 'embeddings'];
+    const found = new Set();
+    Object.values(models || {}).forEach(model => {
+      getOutputModalities(model).forEach(modality => found.add(modality));
+    });
+    const sorted = Array.from(found).sort((a, b) => {
+      const ai = order.indexOf(a);
+      const bi = order.indexOf(b);
+      if (ai !== -1 || bi !== -1) return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
+      return a.localeCompare(b);
+    });
+    pricingOutputModalityFilter.innerHTML = [
+      '<option value="all">全部輸出類型</option>',
+      ...sorted.map(modality => `<option value="${escapeVal(modality)}">${escapeVal(formatModalityLabel(modality))}</option>`)
+    ].join('');
+    pricingOutputModalityFilter.value = found.has(current) ? current : 'all';
+  }
+
   function renderModalityBadges(model) {
     const inputModalities = getInputModalities(model);
     const outputModalities = getOutputModalities(model);
@@ -517,6 +543,44 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   function supportsToolUse(model) {
     return Array.isArray(model?.supportedParameters) && model.supportedParameters.includes('tools');
+  }
+
+  function getModelUseCases(model) {
+    const cases = new Set();
+    const inputModalities = getInputModalities(model);
+    const outputModalities = getOutputModalities(model);
+    const inputCost = pricePerMillion(model?.pricing?.prompt);
+    const outputCost = pricePerMillion(model?.pricing?.completion);
+    const contextLength = Number(model?.contextLength || 0);
+    const idText = `${model?.id || ''} ${model?.name || ''}`.toLowerCase();
+
+    if (contextLength >= 128000) cases.add('long-context');
+    if (supportsToolUse(model) && outputModalities.includes('text')) cases.add('analysis-tools');
+    if ((inputModalities.includes('image') || inputModalities.includes('file')) && outputModalities.includes('text')) cases.add('vision');
+    if (outputModalities.includes('image')) cases.add('image-gen');
+    if (outputModalities.includes('audio') || inputModalities.includes('audio')) cases.add('audio');
+    if (inputCost === 0 && outputCost === 0) cases.add('free');
+    if (inputCost !== null && outputCost !== null && inputCost <= 0.5 && outputCost <= 2) cases.add('low-cost');
+    if (/\b(gpt-5|claude|opus|sonnet|gemini-3|gemini-2\.5-pro|grok-4|o[34]|deepseek-r1)\b/i.test(idText)) {
+      cases.add('premium');
+    }
+    return Array.from(cases);
+  }
+
+  function renderRecommendationBadges(model) {
+    const labels = {
+      'long-context': '長文本',
+      'analysis-tools': '分析/工具',
+      vision: '圖片/PDF',
+      'image-gen': '生圖',
+      audio: '語音',
+      'low-cost': '低成本',
+      free: '免費',
+      premium: '高品質'
+    };
+    const cases = getModelUseCases(model);
+    if (cases.length === 0) return '';
+    return `<div class="recommendation-badges">${cases.map(id => `<span class="rec-${escapeVal(id)}">${escapeVal(labels[id] || id)}</span>`).join('')}</div>`;
   }
 
   function renderCapabilityBadges(model) {
@@ -631,10 +695,12 @@ document.addEventListener('DOMContentLoaded', async () => {
       `).join('') || '<tr><td colspan="5" class="empty-cell">尚無 OpenRouter 使用紀錄</td></tr>';
 
     const models = priceCache?.models || {};
+    updateOutputModalityFilter(models);
     const enabledModelIds = new Set((Array.isArray(customModels) ? customModels : []).map(m => m.modelId));
     const query = (pricingSearchInput?.value || '').trim().toLowerCase();
     const modalityFilter = pricingModalityFilter?.value || 'all';
     const outputModalityFilter = pricingOutputModalityFilter?.value || 'all';
+    const useCaseFilter = pricingUseCaseFilter?.value || 'all';
     const toolFilter = pricingToolFilter?.value || 'all';
     const allRows = Object.values(models)
       .filter(model => model?.pricing)
@@ -644,6 +710,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       })
       .filter(model => modalityFilter === 'all' || getInputModalities(model).includes(modalityFilter))
       .filter(model => outputModalityFilter === 'all' || getOutputModalities(model).includes(outputModalityFilter))
+      .filter(model => useCaseFilter === 'all' || getModelUseCases(model).includes(useCaseFilter))
       .filter(model => {
         if (toolFilter === 'all') return true;
         const supported = supportsToolUse(model);
@@ -666,7 +733,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       const enabled = enabledModelIds.has(model.id);
       return `
         <tr>
-          <td><strong>${escapeVal(model.name || model.id)}</strong><br><span>${escapeVal(model.id)}</span>${renderModalityBadges(model)}${renderCapabilityBadges(model)}</td>
+          <td><strong>${escapeVal(model.name || model.id)}</strong><br><span>${escapeVal(model.id)}</span>${renderModalityBadges(model)}${renderRecommendationBadges(model)}${renderCapabilityBadges(model)}</td>
           <td>${formatPricePerMillion(pricePerMillion(pricing.prompt))}</td>
           <td>${formatPricePerMillion(pricePerMillion(pricing.completion))}</td>
           <td>${usd(Number(pricing.request || 0), 6)}</td>
