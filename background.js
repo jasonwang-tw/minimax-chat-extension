@@ -1468,8 +1468,9 @@ async function streamMiniMaxChat(message, history, translateConfig, model, syste
       : lastFinishReason === 'length'
         ? '對話歷史過長，模型在回覆前即達 token 上限。請點擊「+」開啟新對話。'
         : '模型回傳空內容，可能為暫時性錯誤，請稍後重試。';
-    console.error(`[Stream] 空回應 finish_reason=${lastFinishReason} streamError=${streamError}`);
-    throw new Error(reason);
+    const debugLine = `[Debug] model=${useModel} msgs=${messages.length} finish=${lastFinishReason ?? 'none'} err=${streamError ?? 'none'}`;
+    console.error(`[Stream] 空回應 ${debugLine}`);
+    throw new Error(`${reason}\n${debugLine}`);
   }
 
   if (useOpenRouter) {
