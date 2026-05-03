@@ -19,6 +19,9 @@ const PORT_KEEPALIVE_INTERVAL_MS = 20000;
 const AGENT_TOOL_RESULT_LIMIT = 1600;
 const AGENT_TOOL_RESULT_COUNT = 3;
 const AGENT_FINAL_CONTEXT_LIMIT = 8000;
+const AGENT_ITER_MIN = 3;
+const AGENT_ITER_DEFAULT = 6;
+const AGENT_ITER_MAX = 12;
 
 const DEFAULT_PROMPTS = {
   chat: '',
@@ -42,6 +45,12 @@ function normalizeContextCharBudget(value) {
   const budget = Number(value);
   if (!Number.isFinite(budget) || budget <= 0) return MAX_CONTEXT_CHARS;
   return Math.max(1000, Math.round(budget));
+}
+
+function normalizeAgentIterations(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return AGENT_ITER_DEFAULT;
+  return Math.min(AGENT_ITER_MAX, Math.max(AGENT_ITER_MIN, Math.round(n)));
 }
 
 function normalizeUsage(usage) {
@@ -965,7 +974,7 @@ ${compactHistory || '無'}`;
   };
 }
 
-async function streamHandleMessage({ message, history, images, image, mode, translateConfig, model, contextCharBudget, systemPrompt, memoryContext, sessionId, skipTools, planMode, planApproved, approvedPlan }, port) {
+async function streamHandleMessage({ message, history, images, image, mode, translateConfig, model, contextCharBudget, maxAgentIterations, systemPrompt, memoryContext, sessionId, skipTools, planMode, planApproved, approvedPlan }, port) {
   if (planMode && !planApproved) {
     const plan = await generateAgentPlan({ message, history, model, systemPrompt, memoryContext });
     port.postMessage({ type: 'plan_required', plan });
@@ -982,7 +991,7 @@ async function streamHandleMessage({ message, history, images, image, mode, tran
     if (skipTools || translateConfig?.enabled) {
       await streamMiniMaxChat(message, history, translateConfig, model, planPrompt, memoryContext, port, sessionId, contextCharBudget);
     } else {
-      await streamAgentChat(message, history, translateConfig, model, planPrompt, memoryContext, port, sessionId, contextCharBudget);
+      await streamAgentChat(message, history, translateConfig, model, planPrompt, memoryContext, port, sessionId, contextCharBudget, maxAgentIterations);
     }
     return;
   }
@@ -1661,19 +1670,31 @@ const AGENT_TOOLS_BROWSER = [
   }
 ];
 
-// ── Session 層級瀏覽器分頁追蹤 ───────────────────────────────
-// key: sessionId → tabId（該 session 的 agent 分頁）
+// ── Session 層級瀏覽器分頁 / 群組追蹤 ──────────────────────────
+// key: sessionId → { tabId, groupId }
+// tabId：目前最後一個 agent 分頁；groupId：該 session 的分頁群組
 const agentBrowserSessions = new Map();
 
 async function getAgentTabId(sessionId) {
-  const tabId = agentBrowserSessions.get(sessionId);
-  if (!tabId) return null;
-  // 確認分頁仍存在
+  const ctx = agentBrowserSessions.get(sessionId);
+  if (!ctx?.tabId) return null;
   try {
-    await chrome.tabs.get(tabId);
-    return tabId;
+    await chrome.tabs.get(ctx.tabId);
+    return ctx.tabId;
   } catch {
-    agentBrowserSessions.delete(sessionId);
+    agentBrowserSessions.set(sessionId, { ...ctx, tabId: null });
+    return null;
+  }
+}
+
+async function getAgentGroupId(sessionId) {
+  const ctx = agentBrowserSessions.get(sessionId);
+  if (!ctx?.groupId) return null;
+  try {
+    await chrome.tabGroups.get(ctx.groupId);
+    return ctx.groupId;
+  } catch {
+    agentBrowserSessions.set(sessionId, { ...ctx, groupId: null });
     return null;
   }
 }
@@ -1702,11 +1723,24 @@ function toolDisplayQuery(name, args) {
 
 // ── 瀏覽器工具執行 ────────────────────────────────────────────
 async function executeBrowserTool(toolName, args, sessionId) {
-  // browser_navigate：永遠開新分頁，儲存至 session
+  // browser_navigate：永遠開新分頁，加入（或建立）session 群組
   if (toolName === 'browser_navigate') {
     try {
       const tab = await chrome.tabs.create({ url: args.url, active: false });
-      if (sessionId) agentBrowserSessions.set(sessionId, tab.id);
+      if (sessionId) {
+        const existingGroupId = await getAgentGroupId(sessionId);
+        let groupId;
+        if (existingGroupId) {
+          // 加入既有群組
+          await chrome.tabs.group({ tabIds: [tab.id], groupId: existingGroupId });
+          groupId = existingGroupId;
+        } else {
+          // 建立新群組並設定樣式
+          groupId = await chrome.tabs.group({ tabIds: [tab.id] });
+          await chrome.tabGroups.update(groupId, { title: 'Open Chat Hub', color: 'blue' });
+        }
+        agentBrowserSessions.set(sessionId, { tabId: tab.id, groupId });
+      }
       return { success: true, url: args.url, tabId: tab.id };
     } catch (e) {
       return { error: e.message };
@@ -1900,7 +1934,7 @@ async function handleToolCall(name, args, sessionId) {
 }
 
 // ── Agent 對話（帶 Tool Use）──────────────────────────────────
-async function streamAgentChat(message, history, translateConfig, model, systemPrompt, memoryContext, port, sessionId, contextCharBudget) {
+async function streamAgentChat(message, history, translateConfig, model, systemPrompt, memoryContext, port, sessionId, contextCharBudget, maxAgentIterations) {
   const { apiKey, defaultPrompts, globalPrompt: storedGlobal, openrouterApiKey } =
     await chrome.storage.sync.get(['apiKey', 'defaultPrompts', 'globalPrompt', 'openrouterApiKey']);
 
@@ -1961,7 +1995,7 @@ async function streamAgentChat(message, history, translateConfig, model, systemP
 
   let toolsExecuted = false;
   const toolObservations = [];
-  const MAX_ITER = 6;
+  const maxIter = normalizeAgentIterations(maxAgentIterations);
 
   function getMessageText(msg) {
     if (Array.isArray(msg?.content)) {
@@ -2038,8 +2072,8 @@ ${reason ? `補充狀態：${reason}\n` : ''}${errorMessage ? `前一次整理�
     );
   }
 
-  for (let iter = 0; iter < MAX_ITER; iter++) {
-    port.postMessage({ type: 'agent_thinking', iter: iter + 1 });
+  for (let iter = 0; iter < maxIter; iter++) {
+    port.postMessage({ type: 'agent_thinking', iter: iter + 1, maxIter });
     let resp;
     try {
       resp = await fetchWithTimeout(agentUrl, {
@@ -2175,14 +2209,14 @@ ${reason ? `補充狀態：${reason}\n` : ''}${errorMessage ? `前一次整理�
   if (toolsExecuted) {
     port.postMessage({
       type: 'agent_notice',
-      text: `工具呼叫已達 ${MAX_ITER} 輪上限，正在強制整理目前結果。`,
+      text: `工具呼叫已達 ${maxIter} 輪上限，正在根據目前結果穩定整理回覆。若需要更完整搜尋，可將 Agent 深度切換為深入或研究後重試。`,
       level: 'warning'
     });
     let finalReply;
     try {
-      finalReply = await requestFinalSynthesis(`已達工具迭代上限 ${MAX_ITER} 輪。`);
+      finalReply = await requestFinalSynthesis(`已達工具迭代上限 ${maxIter} 輪。請根據現有資料產生完整回答，並明確指出仍可能需要使用者確認或後續查證的部分。`);
     } catch (err) {
-      await streamFinalFallback(`已達工具迭代上限 ${MAX_ITER} 輪。`, err.message);
+      await streamFinalFallback(`已達工具迭代上限 ${maxIter} 輪。`, err.message);
       return;
     }
     port.postMessage({ type: 'done', reply: finalReply });

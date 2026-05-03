@@ -8,6 +8,7 @@
     "sidePanel",
     "activeTab",
     "tabs",
+    "tabGroups",
     "scripting",
     "contextMenus",
     "identity"
