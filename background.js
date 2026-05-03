@@ -13,7 +13,12 @@ const MODEL_PRICING_CACHE_KEY = 'openrouterModelPricingCache';
 const MODEL_USAGE_LEDGER_KEY = 'modelUsageLedger';
 const MODEL_USAGE_LEDGER_LIMIT = 1000;
 const AGENT_REQUEST_TIMEOUT_MS = 45000;
+const AGENT_SYNTHESIS_TIMEOUT_MS = 90000;
 const STREAM_IDLE_TIMEOUT_MS = 60000;
+const PORT_KEEPALIVE_INTERVAL_MS = 20000;
+const AGENT_TOOL_RESULT_LIMIT = 1600;
+const AGENT_TOOL_RESULT_COUNT = 3;
+const AGENT_FINAL_CONTEXT_LIMIT = 8000;
 
 const DEFAULT_PROMPTS = {
   chat: '',
@@ -870,7 +875,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 chrome.runtime.onConnect.addListener(port => {
   if (port.name !== 'chat-stream') return;
   let portDisconnected = false;
-  port.onDisconnect.addListener(() => { portDisconnected = true; });
+  const keepAliveTimer = setInterval(() => {
+    chrome.runtime.getPlatformInfo(() => {
+      if (chrome.runtime.lastError) {
+        console.warn('[Background] keepalive 失敗:', chrome.runtime.lastError.message);
+      }
+    });
+  }, PORT_KEEPALIVE_INTERVAL_MS);
+  port.onDisconnect.addListener(() => {
+    portDisconnected = true;
+    clearInterval(keepAliveTimer);
+  });
   port.onMessage.addListener(async (msg) => {
     if (msg.type !== 'STREAM_MESSAGE') return;
     try {
@@ -1824,6 +1839,46 @@ function parseXmlToolCalls(content) {
   return calls.length > 0 ? calls : null;
 }
 
+function truncateAgentText(value, limit = AGENT_TOOL_RESULT_LIMIT) {
+  const text = String(value || '');
+  return text.length > limit ? `${text.slice(0, limit)}\n...（已截斷，原長度 ${text.length} 字）` : text;
+}
+
+function compactToolResultForAgent(result) {
+  if (!result || typeof result !== 'object') return truncateAgentText(result);
+  if (result.error) return { error: truncateAgentText(result.error, 600) };
+  if (Array.isArray(result.results)) {
+    return {
+      ...result,
+      results: result.results.slice(0, AGENT_TOOL_RESULT_COUNT).map(r => ({
+        title: truncateAgentText(r.title, 160),
+        url: r.url,
+        snippet: truncateAgentText(r.snippet, 500)
+      })),
+      omitted: Math.max(0, result.results.length - AGENT_TOOL_RESULT_COUNT)
+    };
+  }
+  if (typeof result.text === 'string') {
+    return { ...result, text: truncateAgentText(result.text) };
+  }
+  if (typeof result.html === 'string') {
+    return { ...result, html: truncateAgentText(result.html) };
+  }
+  return result;
+}
+
+function formatXmlToolResultForAgent(name, args, result) {
+  const compact = compactToolResultForAgent(result);
+  if (compact.results) {
+    const snippets = compact.results.map((r, i) => (
+      `[${i + 1}] ${r.title}\n${r.snippet}\n來源：${r.url}`
+    )).join('\n\n');
+    const omitted = compact.omitted ? `\n\n另有 ${compact.omitted} 筆結果已省略，請先根據以上高相關結果判斷是否需要再搜尋。` : '';
+    return `[工具 ${name} 搜尋「${args.query || ''}」的結果]\n${snippets}${omitted}`;
+  }
+  return `[工具 ${name} 的結果]\n${truncateAgentText(JSON.stringify(compact), AGENT_TOOL_RESULT_LIMIT)}`;
+}
+
 // ── Tool 執行路由 ─────────────────────────────────────────────
 async function handleToolCall(name, args, sessionId) {
   if (name === 'web_search') {
@@ -1905,6 +1960,7 @@ async function streamAgentChat(message, history, translateConfig, model, systemP
   const messages = buildMessages(message, compressedHistory, translateConfig, effectiveSystemPrompt, globalPrompt, effectiveContextChars);
 
   let toolsExecuted = false;
+  const toolObservations = [];
   const MAX_ITER = 6;
 
   function getMessageText(msg) {
@@ -1934,7 +1990,7 @@ async function streamAgentChat(message, history, translateConfig, model, systemP
       method: 'POST',
       headers: { 'Authorization': `Bearer ${agentKey}`, 'Content-Type': 'application/json', ...agentExtraHeaders },
       body: JSON.stringify({ model: useModel, messages: finalMessages })
-    });
+    }, AGENT_SYNTHESIS_TIMEOUT_MS);
     if (!resp.ok) {
       const err = await resp.json().catch(() => ({}));
       throw new Error(extractApiErrorMessage(err, resp.status));
@@ -1947,6 +2003,39 @@ async function streamAgentChat(message, history, translateConfig, model, systemP
     const reply = cleanAgentReply(getMessageText(data.choices?.[0]?.message));
     if (!reply) throw new Error('模型完成工具搜尋後未返回文字內容，請稍後重試或切換模型。');
     return reply;
+  }
+
+  function buildFinalFallbackPrompt(reason = '', errorMessage = '') {
+    const toolContext = truncateAgentText(toolObservations.join('\n\n---\n\n'), AGENT_FINAL_CONTEXT_LIMIT);
+    return `以下是 Agent 已經取得的工具結果。請不要再呼叫工具，直接根據這些資料用繁體中文回答使用者原始問題。
+
+使用者原始問題：
+${message || '未提供'}
+
+工具結果：
+${toolContext || '沒有可用工具結果'}
+
+${reason ? `補充狀態：${reason}\n` : ''}${errorMessage ? `前一次整理失敗原因：${errorMessage}\n` : ''}
+請輸出完整、條理清楚的最終回答。`;
+  }
+
+  async function streamFinalFallback(reason = '', errorMessage = '') {
+    port.postMessage({
+      type: 'agent_notice',
+      text: `最終整理逾時，已改用已取得的工具結果直接整理回覆。${errorMessage ? `原因：${errorMessage}` : ''}`,
+      level: 'warning'
+    });
+    await streamMiniMaxChat(
+      buildFinalFallbackPrompt(reason, errorMessage),
+      [],
+      null,
+      model,
+      systemPrompt,
+      memoryContext,
+      port,
+      sessionId,
+      contextCharBudget
+    );
   }
 
   for (let iter = 0; iter < MAX_ITER; iter++) {
@@ -2010,7 +2099,9 @@ async function streamAgentChat(message, history, translateConfig, model, systemP
             });
           }
           port.postMessage({ type: 'tool_done', tool: name, count: result.results?.length ?? null, error: result.error || null });
-          messages.push({ role: 'tool', tool_call_id: tc.id || '', content: JSON.stringify(result) });
+          const compactResult = compactToolResultForAgent(result);
+          toolObservations.push(formatXmlToolResultForAgent(name, args, compactResult));
+          messages.push({ role: 'tool', tool_call_id: tc.id || '', content: JSON.stringify(compactResult) });
         }
       } else {
         // XML format：清除 XML block 後 append assistant message，結果以 user 訊息注入
@@ -2033,10 +2124,9 @@ async function streamAgentChat(message, history, translateConfig, model, systemP
             });
           }
           port.postMessage({ type: 'tool_done', tool: tc.name, count: result.results?.length ?? null, error: result.error || null });
-          const snippets = result.results
-            ? result.results.map((r, i) => `[${i + 1}] ${r.title}\n${r.snippet}\n來源：${r.url}`).join('\n\n')
-            : (result.error || '無搜尋結果');
-          resultParts.push(`[工具 ${tc.name} 搜尋「${tc.args.query || ''}」的結果]\n${snippets}`);
+          const formattedResult = formatXmlToolResultForAgent(tc.name, tc.args, result);
+          resultParts.push(formattedResult);
+          toolObservations.push(formattedResult);
         }
         messages.push({ role: 'user', content: resultParts.join('\n\n---\n\n') });
       }
@@ -2071,7 +2161,12 @@ async function streamAgentChat(message, history, translateConfig, model, systemP
         text: '工具執行後模型未產生最終回答，正在改用補救整理流程。',
         level: 'warning'
       });
-      finalReply = await requestFinalSynthesis('上一輪模型未產生 final answer。');
+      try {
+        finalReply = await requestFinalSynthesis('上一輪模型未產生 final answer。');
+      } catch (err) {
+        await streamFinalFallback('上一輪模型未產生 final answer。', err.message);
+        return;
+      }
     }
     port.postMessage({ type: 'done', reply: finalReply });
     return;
@@ -2083,7 +2178,13 @@ async function streamAgentChat(message, history, translateConfig, model, systemP
       text: `工具呼叫已達 ${MAX_ITER} 輪上限，正在強制整理目前結果。`,
       level: 'warning'
     });
-    const finalReply = await requestFinalSynthesis(`已達工具迭代上限 ${MAX_ITER} 輪。`);
+    let finalReply;
+    try {
+      finalReply = await requestFinalSynthesis(`已達工具迭代上限 ${MAX_ITER} 輪。`);
+    } catch (err) {
+      await streamFinalFallback(`已達工具迭代上限 ${MAX_ITER} 輪。`, err.message);
+      return;
+    }
     port.postMessage({ type: 'done', reply: finalReply });
     return;
   }
