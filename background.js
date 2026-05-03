@@ -128,11 +128,74 @@ function getInputModalities(model) {
   return list.map(v => String(v).trim().toLowerCase()).filter(Boolean);
 }
 
+function getOutputModalities(model) {
+  const values = model?.outputModalities
+    || model?.architecture?.output_modalities
+    || model?.output_modalities
+    || [];
+  const list = Array.isArray(values) ? values : String(values || '').split('+');
+  return list.map(v => String(v).trim().toLowerCase()).filter(Boolean);
+}
+
+const SUPPORTED_IMAGE_ASPECT_RATIOS = new Set(['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9']);
+
+function normalizeImageAspectRatio(value) {
+  const normalized = String(value || '')
+    .replace(/[：xX]/g, ':')
+    .replace(/\s+/g, '')
+    .trim();
+  return SUPPORTED_IMAGE_ASPECT_RATIOS.has(normalized) ? normalized : null;
+}
+
+function extractImageAspectRatio(text = '') {
+  const matches = String(text).matchAll(/(?:^|[^\d])(\d{1,2}\s*[:：xX]\s*\d{1,2})(?!\d)/g);
+  for (const match of matches) {
+    const ratio = normalizeImageAspectRatio(match[1]);
+    if (ratio) return ratio;
+  }
+  return null;
+}
+
+function looksLikeImageGenerationModel(modelId = '', modelInfo = {}) {
+  const outputModalities = getOutputModalities(modelInfo);
+  if (outputModalities.includes('image')) return true;
+  return /(?:image|nano[-_\s]?banana|gemini.*flash.*image)/i.test(String(modelId || modelInfo?.name || ''));
+}
+
+function looksLikeImageGenerationRequest(text = '') {
+  return /(?:生成|產生|建立|創建|畫|繪製|生圖|圖片|圖像|照片|海報|插圖|generate|create|draw|image|picture|photo|poster|illustration)/i.test(String(text || ''));
+}
+
+function isImageReplyNoise(text = '') {
+  const normalized = String(text || '')
+    .replace(/<think>[\s\S]*?<\/think>/gi, '')
+    .replace(/<result>|<\/result>/gi, '')
+    .trim();
+  return !normalized || /^[`'"\s.,，。!！?？:：;；\-_*~|()[\]{}<>]+$/.test(normalized);
+}
+
+async function getOpenRouterImageRequestConfig({ modelId, message, apiKey }) {
+  if (!apiKey || !modelId || modelId === MODEL_NAME || !looksLikeImageGenerationRequest(message)) return null;
+  const pricingMap = await getOpenRouterPricingMap(apiKey);
+  const modelInfo = pricingMap[modelId] || {};
+  if (!looksLikeImageGenerationModel(modelId, modelInfo)) return null;
+  const aspectRatio = extractImageAspectRatio(message);
+  return {
+    modalities: ['image', 'text'],
+    ...(aspectRatio ? { image_config: { aspect_ratio: aspectRatio } } : {}),
+    aspectRatio
+  };
+}
+
 async function getOpenRouterPricingMap(apiKey) {
   const now = Date.now();
   const { [MODEL_PRICING_CACHE_KEY]: cache } = await chrome.storage.local.get([MODEL_PRICING_CACHE_KEY]);
   if (cache?.models && now - (cache.updatedAt || 0) < 24 * 60 * 60 * 1000) {
-    return cache.models;
+    const hasOutputMetadata = Object.values(cache.models).some(model => Array.isArray(model.outputModalities));
+    if (hasOutputMetadata) {
+      return cache.models;
+    }
+    console.log('[Usage] OpenRouter 模型快取缺少 output modalities，重新整理模型資料');
   }
 
   try {
@@ -149,6 +212,7 @@ async function getOpenRouterPricingMap(apiKey) {
         pricing: model.pricing || {},
         supportedParameters: model.supported_parameters || [],
         inputModalities: getInputModalities(model),
+        outputModalities: getOutputModalities(model),
         contextLength: model.context_length || model.top_provider?.context_length || null,
         updatedAt: now
       };
@@ -988,7 +1052,9 @@ async function streamHandleMessage({ message, history, images, image, mode, tran
     : (image ? [{ dataUrl: image, mode: mode || 'upload', fileType: 'image' }] : null);
 
   if (!fileList || fileList.length === 0) {
-    if (skipTools || translateConfig?.enabled) {
+    const { openrouterApiKey } = await chrome.storage.sync.get(['openrouterApiKey']);
+    const imageRequestConfig = await getOpenRouterImageRequestConfig({ modelId: model || MODEL_NAME, message, apiKey: openrouterApiKey });
+    if (skipTools || translateConfig?.enabled || imageRequestConfig) {
       await streamMiniMaxChat(message, history, translateConfig, model, planPrompt, memoryContext, port, sessionId, contextCharBudget);
     } else {
       await streamAgentChat(message, history, translateConfig, model, planPrompt, memoryContext, port, sessionId, contextCharBudget, maxAgentIterations);
@@ -1321,7 +1387,7 @@ function normalizeImageAttachment(raw, index = 0) {
       source: 'openrouter'
     };
   }
-  const url = raw.url || raw.image_url?.url || raw.data_url || raw.dataUrl || raw.b64_json || raw.base64 || raw.file_data;
+  const url = raw.url || raw.image_url?.url || raw.imageUrl?.url || raw.data_url || raw.dataUrl || raw.b64_json || raw.base64 || raw.file_data;
   if (!url) return null;
   const mimeType = raw.mime_type || raw.mimeType || (String(url).match(/^data:([^;]+);/)?.[1] || 'image/png');
   const normalizedUrl = String(url).startsWith('data:') || String(url).startsWith('http')
@@ -1407,11 +1473,18 @@ async function streamMiniMaxChat(message, history, translateConfig, model, syste
   const extraHeaders = useOpenRouter
     ? { 'HTTP-Referer': 'chrome-extension://open-chat-hub', 'X-Title': 'Open Chat Hub' }
     : {};
+  const imageRequestConfig = useOpenRouter
+    ? await getOpenRouterImageRequestConfig({ modelId: useModel, message, apiKey: openrouterApiKey })
+    : null;
 
   const requestBody = {
     model: useModel,
     messages,
     stream: true,
+    ...(imageRequestConfig ? {
+      modalities: imageRequestConfig.modalities,
+      ...(imageRequestConfig.image_config ? { image_config: imageRequestConfig.image_config } : {})
+    } : {}),
     ...(useOpenRouter ? { stream_options: { include_usage: true } } : {})
   };
   console.log(`[Stream] 送出請求 model=${useModel} msgs=${messages.length} histChars=${messages.reduce((s, m) => s + (typeof m.content === 'string' ? m.content.length : 0), 0)}`);
@@ -1493,7 +1566,14 @@ async function streamMiniMaxChat(message, history, translateConfig, model, syste
     .replace(/<result>[\s\S]*?<\/result>/gi, '')
     .trim();
 
-  if (!cleaned && !fullContent) {
+  if (useOpenRouter) {
+    const textAttachments = extractImageOutputAttachments(null, cleaned || fullContent);
+    if (textAttachments.length > 0) {
+      outputAttachments = [...outputAttachments, ...textAttachments.filter(a => !outputAttachments.some(existing => existing.url === a.url))];
+    }
+  }
+
+  if (!cleaned && !fullContent && outputAttachments.length === 0) {
     const reason = streamError
       ? `API 錯誤：${streamError}`
       : lastFinishReason === 'length'
@@ -1504,15 +1584,18 @@ async function streamMiniMaxChat(message, history, translateConfig, model, syste
     throw new Error(`${reason}\n${debugLine}`);
   }
 
-  if (useOpenRouter) {
-    const textAttachments = extractImageOutputAttachments(null, cleaned || fullContent);
-    if (textAttachments.length > 0) {
-      outputAttachments = [...outputAttachments, ...textAttachments.filter(a => !outputAttachments.some(existing => existing.url === a.url))];
+  let finalReply = cleaned || fullContent;
+  if (outputAttachments.length > 0) {
+    const refusalLikeReply = /(?:無法理解|無法為.*生成|無法.*圖片|不能.*生成|sorry|can't|cannot|unable)/i.test(finalReply);
+    if (isImageReplyNoise(finalReply) || refusalLikeReply) {
+      finalReply = imageRequestConfig?.aspectRatio
+        ? `已生成圖片（${imageRequestConfig.aspectRatio}）。`
+        : '已生成圖片。';
     }
   }
 
   console.log(`[Stream] 完成 chars=${fullContent.length} finish_reason=${lastFinishReason}`);
-  port.postMessage({ type: 'done', reply: cleaned || fullContent, attachments: outputAttachments });
+  port.postMessage({ type: 'done', reply: finalReply, attachments: outputAttachments, usage: normalizeUsage(finalUsage) });
   if (useOpenRouter && finalUsage) {
     recordOpenRouterUsage({ modelId: useModel, usage: finalUsage, apiKey: openrouterApiKey, sessionId, source: 'chat' })
       .catch(err => console.warn('[Usage] 紀錄失敗:', err?.message || err));
@@ -2760,7 +2843,13 @@ async function saveSession(session) {
     chatSessions.shift();
   }
 
-  await chrome.storage.local.set({ chatSessions });
+  await new Promise((resolve, reject) => {
+    chrome.storage.local.set({ chatSessions }, () => {
+      const err = chrome.runtime.lastError;
+      if (err) reject(new Error(err.message));
+      else resolve();
+    });
+  });
 }
 
 // 刪除單一 session

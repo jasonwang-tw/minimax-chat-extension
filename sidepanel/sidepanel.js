@@ -322,6 +322,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     return getModelContextInfo().tokens * APPROX_CHARS_PER_TOKEN;
   }
 
+  function getOutputModalities(model) {
+    const values = model?.architecture?.output_modalities || model?.output_modalities || model?.outputModalities || [];
+    return Array.isArray(values)
+      ? values.map(v => String(v).trim().toLowerCase()).filter(Boolean)
+      : String(values || '').split('+').map(v => v.trim().toLowerCase()).filter(Boolean);
+  }
+
   async function getOpenRouterPricingMap(apiKey) {
     const now = Date.now();
     const { [MODEL_PRICING_CACHE_KEY]: cache } = await chrome.storage.local.get([MODEL_PRICING_CACHE_KEY]);
@@ -343,6 +350,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           pricing: model.pricing || {},
           supportedParameters: model.supported_parameters || [],
           inputModalities: model.architecture?.input_modalities || model.input_modalities || [],
+          outputModalities: getOutputModalities(model),
           contextLength: model.context_length || model.top_provider?.context_length || null,
           updatedAt: now
         };
@@ -647,13 +655,21 @@ document.addEventListener('DOMContentLoaded', async () => {
       + estimateTextLength(pageContext.text);
   }
 
+  function estimateMessageTokens(message) {
+    const textTokens = Math.ceil(estimateTextLength(message?.content) / APPROX_CHARS_PER_TOKEN);
+    const usageTokens = Number(message?.usage?.totalTokens || message?.usage?.total_tokens || 0);
+    const attachmentTokens = (message?.attachments || []).reduce((sum, attachment) => {
+      if (attachment?.type === 'image' || String(attachment?.mimeType || '').startsWith('image/')) return sum + 1290;
+      return sum;
+    }, 0);
+    return Math.max(textTokens, usageTokens, attachmentTokens);
+  }
+
   function updateCharCounter() {
-    const historyChars = (currentSession?.messages || [])
-      .reduce((sum, m) => sum + (typeof m.content === 'string' ? m.content.length : 0), 0);
+    const historyTokens = (currentSession?.messages || [])
+      .reduce((sum, m) => sum + estimateMessageTokens(m), 0);
     const inputChars = estimateTextLength(messageInput?.value || '');
     const extraChars = estimateKnowledgeLength() + estimatePageContextLength();
-    const totalChars = historyChars + inputChars + extraChars;
-    const historyTokens = Math.ceil(historyChars / APPROX_CHARS_PER_TOKEN);
     const inputTokens = Math.ceil(inputChars / APPROX_CHARS_PER_TOKEN);
     const extraTokens = Math.ceil(extraChars / APPROX_CHARS_PER_TOKEN);
     const totalTokens = historyTokens + inputTokens + extraTokens;
@@ -2046,7 +2062,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   function getSessionDefaultName(session) {
     if (!session) return '新對話';
     const firstUserMsg = (session.messages || []).find(m => m.role === 'user');
-    const hasImage = (session.messages || []).some(m => m.image || (m.images && m.images.length > 0));
+    const hasImage = (session.messages || []).some(messageHasImage);
     const base = firstUserMsg
       ? firstUserMsg.content.substring(0, 40) + (firstUserMsg.content.length > 40 ? '...' : '')
       : '新對話';
@@ -2119,7 +2135,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           (session.pinned ? ' pinned' : '');
 
         const firstUserMsg = session.messages.find(m => m.role === 'user');
-        const hasImage = session.messages.some(m => m.image || (m.images && m.images.length > 0));
+        const hasImage = session.messages.some(messageHasImage);
         const defaultPreview = firstUserMsg
           ? firstUserMsg.content.substring(0, 40) + (firstUserMsg.content.length > 40 ? '...' : '')
           : '新對話';
@@ -2694,8 +2710,11 @@ document.addEventListener('DOMContentLoaded', async () => {
         return;
       }
       if (msg.type === 'done') {
-        const reply = msg.reply;
-        if (!reply || !String(reply).trim()) {
+        const savedAttachments = Array.isArray(msg.attachments) && msg.attachments.length > 0 ? msg.attachments : null;
+        const reply = (msg.reply && String(msg.reply).trim())
+          ? msg.reply
+          : (savedAttachments ? '已生成圖片。' : '');
+        if (!reply) {
           liveDiv.remove();
           addMessage('錯誤: 模型未返回文字內容，請稍後重試或切換模型。', 'error');
           clearAgentStatus();
@@ -2711,11 +2730,11 @@ document.addEventListener('DOMContentLoaded', async () => {
         const thinkContent = doneThinkMatch ? doneThinkMatch[1].trim() : undefined;
         const savedSearchLog = _agentSearchLog.length > 0 ? [..._agentSearchLog] : null;
         const savedAgentNotices = _agentNotices.length > 0 ? [..._agentNotices] : null;
-        const savedAttachments = Array.isArray(msg.attachments) && msg.attachments.length > 0 ? msg.attachments : null;
+        const savedUsage = msg.usage && Number(msg.usage.totalTokens || 0) > 0 ? msg.usage : null;
         const savedContinuation = msg.continuation?.prompt
           ? { prompt: msg.continuation.prompt, label: msg.continuation.label || '繼續深入搜尋' }
           : null;
-        currentSession.messages.push({ role: 'assistant', content: reply, ...(thinkContent && { thinkContent }), ...(savedSearchLog && { searchLog: savedSearchLog }), ...(savedAttachments && { attachments: savedAttachments }), ...(savedContinuation && { continuation: savedContinuation }) });
+        currentSession.messages.push({ role: 'assistant', content: reply, ...(thinkContent && { thinkContent }), ...(savedSearchLog && { searchLog: savedSearchLog }), ...(savedAttachments && { attachments: savedAttachments }), ...(savedUsage && { usage: savedUsage }), ...(savedContinuation && { continuation: savedContinuation }) });
         if (savedAgentNotices) {
           liveDiv.parentNode.insertBefore(buildAgentNoticeEl(savedAgentNotices), liveDiv);
         }
@@ -3245,10 +3264,17 @@ document.addEventListener('DOMContentLoaded', async () => {
     } else {
       sessions.push(currentSession);
     }
-    await chrome.runtime.sendMessage({
+    const response = await chrome.runtime.sendMessage({
       type: 'SAVE_SESSION',
       data: { session: currentSession }
     });
+    if (!response?.success) {
+      const reason = response?.error || '歷史紀錄保存失敗';
+      console.error('[History] 保存失敗:', reason);
+      setStatus(`歷史紀錄保存失敗：${reason}`, true, 8000);
+      return false;
+    }
+    return true;
   }
 
   // ── 訊息渲染 ────────────────────────────────────────────
@@ -3286,6 +3312,16 @@ document.addEventListener('DOMContentLoaded', async () => {
         source
       };
     }).filter(a => a.url);
+  }
+
+  function messageHasImage(msg) {
+    if (!msg) return false;
+    if (msg.image || (Array.isArray(msg.images) && msg.images.length > 0)) return true;
+    return (msg.attachments || []).some(att => {
+      const type = String(att?.type || att?.fileType || '').toLowerCase();
+      const mimeType = String(att?.mimeType || att?.mime_type || '').toLowerCase();
+      return type === 'image' || mimeType.startsWith('image/');
+    });
   }
 
   function legacyMessageAttachments(msg) {
