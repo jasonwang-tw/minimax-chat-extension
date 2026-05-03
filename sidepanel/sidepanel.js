@@ -2318,6 +2318,15 @@ document.addEventListener('DOMContentLoaded', async () => {
           updateSendButton();
           executeAction(intent.trigger, intent.args);
           return;
+        } else if (intent.type === 'plan') {
+          if (!intent.task && !pageContext && !currentImages.length) return;
+          planModeForSend = true;
+          commandDisplayLabel = '計畫模式' + (intent.task ? ` · ${intent.task}` : '');
+          message = intent.task;
+          messageInput.value = intent.task;
+          messageInput.style.height = 'auto';
+          messageInput.style.height = Math.min(messageInput.scrollHeight, 120) + 'px';
+          updateSendButton();
         } else if (intent.type === 'template') {
           const filled = intent.cmd.template.replace('{input}', intent.args);
           if (filled.trim()) {
@@ -3451,6 +3460,22 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // 意圖偵測：判斷訊息是否隱含指令意圖，回傳對應動作或 null
   function detectCommandIntent(message, allCmds) {
+    // /plan（優先偵測，避免「規劃這個頁面」誤觸 /page）
+    const planRegexes = [
+      /^幫(?:我)?計(?:畫|劃)[：:，,\s]*(.*)/s,                    // 幫我計畫 / 幫計畫
+      /^幫(?:我)?規劃[：:，,\s]*(.*)/s,                            // 幫我規劃 / 幫規劃
+      /^幫(?:我)?制定(?:個?)?計(?:畫|劃)[：:，,\s]*(.*)/s,        // 幫我制定計畫
+      /^幫(?:我)?擬定(?:個?)?計(?:畫|劃)[：:，,\s]*(.*)/s,        // 幫我擬定計畫
+      /^計(?:畫|劃)[：:，,\s]+(.+)/s,                             // 計畫：XXX（需分隔符）
+      /^規劃(.+)/s,                                               // 規劃以下專案 / 規劃 XXX
+    ];
+    for (const re of planRegexes) {
+      const m = message.match(re);
+      if (m !== null) {
+        return { type: 'plan', task: (m[1] || '').trim() };
+      }
+    }
+
     // /page-code（比 /page 更具體，優先偵測）
     if (
       /(?:分析|看|查看|檢查|查一下)(?:一下)?(?:當前|這個?|此|目前)?(?:頁面|網頁)(?:的)?(?:原始碼|源碼|代碼|HTML|CSS|JS)/i.test(message) ||
