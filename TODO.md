@@ -104,6 +104,32 @@
 - Added a unified chat attachment model while preserving legacy `images` / `fileInfos` compatibility.
 - Added OpenRouter image output attachment extraction and chat rendering.
 
+## Done (v1.23.x)
+
+- Added dynamic Context window UI:
+  - model-aware `contextLength` display from OpenRouter metadata
+  - MiniMax M2.7 fallback at 200k tokens
+  - send-time `contextCharBudget` propagation to background history trimming
+- Added Claude-style page context workflow:
+  - `/page` attaches current page context immediately
+  - `/page-code` attaches HTML/CSS/style context as a page chip with `分析程式碼與樣式`
+  - new conversations can auto-attach current page context
+- Added unified context chip styling:
+  - action/page chips share one `context-chip-row`
+  - knowledge chips share height/spacing with action chips
+  - knowledge chip color tokens promoted to global CSS variables
+  - knowledge palette spacing adjusted (`bottom: calc(100% + 10px)`, `margin: 0 10px`)
+- Added slash command matching in the middle of text:
+  - triggers only after start/whitespace
+  - ignores URLs and path-like text
+  - replaces only the active slash token
+- Added Plan Mode v1:
+  - `/plan <task>` command
+  - plan generation before tool execution
+  - approval card with steps/tools/sites
+  - `Approve plan` continues through existing Agent/tool flow
+  - high-risk API/SSH tools intentionally not enabled yet
+
 ---
 
 ## 待議事項
@@ -121,6 +147,7 @@
 | 🔴 P0 | AI Agent Loop 基礎建設 | 其他 Agent 功能的前提 |
 | 🔴 P0 | MiniMax 圖像生成 | 高價值、差異化功能 |
 | 🟠 P1 | AI 設定 & 記憶工具 | 搭配 Agent Loop |
+| 🟠 P1 | Plan Approval / Tool Registry | API/SSH 等高風險工具前置審核 |
 | 🟠 P1 | MiniMax TTS 升級 | 現有 Google TTS 直接替換 |
 | 🟠 P1 | System Prompt 壓縮 | M2.7 200k token 充分利用 |
 | 🟡 P2 | 任務腳本（Task Script） | 長任務腳本化，搭配 Agent |
@@ -186,6 +213,17 @@
 - [ ] **`save_memory(title, summary, tags)`**：AI 主動寫入長期記憶
 - [ ] **白名單管理**：AI 可寫設定限定為 `settings.model`、`globalPrompt`、`defaultPrompts`
 
+### Phase 2.5 — Plan Approval / 計畫模式（P1）
+
+- [x] **`/plan <task>` 指令**：先產生計畫卡，不直接執行工具
+- [x] **Plan card UI**：顯示可用工具、允許站點、執行步驟、批准/取消操作
+- [x] **批准後執行**：`Approve plan` 將原始 request 交回既有 Agent/tool 流程
+- [x] **已批准計畫注入**：background 將 approved plan 合入 system prompt，約束後續執行
+- [ ] **計畫模式設定**：新增 `off / auto / always`，讓使用者決定是否強制先批准計畫
+- [ ] **工具風險分級**：`low`（搜尋）/ `medium`（API read）/ `high`（API write、SSH）
+- [ ] **計畫卡持久化**：批准/取消狀態寫入 session，切換對話後仍可追蹤
+- [ ] **計畫修正流程**：`Make changes` 可把計畫帶回輸入框供使用者修改，而非單純取消
+
 ### Phase 3 — 搜尋工具整合（P2）✅ 已完成 v1.19.x
 
 - [x] **`web_search(query)`**：整合現有 Brave 搜尋，改由 AI 自行判斷何時觸發
@@ -205,6 +243,24 @@
 - [ ] **`run_skill(name, params)`**：AI 調用預定義 skill（流程化任務）
 - [ ] **Skill 定義格式**：JSON 結構定義每個 skill 的步驟與工具調用序列
 - [ ] **內建 Skill**：`blog_write`、`summarize_page`、`translate_and_save` 等
+
+### Phase 6 — API Tool Registry（P1/P2）
+
+- [ ] **Tool Registry schema**：統一定義 tool name、description、JSON schema、risk level、auth requirements
+- [ ] **HTTP API read tool**：支援 GET/POST read-only API，回傳 JSON/text 摘要給 Agent
+- [ ] **HTTP API write tool**：支援 POST/PUT/PATCH/DELETE，但強制 Plan Approval + 使用者確認
+- [ ] **Auth 管理**：支援 API key / Bearer token / header mapping，避免模型直接讀取 secret
+- [ ] **Host allowlist**：每個 API tool 必須設定允許 domain，防止任意外連
+- [ ] **Result limiter**：限制回傳長度、清理敏感資訊、避免 context 爆量
+
+### Phase 7 — SSH / Server Tool（P1/P2，需橋接）
+
+- [ ] **SSH tool 方案評估**：Chrome extension 不能直接 SSH，需 Native Messaging host 或後端 proxy
+- [ ] **Native Messaging bridge**：本機執行器負責 SSH，extension 只送受限命令 schema
+- [ ] **Server-side proxy**：以自有 API 代為執行 SSH，集中管理金鑰與審計
+- [ ] **命令白名單**：只允許預先定義任務（cache clear、disk usage、script list 等）
+- [ ] **強制 Plan Approval**：所有 SSH tool 都必須先顯示計畫與目標主機
+- [ ] **審計紀錄**：記錄 tool、host、command template、時間、結果摘要
 
 ### 技術備註
 
