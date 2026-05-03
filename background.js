@@ -2053,6 +2053,32 @@ ${reason ? `補充狀態：${reason}\n` : ''}${errorMessage ? `前一次整理�
 請輸出完整、條理清楚的最終回答。`;
   }
 
+  function buildContinuationPrompt(reason = '') {
+    const toolContext = truncateAgentText(toolObservations.join('\n\n---\n\n'), AGENT_FINAL_CONTEXT_LIMIT);
+    if (!toolContext) return null;
+    return `請繼續上一段 Agent 任務，針對尚未查清楚的部分做後續搜尋與整理。
+
+原始問題：
+${message || '未提供'}
+
+上一段停止原因：
+${reason || '已達本段工具迭代上限'}
+
+上一段已取得的工具結果摘要：
+${toolContext}
+
+續跑要求：
+- 不要重複搜尋已經明確回答的問題。
+- 先判斷還缺哪些關鍵資訊，再進行有針對性的搜尋。
+- 搜尋完成後，輸出一份可直接執行的繁體中文完整答案。
+- 若仍有不確定事項，請明確標示需要使用者確認的部分。`;
+  }
+
+  function buildContinuationPayload(reason = '') {
+    const prompt = buildContinuationPrompt(reason);
+    return prompt ? { prompt, label: '繼續深入搜尋' } : null;
+  }
+
   async function streamFinalFallback(reason = '', errorMessage = '') {
     port.postMessage({
       type: 'agent_notice',
@@ -2207,6 +2233,7 @@ ${reason ? `補充狀態：${reason}\n` : ''}${errorMessage ? `前一次整理�
   }
 
   if (toolsExecuted) {
+    const limitReason = `已達工具迭代上限 ${maxIter} 輪。`;
     port.postMessage({
       type: 'agent_notice',
       text: `工具呼叫已達 ${maxIter} 輪上限，正在根據目前結果穩定整理回覆。若需要更完整搜尋，可將 Agent 深度切換為深入或研究後重試。`,
@@ -2214,12 +2241,12 @@ ${reason ? `補充狀態：${reason}\n` : ''}${errorMessage ? `前一次整理�
     });
     let finalReply;
     try {
-      finalReply = await requestFinalSynthesis(`已達工具迭代上限 ${maxIter} 輪。請根據現有資料產生完整回答，並明確指出仍可能需要使用者確認或後續查證的部分。`);
+      finalReply = await requestFinalSynthesis(`${limitReason}請根據現有資料產生完整回答，並明確指出仍可能需要使用者確認或後續查證的部分。`);
     } catch (err) {
-      await streamFinalFallback(`已達工具迭代上限 ${maxIter} 輪。`, err.message);
+      await streamFinalFallback(limitReason, err.message);
       return;
     }
-    port.postMessage({ type: 'done', reply: finalReply });
+    port.postMessage({ type: 'done', reply: finalReply, continuation: buildContinuationPayload(limitReason) });
     return;
   }
 }

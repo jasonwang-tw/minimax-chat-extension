@@ -292,6 +292,14 @@
             <input type="file" id="imageInput" accept="image/*,.pdf,.txt,.md,.csv,.json,.js,.ts,.py,.html,.css,.xml,.yaml,.yml,.sh,.sql,.jsx,.tsx" multiple hidden>
           </div>
           <div class="input-right-group">
+            <!-- Agent 深度 -->
+            <div class="agent-depth-picker" id="agentDepthWrapper">
+              <button id="agentDepthBtn" class="btn-agent-depth" type="button" title="Agent 搜尋深度">
+                <span id="agentDepthLabel">標準</span>
+                <svg class="agent-depth-chevron" xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+              </button>
+              <div id="agentDepthDropdown" class="agent-depth-dropdown hidden"></div>
+            </div>
             <!-- 模型選擇 -->
             <div class="model-picker" id="modelPickerWrapper">
               <button id="modelPickerBtn" class="btn-model-picker" type="button">

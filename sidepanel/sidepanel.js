@@ -10,6 +10,7 @@ let _agentSearchLog = [];  // 方案 B：搜尋歷程記錄 [{ tool, query, coun
 let _agentNotices = [];    // Agent fallback / tool error notices for the current reply
 let pendingRegionMode = null; // 區域截圖完成後要套用的 mode（null = 'region'）
 let currentModel = 'MiniMax-M2.7';  // 目前選擇的模型
+let currentAgentDepth = 'standard'; // Agent 搜尋深度
 let historySearchQuery = '';  // 歷史紀錄搜尋關鍵字
 let memories = [];            // 全域長期記憶條目
 let memoryCategoryFilter = '';     // 長期記憶分類篩選
@@ -41,6 +42,12 @@ const APPROX_CHARS_PER_TOKEN = 2;
 const DEFAULT_CONTEXT_TOKENS = 20000;
 const MODEL_CONTEXT_LIMITS = {
   'MiniMax-M2.7': { tokens: 200000, source: 'MiniMax 預設' }
+};
+const AGENT_DEPTH_OPTIONS = {
+  fast: { label: '快速', iterations: 3, description: '較快回覆，適合簡單查詢' },
+  standard: { label: '標準', iterations: 6, description: '預設平衡速度與完整度' },
+  deep: { label: '深入', iterations: 10, description: '適合部署教學與疑難排查' },
+  research: { label: '研究', iterations: 12, description: '最完整，耗時與成本較高' }
 };
 
 document.addEventListener('DOMContentLoaded', async () => {
@@ -243,6 +250,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   const modelPickerBtn = document.getElementById('modelPickerBtn');
   const modelPickerLabel = document.getElementById('modelPickerLabel');
   const modelPickerDropdown = document.getElementById('modelPickerDropdown');
+  const agentDepthBtn = document.getElementById('agentDepthBtn');
+  const agentDepthLabel = document.getElementById('agentDepthLabel');
+  const agentDepthDropdown = document.getElementById('agentDepthDropdown');
 
   const OPENROUTER_MODELS_API_URL = 'https://openrouter.ai/api/v1/models';
   const MODEL_PRICING_CACHE_KEY = 'openrouterModelPricingCache';
@@ -351,7 +361,47 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   }
 
+  async function initAgentDepthPicker() {
+    const { agentDepth } = await chrome.storage.sync.get(['agentDepth']);
+    if (AGENT_DEPTH_OPTIONS[agentDepth]) currentAgentDepth = agentDepth;
+    renderAgentDepthPicker();
+  }
+
+  function getCurrentAgentDepthConfig() {
+    return AGENT_DEPTH_OPTIONS[currentAgentDepth] || AGENT_DEPTH_OPTIONS.standard;
+  }
+
+  function renderAgentDepthPicker() {
+    if (!agentDepthLabel || !agentDepthDropdown) return;
+    const activeConfig = getCurrentAgentDepthConfig();
+    agentDepthLabel.textContent = activeConfig.label;
+    agentDepthDropdown.innerHTML = '';
+    Object.entries(AGENT_DEPTH_OPTIONS).forEach(([key, config]) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = `agent-depth-item${currentAgentDepth === key ? ' active' : ''}`;
+      btn.innerHTML = `<span class="agent-depth-item-title">${escSp(config.label)} · ${config.iterations} 輪</span><span class="agent-depth-item-desc">${escSp(config.description)}</span>`;
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        currentAgentDepth = key;
+        await chrome.storage.sync.set({ agentDepth: key });
+        renderAgentDepthPicker();
+        agentDepthDropdown.classList.add('hidden');
+        agentDepthBtn?.classList.remove('open');
+      });
+      agentDepthDropdown.appendChild(btn);
+    });
+  }
+
+  await initAgentDepthPicker();
   await safeInitModelPicker();
+
+  agentDepthBtn?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const isOpen = !agentDepthDropdown.classList.contains('hidden');
+    agentDepthDropdown.classList.toggle('hidden', isOpen);
+    agentDepthBtn.classList.toggle('open', !isOpen);
+  });
 
   modelPickerBtn?.addEventListener('click', async (e) => {
     e.stopPropagation();
@@ -362,6 +412,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   document.addEventListener('click', () => {
+    agentDepthDropdown?.classList.add('hidden');
+    agentDepthBtn?.classList.remove('open');
     modelPickerDropdown?.classList.add('hidden');
     modelPickerBtn?.classList.remove('open');
   });
@@ -370,6 +422,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area === 'sync' && (changes.openrouterApiKey || changes.customModels)) {
       safeInitModelPicker();
+    }
+    if (area === 'sync' && changes.agentDepth && AGENT_DEPTH_OPTIONS[changes.agentDepth.newValue]) {
+      currentAgentDepth = changes.agentDepth.newValue;
+      renderAgentDepthPicker();
     }
   });
 
@@ -2188,7 +2244,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (attachments.length > 0) {
         addMessageWithAttachments(msg.content, msg.role, attachments, ttsLang);
       } else {
-        addMessage(msg.content, msg.role, ttsLang, msg.thinkContent || '');
+        addMessage(msg.content, msg.role, ttsLang, msg.thinkContent || '', msg.continuation || null);
       }
     });
 
@@ -2258,12 +2314,13 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   // ── 發送訊息 ────────────────────────────────────────────
-  async function handleSend() {
+  async function handleSend(options = {}) {
+    const programmaticMessage = typeof options.apiMessageOverride === 'string';
     // 有待執行指令時，用輸入框文字作為 args 執行
     let commandDisplayLabel = null;
     let planModeForSend = false;
     const pendingWasSet = !!pendingCommand;
-    if (pendingCommand) {
+    if (!programmaticMessage && pendingCommand) {
       const { cmd } = pendingCommand;
       const args = messageInput.value.trim();
       clearCommandChip();
@@ -2294,11 +2351,13 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
     }
 
-    let message = messageInput.value.trim();
+    let message = programmaticMessage
+      ? (options.displayMessageOverride || options.apiMessageOverride).trim()
+      : messageInput.value.trim();
     if (!message && !currentImages.length && !pageContext) return;
 
     // 意圖偵測：自動對應指令（僅在非載入中、無明確 /指令、無待執行指令時）
-    if (!isLoading && !pendingWasSet && message && !message.startsWith('/')) {
+    if (!programmaticMessage && !isLoading && !pendingWasSet && message && !message.startsWith('/')) {
       const intent = detectCommandIntent(message, getAllCommands());
       if (intent) {
         if (intent.type === 'fetch-page' || intent.type === 'fetch-page-code') {
@@ -2343,6 +2402,10 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // 串流中：入佇列，等待當前回覆完成後自動送出
     if (isLoading) {
+      if (programmaticMessage) {
+        setStatus('目前仍有回覆進行中，完成後再繼續搜尋。', true, 3000);
+        return;
+      }
       messageQueue.push({
         message,
         images: [...currentImages],
@@ -2358,7 +2421,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     // 存入輸入歷史（去重、上限 10 則）
-    if (message) {
+    if (!programmaticMessage && message) {
       inputHistory = inputHistory.filter(h => h !== message);
       inputHistory.push(message);
       if (inputHistory.length > 10) inputHistory.shift();
@@ -2367,7 +2430,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     inputHistorySaved = '';
 
     // 指令路由：若訊息以已知指令開頭，交給 executeAction 處理
-    if (message.startsWith('/')) {
+    if (!programmaticMessage && message.startsWith('/')) {
       const allCmds = getAllCommands();
       const matchedCmd = allCmds.find(c => message === c.trigger || message.startsWith(c.trigger + ' '));
       if (matchedCmd) {
@@ -2400,17 +2463,19 @@ document.addEventListener('DOMContentLoaded', async () => {
     clearStatus();
 
     // 若有頁面內容，包裝 user message（先擷取標題供顯示用）
-    const pageTitle = pageContext?.title;
-    const hadPageContext = !!pageContext; // 記錄是否有頁面內容（buildPageContextMessage 會清除 pageContext）
-    const isPageOnly = !message && !!pageContext;
-    const isLongPage = !!pageContext && pageContext.text.length > PAGE_INLINE_LIMIT;
+    const pageTitle = programmaticMessage ? null : pageContext?.title;
+    const hadPageContext = programmaticMessage ? false : !!pageContext; // 記錄是否有頁面內容（buildPageContextMessage 會清除 pageContext）
+    const isPageOnly = !programmaticMessage && !message && !!pageContext;
+    const isLongPage = !programmaticMessage && !!pageContext && pageContext.text.length > PAGE_INLINE_LIMIT;
     // 長頁：轉 text file（buildPageContextFile 內會 clearPageContext）
     const pageFile = isLongPage ? buildPageContextFile() : null;
-    const knowledgePrefix = buildKnowledgeBlock();
-    const finalMessage = knowledgePrefix + buildPageContextMessage(message);
+    const knowledgePrefix = programmaticMessage ? '' : buildKnowledgeBlock();
+    const finalMessage = programmaticMessage ? options.apiMessageOverride : knowledgePrefix + buildPageContextMessage(message);
     // 清除已選知識庫 chips
-    selectedKnowledge = [];
-    renderKnowledgeChips();
+    if (!programmaticMessage) {
+      selectedKnowledge = [];
+      renderKnowledgeChips();
+    }
 
     // 長輸入（貼入代碼/大量文字）自動轉 text file 走 pipeline 分段分析
     const LARGE_INPUT_LIMIT = 6000;
@@ -2423,7 +2488,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     // 顯示訊息
-    const displayMessage = commandDisplayLabel
+    const displayMessage = programmaticMessage
+      ? (options.displayMessageOverride || '繼續深入搜尋')
+      : commandDisplayLabel
       ? commandDisplayLabel
       : isPageOnly
         ? `📄 ${pageTitle?.slice(0, 40) || '讀取頁面'}`
@@ -2432,7 +2499,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           : message;
 
     const userMessage = { role: 'user', content: displayMessage };
-    const snapshotImages = [...currentImages]; // 快照，避免 clearImageData 後遺失
+    const snapshotImages = programmaticMessage ? [] : [...currentImages]; // 快照，避免 clearImageData 後遺失
     if (pageFile) snapshotImages.unshift(pageFile); // 長頁 file 插到最前
     if (longInputFile) snapshotImages.unshift(longInputFile); // 長輸入 file
     if (snapshotImages.length > 0) {
@@ -2446,9 +2513,11 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     const textMessage = apiMessage;
 
-    messageInput.value = '';
-    messageInput.style.height = 'auto';
-    clearImageData();
+    if (!programmaticMessage) {
+      messageInput.value = '';
+      messageInput.style.height = 'auto';
+      clearImageData();
+    }
 
     // 翻譯設定
     const translateConfig = translateEnabled ? {
@@ -2469,7 +2538,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // Agent Loop 接管搜尋決策，skipTools 時回退正常 streaming
     const augmentedMessage = textMessage;
-    const skipTools = !!(snapshotImages.length || translateEnabled || hadPageContext);
+    const skipTools = programmaticMessage ? false : !!(snapshotImages.length || translateEnabled || hadPageContext);
 
     // 建立即時串流訊息 div
     _agentSearchLog = [];
@@ -2519,6 +2588,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       translateConfig,
       model: currentModel,
       contextCharBudget: getCurrentContextCharBudget(),
+      maxAgentIterations: getCurrentAgentDepthConfig().iterations,
       systemPrompt,
       memoryContext,
       sessionId: currentSession?.id,
@@ -2549,7 +2619,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (msg.type === 'agent_thinking') {
         _agentIter = msg.iter;
         if (!agentStatusEl) startAgentStatus();
-        updateAgentStatus(`第 ${msg.iter} 輪，AI 分析中...`);
+        updateAgentStatus(msg.maxIter ? `第 ${msg.iter}/${msg.maxIter} 輪，AI 分析中...` : `第 ${msg.iter} 輪，AI 分析中...`);
         return;
       }
       if (msg.type === 'tool_start') {
@@ -2604,14 +2674,17 @@ document.addEventListener('DOMContentLoaded', async () => {
         const savedSearchLog = _agentSearchLog.length > 0 ? [..._agentSearchLog] : null;
         const savedAgentNotices = _agentNotices.length > 0 ? [..._agentNotices] : null;
         const savedAttachments = Array.isArray(msg.attachments) && msg.attachments.length > 0 ? msg.attachments : null;
-        currentSession.messages.push({ role: 'assistant', content: reply, ...(thinkContent && { thinkContent }), ...(savedSearchLog && { searchLog: savedSearchLog }), ...(savedAttachments && { attachments: savedAttachments }) });
+        const savedContinuation = msg.continuation?.prompt
+          ? { prompt: msg.continuation.prompt, label: msg.continuation.label || '繼續深入搜尋' }
+          : null;
+        currentSession.messages.push({ role: 'assistant', content: reply, ...(thinkContent && { thinkContent }), ...(savedSearchLog && { searchLog: savedSearchLog }), ...(savedAttachments && { attachments: savedAttachments }), ...(savedContinuation && { continuation: savedContinuation }) });
         if (savedAgentNotices) {
           liveDiv.parentNode.insertBefore(buildAgentNoticeEl(savedAgentNotices), liveDiv);
         }
         if (savedSearchLog) {
           liveDiv.parentNode.insertBefore(buildSearchHistoryEl(savedSearchLog), liveDiv);
         }
-        finalizeLiveMessage(liveDiv, rawForFinalize, reply, replyLang, savedAttachments);
+        finalizeLiveMessage(liveDiv, rawForFinalize, reply, replyLang, savedAttachments, savedContinuation);
         clearAgentStatus();
         _agentSearchLog = [];
         _agentNotices = [];
@@ -2746,7 +2819,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   }
 
-  function finalizeLiveMessage(div, raw, cleanReply, lang, attachments = null) {
+  function finalizeLiveMessage(div, raw, cleanReply, lang, attachments = null, continuation = null) {
     const replyLive = div.querySelector('.reply-live');
     if (replyLive) {
       replyLive.className = '';
@@ -2765,10 +2838,35 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
     const actionsHtml = buildMessageActions(cleanReply, resolveTTSLang('assistant', lang, cleanReply), 'assistant');
     div.querySelector('.message-content').insertAdjacentHTML('afterend', actionsHtml);
+    appendContinuationAction(div, continuation);
     div.querySelector('.btn-tts')?.addEventListener('click', handleTTS);
     div.querySelector('.btn-copy')?.addEventListener('click', handleCopy);
     div.classList.remove('message-live');
     scrollToBottom();
+  }
+
+  function appendContinuationAction(messageEl, continuation) {
+    if (!messageEl || !continuation?.prompt) return;
+    const action = document.createElement('div');
+    action.className = 'agent-continuation-action';
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'btn-agent-continue';
+    btn.textContent = continuation.label || '繼續深入搜尋';
+    btn.addEventListener('click', async () => {
+      if (isLoading) {
+        setStatus('目前仍有回覆進行中，完成後再繼續搜尋。', true, 3000);
+        return;
+      }
+      btn.disabled = true;
+      await handleSend({
+        apiMessageOverride: continuation.prompt,
+        displayMessageOverride: continuation.label || '繼續深入搜尋上一段未完成的部分'
+      });
+      action.remove();
+    });
+    action.appendChild(btn);
+    messageEl.appendChild(action);
   }
 
   // ── 狀態通知（顯示於聊天區底部）──────────────────────
@@ -2957,7 +3055,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (msg.type === 'agent_thinking') {
         _agentIter = msg.iter;
         if (!agentStatusEl) startAgentStatus();
-        updateAgentStatus(`第 ${msg.iter} 輪，AI 分析中...`);
+        updateAgentStatus(msg.maxIter ? `第 ${msg.iter}/${msg.maxIter} 輪，AI 分析中...` : `第 ${msg.iter} 輪，AI 分析中...`);
         return;
       }
       if (msg.type === 'tool_start') {
@@ -2985,10 +3083,13 @@ document.addEventListener('DOMContentLoaded', async () => {
         const reply = msg.reply;
         const savedSearchLog = _agentSearchLog.length > 0 ? [..._agentSearchLog] : null;
         const savedAgentNotices = _agentNotices.length > 0 ? [..._agentNotices] : null;
-        currentSession.messages.push({ role: 'assistant', content: reply, ...(savedSearchLog && { searchLog: savedSearchLog }) });
+        const savedContinuation = msg.continuation?.prompt
+          ? { prompt: msg.continuation.prompt, label: msg.continuation.label || '繼續深入搜尋' }
+          : null;
+        currentSession.messages.push({ role: 'assistant', content: reply, ...(savedSearchLog && { searchLog: savedSearchLog }), ...(savedContinuation && { continuation: savedContinuation }) });
         if (savedAgentNotices) liveDiv.parentNode.insertBefore(buildAgentNoticeEl(savedAgentNotices), liveDiv);
         if (savedSearchLog) liveDiv.parentNode.insertBefore(buildSearchHistoryEl(savedSearchLog), liveDiv);
-        finalizeLiveMessage(liveDiv, rawContent || reply, reply, undefined, null);
+        finalizeLiveMessage(liveDiv, rawContent || reply, reply, undefined, null, savedContinuation);
         clearAgentStatus();
         _agentSearchLog = [];
         _agentNotices = [];
@@ -3155,7 +3256,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     return `<div class="message-attachments">${items}</div>`;
   }
 
-  function addMessage(content, role, ttsLang, thinkContent = '') {
+  function addMessage(content, role, ttsLang, thinkContent = '', continuation = null) {
     const lang = resolveTTSLang(role, ttsLang, content);
     const div = document.createElement('div');
     div.className = `message message-${role === 'user' ? 'user' : role === 'error' ? 'error' : 'assistant'}`;
@@ -3182,8 +3283,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
     div.querySelector('.btn-tts')?.addEventListener('click', handleTTS);
     div.querySelector('.btn-copy')?.addEventListener('click', handleCopy);
+    if (role === 'assistant') appendContinuationAction(div, continuation);
     chatMessages.appendChild(div);
     scrollToBottom();
+    return div;
   }
 
   function addMessageWithImages(content, role, files, ttsLang) {
