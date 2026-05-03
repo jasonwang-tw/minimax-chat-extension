@@ -6,7 +6,7 @@ Open Chat Hub 是一個多模型 AI 側邊欄工作台，讓你在瀏覽器內�
 
 ## 版本
 
-**v1.23.3** (2026-05-03)
+**v1.23.4** (2026-05-03)
 
 ## 功能特色
 
@@ -105,6 +105,10 @@ npm run build:css
 - **TailwindCSS + SCSS**：樣式設計
 
 ## Changelog
+
+## [1.23.4] - 2026-05-03
+### Fixed
+- 修復多輪分析後 AI 停住且無錯誤訊息的問題：`onDisconnect` 改為永遠顯示錯誤；有部分回應時保留已產生內容並提示中斷；background 補強 port 斷線偵測與 error log
 
 ## [1.23.3] - 2026-05-03
 ### Fixed

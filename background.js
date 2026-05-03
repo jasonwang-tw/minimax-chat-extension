@@ -869,12 +869,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 // ── Streaming（Port 長連線）─────────────────────────────
 chrome.runtime.onConnect.addListener(port => {
   if (port.name !== 'chat-stream') return;
+  let portDisconnected = false;
+  port.onDisconnect.addListener(() => { portDisconnected = true; });
   port.onMessage.addListener(async (msg) => {
     if (msg.type !== 'STREAM_MESSAGE') return;
     try {
       await streamHandleMessage(msg.data, port);
     } catch (err) {
-      try { port.postMessage({ type: 'error', message: err.message }); } catch {}
+      console.error('[Background] streamHandleMessage 拋出錯誤:', err.message);
+      if (!portDisconnected) {
+        try { port.postMessage({ type: 'error', message: err.message }); } catch (e) {
+          console.warn('[Background] 無法傳送 error 至 port（已斷線）:', e.message);
+        }
+      }
     }
   });
 });

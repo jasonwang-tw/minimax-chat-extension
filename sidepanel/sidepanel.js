@@ -2673,9 +2673,20 @@ document.addEventListener('DOMContentLoaded', async () => {
       _agentSearchLog = [];
       _agentNotices = [];
       clearStatus();
-      liveDiv.remove();
-      const errMsg = chrome.runtime.lastError?.message;
-      if (errMsg) addMessage(`錯誤: ${errMsg}`, 'error');
+      const disconnectErr = chrome.runtime.lastError?.message;
+      if (rawContent) {
+        // 有部分回應：保留已產生的內容並標注中斷
+        const partial = rawContent.trimEnd();
+        currentSession.messages.push({ role: 'assistant', content: partial });
+        finalizeLiveMessage(liveDiv, partial, partial, replyLang, null);
+        await saveCurrentSession();
+        await loadHistory();
+        addMessage(`⚠️ 回應中斷（連線異常），以上為部分內容。${disconnectErr ? `\n[Debug] ${disconnectErr}` : ''}`, 'error');
+      } else {
+        liveDiv.remove();
+        const errMsg = disconnectErr || '連線中斷，背景服務未回應，請稍後重試。';
+        addMessage(`錯誤: ${errMsg}`, 'error');
+      }
       resetLoading();
     });
 
@@ -2969,10 +2980,21 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
     });
 
-    port.onDisconnect.addListener(() => {
+    port.onDisconnect.addListener(async () => {
       if (!isLoading) return;
-      liveDiv.remove();
       clearAgentStatus();
+      const disconnectErr = chrome.runtime.lastError?.message;
+      if (rawContent) {
+        const partial = rawContent.trimEnd();
+        currentSession.messages.push({ role: 'assistant', content: partial });
+        finalizeLiveMessage(liveDiv, partial, partial, undefined, null);
+        await saveCurrentSession();
+        await loadHistory();
+        addMessage(`⚠️ 回應中斷（計畫執行連線異常），以上為部分內容。${disconnectErr ? `\n[Debug] ${disconnectErr}` : ''}`, 'error');
+      } else {
+        liveDiv.remove();
+        addMessage(`錯誤: ${disconnectErr || '計畫執行連線中斷，請稍後重試。'}`, 'error');
+      }
       resetApprovedLoading();
     });
 
