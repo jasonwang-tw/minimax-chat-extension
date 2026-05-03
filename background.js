@@ -879,16 +879,88 @@ chrome.runtime.onConnect.addListener(port => {
   });
 });
 
-async function streamHandleMessage({ message, history, images, image, mode, translateConfig, model, contextCharBudget, systemPrompt, memoryContext, sessionId, skipTools }, port) {
+async function generateAgentPlan({ message, history, model, systemPrompt, memoryContext }) {
+  const { apiKey, openrouterApiKey } = await chrome.storage.sync.get(['apiKey', 'openrouterApiKey']);
+  const requestedModel = model || MODEL_NAME;
+  const useOpenRouter = !!(openrouterApiKey && requestedModel !== MODEL_NAME);
+  const key = useOpenRouter ? openrouterApiKey : apiKey;
+  if (!key) throw new Error('請先在設定頁面輸入 API Key');
+  const url = useOpenRouter ? OPENROUTER_API_URL : MINIMAX_API_URL;
+  const extraHeaders = useOpenRouter
+    ? { 'HTTP-Referer': 'chrome-extension://open-chat-hub', 'X-Title': 'Open Chat Hub' }
+    : {};
+  const compactHistory = trimHistoryForContext(history || [], 8000)
+    .map(m => `${m.role}: ${typeof m.content === 'string' ? m.content.slice(0, 1200) : ''}`)
+    .join('\n');
+  const planPrompt = `你是計畫模式。請先不要執行工具，也不要回答最終答案。
+根據使用者任務、目前上下文與可用工具，產生一份可供使用者批准的繁體中文執行計畫。
+
+可用工具：
+- web_search：一般網路搜尋
+- deep_search：深度搜尋
+
+請只輸出 JSON，不要 Markdown。格式：
+{
+  "summary": "一句話描述目標",
+  "tools": ["web_search"],
+  "sites": ["example.com"],
+  "steps": ["步驟一", "步驟二", "步驟三"],
+  "risk": "低/中/高與原因"
+}
+
+使用者任務：
+${message || '未提供文字任務'}
+
+記憶與系統補充：
+${[memoryContext, systemPrompt].filter(Boolean).join('\n\n') || '無'}
+
+對話摘要：
+${compactHistory || '無'}`;
+  const resp = await fetchWithTimeout(url, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json', ...extraHeaders },
+    body: JSON.stringify({
+      model: requestedModel,
+      messages: [{ role: 'user', content: planPrompt }]
+    })
+  });
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({}));
+    throw new Error(extractApiErrorMessage(err, resp.status));
+  }
+  const data = await resp.json();
+  const raw = getResponseText(data).replace(/```json|```/g, '').trim();
+  let parsed = null;
+  try { parsed = JSON.parse(raw); } catch {}
+  const fallbackSteps = raw.split(/\n+/).map(s => s.replace(/^[-*\d.\s]+/, '').trim()).filter(Boolean).slice(0, 5);
+  return {
+    summary: parsed?.summary || '執行使用者任務',
+    tools: Array.isArray(parsed?.tools) ? parsed.tools : ['web_search', 'deep_search'],
+    sites: Array.isArray(parsed?.sites) ? parsed.sites : [],
+    steps: Array.isArray(parsed?.steps) && parsed.steps.length > 0 ? parsed.steps : fallbackSteps,
+    risk: parsed?.risk || '',
+    text: raw
+  };
+}
+
+async function streamHandleMessage({ message, history, images, image, mode, translateConfig, model, contextCharBudget, systemPrompt, memoryContext, sessionId, skipTools, planMode, planApproved, approvedPlan }, port) {
+  if (planMode && !planApproved) {
+    const plan = await generateAgentPlan({ message, history, model, systemPrompt, memoryContext });
+    port.postMessage({ type: 'plan_required', plan });
+    return;
+  }
+  const planPrompt = planApproved && approvedPlan
+    ? `${systemPrompt || ''}\n\n[已批准的執行計畫]\n${approvedPlan}`.trim()
+    : systemPrompt;
   const fileList = images && images.length > 0
     ? images
     : (image ? [{ dataUrl: image, mode: mode || 'upload', fileType: 'image' }] : null);
 
   if (!fileList || fileList.length === 0) {
     if (skipTools || translateConfig?.enabled) {
-      await streamMiniMaxChat(message, history, translateConfig, model, systemPrompt, memoryContext, port, sessionId, contextCharBudget);
+      await streamMiniMaxChat(message, history, translateConfig, model, planPrompt, memoryContext, port, sessionId, contextCharBudget);
     } else {
-      await streamAgentChat(message, history, translateConfig, model, systemPrompt, memoryContext, port, sessionId, contextCharBudget);
+      await streamAgentChat(message, history, translateConfig, model, planPrompt, memoryContext, port, sessionId, contextCharBudget);
     }
     return;
   }
@@ -909,7 +981,7 @@ async function streamHandleMessage({ message, history, images, image, mode, tran
 
     if (imageFiles.length === 0 && pdfFiles.length > 0 && pdfRoute === 'openrouter-pdf') {
       try {
-        await streamOpenRouterPdfChat(message, history, textFiles, pdfFiles, translateConfig, model, systemPrompt, memoryContext, port, sessionId, contextCharBudget);
+        await streamOpenRouterPdfChat(message, history, textFiles, pdfFiles, translateConfig, model, planPrompt, memoryContext, port, sessionId, contextCharBudget);
         return;
       } catch (err) {
         const fileNames = formatFileNames(pdfFiles);
@@ -970,12 +1042,12 @@ async function streamHandleMessage({ message, history, images, image, mode, tran
       const userQ = combinedMessage ? `\n\n使用者問題：${combinedMessage}` : '';
       minimaxPrompt = `以下是圖片分析結果：\n\n${geminiResult}${userQ}\n\n請根據以上分析，提供清晰、有條理的回應。`;
     }
-    await streamMiniMaxChat(minimaxPrompt, history, null, model, null, memoryContext, port, sessionId, contextCharBudget);
+    await streamMiniMaxChat(minimaxPrompt, history, null, model, planPrompt, memoryContext, port, sessionId, contextCharBudget);
     return;
   }
 
   // 純文字檔 → 分批分析 + stream 合併
-  await streamTextFilesPipeline(textFiles, message, history, translateConfig, model, systemPrompt, memoryContext, port, contextCharBudget);
+  await streamTextFilesPipeline(textFiles, message, history, translateConfig, model, planPrompt, memoryContext, port, contextCharBudget);
 }
 
 async function streamTextFilesPipeline(textFiles, userMessage, history, translateConfig, model, systemPrompt, memoryContext, port, contextCharBudget) {

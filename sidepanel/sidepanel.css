@@ -1429,6 +1429,91 @@ textarea:disabled {
   color: var(--danger);
 }
 
+.agent-plan-card {
+  margin: 8px 12px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  background: rgba(42, 42, 42, 0.96);
+  color: var(--text-primary);
+  overflow: hidden;
+  animation: fadeIn 0.18s ease;
+}
+
+.agent-plan-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.agent-plan-icon {
+  color: var(--primary);
+  font-size: 14px;
+}
+
+.agent-plan-body {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+}
+
+.agent-plan-section {
+  display: grid;
+  gap: 6px;
+}
+
+.agent-plan-section > span,
+.agent-plan-footnote {
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.agent-plan-section strong {
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.agent-plan-section ol {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding-left: 22px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.agent-plan-actions {
+  display: grid;
+  gap: 8px;
+  padding: 0 12px 10px;
+}
+
+.agent-plan-actions button {
+  height: 36px;
+  border-radius: 7px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.agent-plan-approve {
+  background: #f5f5f0;
+  color: #171717;
+}
+
+.agent-plan-cancel {
+  background: transparent;
+  color: var(--text-primary);
+}
+
+.agent-plan-footnote {
+  padding: 0 12px 12px;
+}
+
 .image-preview {
   margin-bottom: 8px;
 }
@@ -3125,7 +3210,7 @@ mark {
 
 .knowledge-palette {
   position: absolute;
-  bottom: 100%;
+  bottom: calc(100% + 10px);
   left: 0;
   right: 0;
   background: var(--bg-card);
@@ -3134,7 +3219,7 @@ mark {
   overflow-y: auto;
   max-height: 200px;
   z-index: 100;
-  margin-bottom: 4px;
+  margin: 0 10px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
 }
 

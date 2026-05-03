@@ -36,6 +36,7 @@ let customCommands = [];      // 使用者自訂指令
 let pageContext = null;       // 當前分頁內容（/page 指令觸發後）
 let messageQueue = [];       // 串流中排入的待發送訊息 [{ message, images, pageCtx }]
 let cmdPaletteIndex = -1;     // 指令選單鍵盤選取游標
+let activeCommandToken = null; // { start, end, query } 游標前正在輸入的 slash command
 const APPROX_CHARS_PER_TOKEN = 2;
 const DEFAULT_CONTEXT_TOKENS = 20000;
 const MODEL_CONTEXT_LIMITS = {
@@ -702,8 +703,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (active) {
           const trigger = active.querySelector('.command-item-trigger')?.textContent;
           const cmd = getAllCommands().find(c => c.trigger === trigger);
-          const query = messageInput.value;
-          if (cmd) applyCommand(cmd, query);
+          if (cmd) applyCommand(cmd);
           return;
         }
       }
@@ -2261,6 +2261,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   async function handleSend() {
     // 有待執行指令時，用輸入框文字作為 args 執行
     let commandDisplayLabel = null;
+    let planModeForSend = false;
     if (pendingCommand) {
       const { cmd } = pendingCommand;
       const args = messageInput.value.trim();
@@ -2268,7 +2269,15 @@ document.addEventListener('DOMContentLoaded', async () => {
       messageInput.value = '';
       messageInput.style.height = 'auto';
       updateSendButton();
-      if (cmd.type === 'template') {
+      if (cmd.trigger === '/plan') {
+        if (!args && !pageContext && !currentImages.length) { messageInput.focus(); return; }
+        planModeForSend = true;
+        commandDisplayLabel = cmd.name + (args ? ` · ${args}` : '');
+        messageInput.value = args;
+        messageInput.style.height = 'auto';
+        messageInput.style.height = Math.min(messageInput.scrollHeight, 120) + 'px';
+        updateSendButton();
+      } else if (cmd.type === 'template') {
         const filled = cmd.template.replace('{input}', args);
         if (!filled.trim()) { messageInput.focus(); return; }
         // 記錄縮減顯示標籤
@@ -2284,7 +2293,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
     }
 
-    const message = messageInput.value.trim();
+    let message = messageInput.value.trim();
     if (!message && !currentImages.length && !pageContext) return;
 
     // 串流中：入佇列，等待當前回覆完成後自動送出
@@ -2318,11 +2327,21 @@ document.addEventListener('DOMContentLoaded', async () => {
       const matchedCmd = allCmds.find(c => message === c.trigger || message.startsWith(c.trigger + ' '));
       if (matchedCmd) {
         const args = message.slice(matchedCmd.trigger.length).trim();
-        messageInput.value = '';
-        messageInput.style.height = 'auto';
-        updateSendButton();
-        executeAction(matchedCmd.trigger, args);
-        return;
+        if (matchedCmd.trigger === '/plan') {
+          if (!args && !pageContext && !currentImages.length) { messageInput.value = ''; updateSendButton(); messageInput.focus(); return; }
+          planModeForSend = true;
+          commandDisplayLabel = matchedCmd.name + (args ? ` · ${args}` : '');
+          message = args;
+          messageInput.value = args;
+          messageInput.style.height = 'auto';
+          updateSendButton();
+        } else {
+          messageInput.value = '';
+          messageInput.style.height = 'auto';
+          updateSendButton();
+          executeAction(matchedCmd.trigger, args);
+          return;
+        }
       }
     }
 
@@ -2448,6 +2467,20 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
     }
 
+    const requestData = {
+      message: augmentedMessage,
+      history: historyForApi,
+      images: snapshotImages,
+      translateConfig,
+      model: currentModel,
+      contextCharBudget: getCurrentContextCharBudget(),
+      systemPrompt,
+      memoryContext,
+      sessionId: currentSession?.id,
+      skipTools,
+      planMode: planModeForSend
+    };
+
     port.onMessage.addListener(async (msg) => {
       if (msg.type === 'status') {
         setStatus(msg.text);
@@ -2486,6 +2519,18 @@ document.addEventListener('DOMContentLoaded', async () => {
           _agentSearchLog[_agentSearchLog.length - 1].count = msg.count;
           _agentSearchLog[_agentSearchLog.length - 1].error = msg.error || null;
         }
+        return;
+      }
+      if (msg.type === 'plan_required') {
+        liveDiv.remove();
+        clearAgentStatus();
+        _agentSearchLog = [];
+        _agentNotices = [];
+        clearStatus();
+        resetLoading();
+        port.disconnect();
+        chatMessages.appendChild(buildPlanApprovalEl(msg.plan, requestData));
+        scrollToBottom();
         return;
       }
       if (msg.type === 'chunk') {
@@ -2589,21 +2634,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       resetLoading();
     });
 
-    port.postMessage({
-      type: 'STREAM_MESSAGE',
-      data: {
-        message: augmentedMessage,
-        history: historyForApi,
-        images: snapshotImages,
-        translateConfig,
-        model: currentModel,
-        contextCharBudget: getCurrentContextCharBudget(),
-        systemPrompt,
-        memoryContext,
-        sessionId: currentSession?.id,
-        skipTools
-      }
-    });
+    port.postMessage({ type: 'STREAM_MESSAGE', data: requestData });
   }
 
   function createLiveMessageDiv() {
@@ -2764,6 +2795,151 @@ document.addEventListener('DOMContentLoaded', async () => {
       return `<div class="agent-notice agent-notice-${level}">${escapeHtml(n.text)}</div>`;
     }).join('');
     return div;
+  }
+
+  function buildPlanApprovalEl(plan, requestData) {
+    const steps = Array.isArray(plan?.steps) && plan.steps.length > 0
+      ? plan.steps
+      : String(plan?.text || '').split(/\n+/).map(s => s.replace(/^\d+[\).\s-]*/, '').trim()).filter(Boolean).slice(0, 6);
+    const tools = Array.isArray(plan?.tools) && plan.tools.length > 0 ? plan.tools : ['既有 Agent 工具'];
+    const sites = Array.isArray(plan?.sites) && plan.sites.length > 0 ? plan.sites : [];
+    const card = document.createElement('div');
+    card.className = 'agent-plan-card';
+    card.innerHTML = `
+      <div class="agent-plan-header">
+        <span class="agent-plan-icon">☷</span>
+        <span>計畫模式</span>
+      </div>
+      <div class="agent-plan-body">
+        ${sites.length ? `<div class="agent-plan-section"><span>允許存取</span><strong>${sites.map(escapeHtml).join('、')}</strong></div>` : ''}
+        <div class="agent-plan-section"><span>可用工具</span><strong>${tools.map(escapeHtml).join('、')}</strong></div>
+        <div class="agent-plan-section">
+          <span>執行步驟</span>
+          <ol>${steps.map(step => `<li>${escapeHtml(step)}</li>`).join('')}</ol>
+        </div>
+      </div>
+      <div class="agent-plan-actions">
+        <button type="button" class="agent-plan-approve">Approve plan</button>
+        <button type="button" class="agent-plan-cancel">Make changes</button>
+      </div>
+      <div class="agent-plan-footnote">批准後才會執行工具。高風險 API / SSH 工具未啟用。</div>
+    `;
+    card.querySelector('.agent-plan-approve').addEventListener('click', () => {
+      card.remove();
+      runApprovedPlan(requestData, plan);
+    });
+    card.querySelector('.agent-plan-cancel').addEventListener('click', () => {
+      card.remove();
+      messageInput.focus();
+    });
+    return card;
+  }
+
+  function runApprovedPlan(requestData, plan) {
+    if (isLoading) return;
+    isLoading = true;
+    typingIndicator.classList.add('hidden');
+    emptyState.classList.add('hidden');
+    clearStatus();
+    _agentSearchLog = [];
+    _agentNotices = [];
+
+    const liveDiv = createLiveMessageDiv();
+    currentLiveDiv = liveDiv;
+    currentRawContent = '';
+    let rawContent = '';
+    const port = chrome.runtime.connect({ name: 'chat-stream' });
+    currentPort = port;
+    setStreamingMode(true);
+
+    function resetApprovedLoading() {
+      isLoading = false;
+      currentPort = null;
+      currentLiveDiv = null;
+      currentRawContent = '';
+      setStreamingMode(false);
+      messageInput.focus();
+    }
+
+    port.onMessage.addListener(async (msg) => {
+      if (msg.type === 'status') { setStatus(msg.text); return; }
+      if (msg.type === 'agent_notice') {
+        const notice = { text: msg.text || '', level: msg.level === 'warning' || msg.level === 'error' ? msg.level : 'info' };
+        if (notice.text) _agentNotices.push(notice);
+        return;
+      }
+      if (msg.type === 'agent_thinking') {
+        _agentIter = msg.iter;
+        if (!agentStatusEl) startAgentStatus();
+        updateAgentStatus(`第 ${msg.iter} 輪，AI 分析中...`);
+        return;
+      }
+      if (msg.type === 'tool_start') {
+        const label = msg.tool === 'deep_search' ? '🔎 深度搜尋' : '🔍 搜尋網路';
+        updateAgentStatus(`第 ${_agentIter} 輪 · ${label}：${msg.query}`);
+        _agentSearchLog.push({ tool: msg.tool, query: msg.query, count: null });
+        return;
+      }
+      if (msg.type === 'tool_done') {
+        updateAgentStatus(msg.error ? `第 ${_agentIter} 輪，工具失敗，改用補救流程...` : `第 ${_agentIter} 輪，AI 分析結果中...`);
+        if (_agentSearchLog.length > 0) {
+          _agentSearchLog[_agentSearchLog.length - 1].count = msg.count;
+          _agentSearchLog[_agentSearchLog.length - 1].error = msg.error || null;
+        }
+        return;
+      }
+      if (msg.type === 'chunk') {
+        rawContent = msg.full;
+        currentRawContent = rawContent;
+        updateLiveMessageContent(liveDiv, rawContent);
+        scrollToBottom();
+        return;
+      }
+      if (msg.type === 'done') {
+        const reply = msg.reply;
+        const savedSearchLog = _agentSearchLog.length > 0 ? [..._agentSearchLog] : null;
+        const savedAgentNotices = _agentNotices.length > 0 ? [..._agentNotices] : null;
+        currentSession.messages.push({ role: 'assistant', content: reply, ...(savedSearchLog && { searchLog: savedSearchLog }) });
+        if (savedAgentNotices) liveDiv.parentNode.insertBefore(buildAgentNoticeEl(savedAgentNotices), liveDiv);
+        if (savedSearchLog) liveDiv.parentNode.insertBefore(buildSearchHistoryEl(savedSearchLog), liveDiv);
+        finalizeLiveMessage(liveDiv, rawContent || reply, reply, undefined, null);
+        clearAgentStatus();
+        _agentSearchLog = [];
+        _agentNotices = [];
+        clearStatus();
+        port.disconnect();
+        resetApprovedLoading();
+        await saveCurrentSession();
+        await loadHistory();
+        updateCharCounter();
+        return;
+      }
+      if (msg.type === 'error') {
+        liveDiv.remove();
+        addMessage(`錯誤: ${msg.message}`, 'error');
+        clearAgentStatus();
+        clearStatus();
+        port.disconnect();
+        resetApprovedLoading();
+      }
+    });
+
+    port.onDisconnect.addListener(() => {
+      if (!isLoading) return;
+      liveDiv.remove();
+      clearAgentStatus();
+      resetApprovedLoading();
+    });
+
+    port.postMessage({
+      type: 'STREAM_MESSAGE',
+      data: {
+        ...requestData,
+        planMode: true,
+        planApproved: true,
+        approvedPlan: plan?.text || ''
+      }
+    });
   }
 
   // 將流程結果寫入 chat 末端（非短暫底部提示）
@@ -3070,6 +3246,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const BUILTIN_COMMANDS = [
     { trigger: '/page',      name: '讀取當前頁面',       type: 'action', icon: '📄' },
     { trigger: '/page-code', name: '分析頁面原始碼/樣式', type: 'action', icon: '🔬', argHint: '/page-code <問題（可選）>' },
+    { trigger: '/plan',      name: '計畫模式',    type: 'action', icon: '☷', argHint: '/plan <任務>' },
     { trigger: '/clear',    name: '清空對話',    type: 'action', icon: '🗑️' },
     { trigger: '/new',      name: '新對話',      type: 'action', icon: '➕' },
     { trigger: '/remember', name: '記住某件事',  type: 'action', icon: '🧠', argHint: '/remember <內容>' },
@@ -3098,17 +3275,30 @@ document.addEventListener('DOMContentLoaded', async () => {
     return [...BUILTIN_COMMANDS, ...customCommands.map(c => ({ ...c, isCustom: true }))];
   }
 
-  function handleCommandPaletteInput() {
-    const val = messageInput.value;
-    if (!val.startsWith('/')) { hideCommandPalette(); return; }
-    const query = val.toLowerCase();
-    const all = getAllCommands();
-    const filtered = all.filter(c => c.trigger.startsWith(query) || c.name.includes(val.slice(1)));
-    if (filtered.length === 0) { hideCommandPalette(); return; }
-    showCommandPaletteItems(filtered, val);
+  function getActiveSlashCommandToken() {
+    const value = messageInput.value;
+    const cursor = messageInput.selectionStart ?? value.length;
+    const before = value.slice(0, cursor);
+    const match = before.match(/(^|\s)(\/[^\s/]*)$/);
+    if (!match) return null;
+    const slash = match[2];
+    const start = cursor - slash.length;
+    return { start, end: cursor, query: slash };
   }
 
-  function showCommandPaletteItems(items, query) {
+  function handleCommandPaletteInput() {
+    const token = getActiveSlashCommandToken();
+    activeCommandToken = token;
+    if (!token) { hideCommandPalette(); return; }
+    const query = token.query.toLowerCase();
+    const all = getAllCommands();
+    const keyword = token.query.slice(1);
+    const filtered = all.filter(c => c.trigger.startsWith(query) || c.name.toLowerCase().includes(keyword.toLowerCase()));
+    if (filtered.length === 0) { hideCommandPalette(); return; }
+    showCommandPaletteItems(filtered);
+  }
+
+  function showCommandPaletteItems(items) {
     commandPalette.innerHTML = '';
     cmdPaletteIndex = 0;
     items.forEach((cmd, idx) => {
@@ -3119,7 +3309,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         <span class="command-item-name">${escapeHtml(cmd.name)}</span>
         <span class="command-item-type">${cmd.type === 'template' ? '模板' : '動作'}</span>
       `;
-      div.addEventListener('click', () => applyCommand(cmd, query));
+      div.addEventListener('click', () => applyCommand(cmd));
       commandPalette.appendChild(div);
     });
     commandPalette.classList.remove('hidden');
@@ -3139,18 +3329,26 @@ document.addEventListener('DOMContentLoaded', async () => {
     commandPalette.classList.add('hidden');
     commandPalette.innerHTML = '';
     cmdPaletteIndex = -1;
+    activeCommandToken = null;
   }
 
-  function applyCommand(cmd, inputVal, tabComplete = false) {
+  function applyCommand(cmd) {
+    const token = activeCommandToken || getActiveSlashCommandToken();
     hideCommandPalette();
-    const args = inputVal.slice(cmd.trigger.length).trim();
+    if (!token) return;
+    const before = messageInput.value.slice(0, token.start);
+    const after = messageInput.value.slice(token.end);
+    const args = after.trim();
     if ((cmd.trigger === '/page' || cmd.trigger === '/page-code') && !args) {
-      messageInput.value = '';
+      messageInput.value = `${before}${after.replace(/^\s+/, '')}`;
       messageInput.style.height = 'auto';
+      messageInput.selectionStart = messageInput.selectionEnd = before.length;
       updateSendButton();
       executeAction(cmd.trigger, args);
       return;
     }
+    messageInput.value = `${before}${after.replace(/^\s+/, '')}`;
+    messageInput.selectionStart = messageInput.selectionEnd = before.length;
     showCommandChip(cmd, args);
   }
 
@@ -3158,8 +3356,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     pendingCommand = { cmd };
     commandChipLabel.textContent = cmd.name + (prefillArgs ? ` · ${prefillArgs}` : '');
     commandChip.classList.remove('hidden');
-    // 把 prefillArgs 填入輸入框讓使用者繼續編輯（template 以外的補充文字）
-    messageInput.value = prefillArgs;
+    if (prefillArgs) messageInput.value = prefillArgs;
     messageInput.style.height = 'auto';
     messageInput.style.height = Math.min(messageInput.scrollHeight, 120) + 'px';
     updateSendButton();
