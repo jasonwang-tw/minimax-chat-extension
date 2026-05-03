@@ -179,6 +179,308 @@
 
 ---
 
+## 開發優先度項目詳細說明
+
+### 🔴 P0 — AI Agent Loop 基礎建設
+
+讓模型不只是一次性回答，而是可以在回答前自行判斷是否需要使用工具、呼叫工具、讀取工具結果，再整合成最終答案。
+
+主要工作：
+- 維護 `streamAgentChat()` 的多輪 tool loop。
+- 統一 `tool_start` / `tool_done` / `agent_notice` 前後端事件格式。
+- 支援 OpenRouter tool calling 與 MiniMax XML tool call 兩種格式。
+- 確保 tool use 失敗時能 fallback 到一般 streaming。
+
+完成標準：
+- AI 可以穩定自行調用 `web_search` / `deep_search`。
+- 搜尋歷程可在 UI 中追蹤。
+- 工具失敗不會中斷整個對話。
+
+### 🔴 P0 — MiniMax 圖像生成
+
+把 MiniMax Image API 接進聊天側邊欄，讓使用者可以用文字直接生成圖片，或讓 AI 在合適場景自行調用圖片生成 tool。
+
+主要工作：
+- 新增 `/image <描述>` 指令。
+- 建立 `generate_image` tool。
+- 支援尺寸、比例、張數等參數。
+- 將生成結果以附件形式顯示在聊天訊息中。
+
+完成標準：
+- 使用者能在側邊欄輸入 prompt 並取得圖片。
+- 圖片可預覽、放大、下載或複製。
+- API 錯誤有清楚提示。
+
+### 🟠 P1 — AI 設定 & 記憶工具
+
+讓 AI 可以在受控白名單內讀取或修改使用者設定，並主動儲存長期記憶。這不是讓 AI 任意修改所有設定，而是只開放低風險、可回復的項目。
+
+主要工作：
+- 新增 `get_setting(key)` tool。
+- 新增 `set_setting(key, value)` tool。
+- 新增 `save_memory(title, summary, tags)` tool。
+- 建立設定白名單，例如模型、語言、global prompt、default prompts。
+- 禁止 AI 讀取或修改 API key、同步 token、授權資訊。
+
+完成標準：
+- AI 可以根據對話幫使用者調整非敏感設定。
+- AI 可以把明確偏好保存成長期記憶。
+- 所有設定修改都有 UI 提示或確認流程。
+
+### 🟠 P1 — Plan Approval / 計畫模式
+
+在 AI 執行工具前先產生計畫，讓使用者確認工具、站點、步驟與風險後才允許執行。這是 API/SSH 等高風險工具的前置安全機制。
+
+主要工作：
+- 完善 `/plan <task>`。
+- 新增 `off / auto / always` 計畫模式設定。
+- Plan card 顯示工具、站點、步驟、風險、批准/取消狀態。
+- `Make changes` 支援把計畫帶回輸入框修改。
+- 將批准紀錄寫入 session，方便回溯。
+
+完成標準：
+- 使用者可以在執行前看懂 AI 準備做什麼。
+- 未批准前不會執行高風險工具。
+- 批准後能沿用同一份原始 request 繼續執行。
+
+### 🟠 P1 — API Tool Registry
+
+建立一套可管理的 HTTP API 工具系統，讓 AI 能在受控條件下呼叫外部 API。這會作為 WordPress、第三方 SaaS、內部服務整合的基礎。
+
+主要工作：
+- 定義 tool registry schema：name、description、parameters、risk、auth、host allowlist。
+- 支援 read-only API tool，例如 GET 查詢資料。
+- 支援 write API tool，但必須強制 Plan Approval。
+- 管理 API key / Bearer token / custom headers。
+- 限制 response 大小，避免 context 爆量。
+
+完成標準：
+- 可以新增一個 API tool 並讓 AI 調用。
+- secret 不會暴露給模型。
+- API 寫入類操作一定需要使用者批准。
+
+### 🟠 P1 — SSH / Server Tool
+
+讓 AI 可以透過受控橋接方式操作伺服器任務，例如清快取、查容量、列排程。Chrome extension 不能直接 SSH，所以需要 Native Messaging 或後端 proxy。
+
+主要工作：
+- 評估 Native Messaging host 與 server-side proxy。
+- 定義 SSH command template，而不是讓模型輸入任意 shell。
+- 建立 host allowlist 與命令白名單。
+- 所有 SSH tool 強制走 Plan Approval。
+- 記錄執行審計：主機、工具、參數、時間、結果摘要。
+
+完成標準：
+- AI 只能執行預先允許的伺服器任務。
+- 使用者能在執行前看到目標主機與操作內容。
+- 任務執行結果會回傳到聊天並留存摘要。
+
+### 🟠 P1 — MiniMax TTS 升級
+
+用 MiniMax TTS 取代目前 Google TTS fallback，提供更自然的語音與更多聲音設定。
+
+主要工作：
+- 新增 MiniMax TTS API 設定。
+- 建立聲音選擇 UI。
+- 支援訊息朗讀、語言判斷、錯誤 fallback。
+- 評估串流 TTS 以降低首字延遲。
+
+完成標準：
+- 使用者可以選擇聲音。
+- 點訊息朗讀可使用 MiniMax TTS。
+- API 不可用時仍有合理 fallback。
+
+### 🟠 P1 — System Prompt 壓縮
+
+避免 global prompt、default prompts、memory context 過長，佔用模型 context window，導致對話歷史或使用者輸入被過早裁切。
+
+主要工作：
+- 監控 system prompt / memory context 長度。
+- 超過門檻時進行摘要壓縮。
+- 顯示目前 system prompt 佔用量。
+- 讓壓縮結果可檢視或重建。
+
+完成標準：
+- 長期使用後不會因 system prompt 膨脹導致 context 不足。
+- 使用者能知道 context 主要被哪些區塊佔用。
+
+### 🟡 P2 — 任務腳本（Task Script）
+
+讓使用者預先定義多步驟任務流程，AI 可按步驟執行，適合長任務、固定 SOP、內容生產流程。
+
+主要工作：
+- 定義 script schema：name、steps、tools、success criteria。
+- 新增 `run_script(name)` tool。
+- 建立腳本管理 UI。
+- 內建常用模板，例如文章生成、頁面分析、code review。
+
+完成標準：
+- 使用者可以建立、編輯、執行一個多步驟腳本。
+- AI 能逐步回報進度與結果。
+
+### 🟡 P2 — 筆記工具（MD Notes）
+
+提供簡單 Markdown 筆記系統，讓 AI 和使用者可以寫入、讀取、列出筆記，作為長任務的中間成果保存。
+
+主要工作：
+- 新增 `write_note(filename, content)`。
+- 新增 `read_note(filename)`。
+- 新增 `list_notes()`。
+- 建立筆記列表與預覽 UI。
+
+完成標準：
+- AI 可以把研究結果或草稿保存成 Markdown。
+- 使用者可以在側邊欄檢視與複用筆記。
+
+### 🟡 P2 — Spaces 多空間
+
+建立多個獨立工作空間，讓不同任務有不同對話 context，例如規劃、執行、筆記分開管理。
+
+主要工作：
+- tab-based space 切換。
+- 每個 space 有獨立 session/context。
+- 長期記憶可跨 space 共用。
+- 支援 space 命名、刪除、排序。
+
+完成標準：
+- 使用者可以把不同任務隔離在不同 space。
+- 切換 space 不會混用聊天歷史。
+
+### 🟡 P2 — 部落格助手
+
+把 jasonsbase-blog 的文章工作流實裝到側邊欄，支援選題、研究、問答、生成、預覽與 WordPress 發布。
+
+主要工作：
+- 新增 `/blog` 入口。
+- 支援多種文章模式。
+- 接 WordPress REST API 建立/讀取/更新文章。
+- 產生 Markdown 或 HTML 預覽。
+- 發布前使用者確認。
+
+完成標準：
+- 可以從側邊欄完成一篇文章從規劃到發布的流程。
+- WordPress API 寫入前有明確確認。
+
+### 🟢 P3 — MiniMax 影片生成
+
+接入 MiniMax Video API，支援文字生成影片。因為影片通常是非同步任務，所以優先度低於圖片。
+
+主要工作：
+- `/video <描述>` 指令。
+- 任務建立、狀態輪詢、完成通知。
+- 顯示影片預覽或下載連結。
+
+完成標準：
+- 使用者能建立影片任務並看到完成結果。
+
+### 🟢 P3 — Skill 執行工具
+
+讓 AI 可以調用預先定義的技能流程，例如部落格寫作、頁面分析、翻譯保存等。
+
+主要工作：
+- 定義 skill schema。
+- 新增 `run_skill(name, params)` tool。
+- 建立內建 skill 清單。
+- 與 Task Script 或 Plan Approval 整合。
+
+完成標準：
+- AI 能根據任務選擇合適 skill。
+- skill 執行過程可追蹤與取消。
+
+### 🟢 P3 — 財經功能
+
+提供股票、台股、新聞等查詢能力，可能接 API 或搜尋工具。
+
+主要工作：
+- `/stock`、`/twstock`、`/news` 指令。
+- 接資料來源 API 或搜尋 fallback。
+- 顯示報價、新聞、摘要與來源。
+
+完成標準：
+- 使用者可以查詢基本財經資訊。
+- 回答包含資料來源與時間。
+
+### 🔵 P4 — MiniMax 音樂生成
+
+接入 MiniMax Music API，支援文字生成音樂或歌詞音樂。使用頻率較低，放在後期。
+
+主要工作：
+- `/music <描述>` 指令。
+- 支援純音樂與含歌詞模式。
+- 任務狀態追蹤與結果播放。
+
+完成標準：
+- 使用者能從 prompt 生成可播放音訊。
+
+### 🔵 P4 — 自動化 Gmail Digest
+
+定時整理 Gmail 摘要，例如每日摘要、重要郵件提醒。需要處理 Google OAuth 與排程。
+
+主要工作：
+- chrome.identity OAuth。
+- chrome.alarms 排程。
+- 郵件摘要與分類。
+- 使用者確認後才執行標記、封存等動作。
+
+完成標準：
+- 使用者能定時收到 Gmail 摘要。
+- 不會在未確認下改動郵件狀態。
+
+### 🔵 P4 — Token lifecycle policy
+
+定義 WordPress sync token 的生命週期，包括過期、輪替、撤銷與清理。
+
+主要工作：
+- token expiration。
+- token rotation。
+- revoked token cleanup。
+- admin UI 顯示狀態。
+
+完成標準：
+- token 不會永久有效。
+- 管理員可檢視與清除舊 token。
+
+### 🔵 P4 — Encrypted backup
+
+讓備份資料在上傳 WordPress 或雲端前加密，降低資料外洩風險。
+
+主要工作：
+- 設計加密 key 來源。
+- 加密/解密備份 payload。
+- 錯誤恢復與 key 遺失提示。
+
+完成標準：
+- 伺服器端不能直接讀取備份內容。
+- 使用者仍能可靠還原。
+
+### 🔵 P4 — Backup version history
+
+保留多個備份版本，讓使用者可以回復到較早狀態。
+
+主要工作：
+- WordPress sync 儲存多版本紀錄。
+- 前端顯示版本列表。
+- 支援選擇版本還原。
+- 設定保留數量與自動清理。
+
+完成標準：
+- 使用者可以看到歷史備份並指定版本還原。
+
+### 🔵 P4 — PHP lint/test
+
+補上 WordPress sync plugin 的 PHP 語法與基礎測試流程。
+
+主要工作：
+- PHP lint。
+- WordPress coding/security 檢查。
+- REST endpoint smoke test。
+- CI 或本機測試指令文件化。
+
+完成標準：
+- 修改 WordPress plugin 後能快速驗證語法與主要 REST 流程。
+
+---
+
 ## 🔴 P0 — AI Agent Tool Use（AI 自主工具調用）
 
 讓 AI 能在對話中自行決定調用工具，實現真正的 Agent 行為。其他 Agent 功能均依賴此基礎。
