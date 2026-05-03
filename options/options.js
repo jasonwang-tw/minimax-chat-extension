@@ -28,6 +28,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const testBtn = document.getElementById('testBtn');
   const testGeminiBtn = document.getElementById('testGeminiBtn');
   const maxHistorySelect = document.getElementById('maxHistory');
+  const planModeSelect = document.getElementById('planModeSelect');
   const saveConversationBtn = document.getElementById('saveConversationBtn');
   const usageRangeSelect = document.getElementById('usageRange');
   const refreshPricingBtn = document.getElementById('refreshPricingBtn');
@@ -148,7 +149,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   saveConversationBtn?.addEventListener('click', async () => {
     await chrome.storage.sync.set({
       settings: {
-        maxHistory: parseInt(maxHistorySelect.value, 10)
+        maxHistory: parseInt(maxHistorySelect.value, 10),
+        planMode: planModeSelect.value
       }
     });
     showMessage('對話設定已儲存', 'success');
@@ -400,6 +402,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     braveApiKeyInput.value = braveApiKey || '';
     exaApiKeyInput.value = exaApiKey || '';
     maxHistorySelect.value = String(settings?.maxHistory || 50);
+    planModeSelect.value = settings?.planMode || 'auto';
     openrouterApiKeyInput.value = openrouterApiKey || '';
   }
 

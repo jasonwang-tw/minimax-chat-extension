@@ -4234,3 +4234,40 @@ mark.search-keyword-current {
   padding: 28px 16px;
   line-height: 1.8;
 }
+
+/* Plan risk badge */
+.plan-risk-badge { padding: 1px 7px; border-radius: 10px; font-size: 11px; }
+.plan-risk-low { background: #d4edda; color: #155724; }
+.plan-risk-medium { background: #fff3cd; color: #856404; }
+.plan-risk-high { background: #f8d7da; color: #721c24; }
+
+/* Plan history record */
+.plan-history-record {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  margin: 4px 0;
+  border-radius: 8px;
+  font-size: 12px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-card);
+  color: var(--text-secondary);
+}
+.plan-history-approved {
+  border-color: #28a745;
+  color: #6fcf97;
+}
+.plan-history-cancelled {
+  border-color: #dc3545;
+  color: #eb5757;
+  opacity: 0.7;
+}
+.plan-history-icon { flex-shrink: 0; }
+.plan-history-summary {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.plan-history-status { flex-shrink: 0; font-weight: 600; }

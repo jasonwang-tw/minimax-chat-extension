@@ -219,6 +219,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   let sessions = [];
   let currentSession = null;
   let isLoading = false;
+  let planModeSetting = 'auto';
+  let _currentPlanRecordIndex = -1;
   let pendingCommand = null; // { cmd, icon } — 選取但尚未送出的指令
   let translateEnabled = false;
   let batchSelectMode = false;
@@ -545,11 +547,20 @@ document.addEventListener('DOMContentLoaded', async () => {
   // 檢查 API Key
   await checkApiKey();
 
+  // 載入計畫模式設定
+  {
+    const { settings: _initSettings } = await chrome.storage.sync.get(['settings']);
+    planModeSetting = _initSettings?.planMode || 'auto';
+  }
+
   chrome.storage.onChanged.addListener((changes, area) => {
     // sync area：API Key、設定、長期記憶、分類（跨裝置同步的資料）
     if (area === 'sync') {
       if (changes.geminiApiKey || changes.apiKey) {
         checkApiKey();
+      }
+      if (changes.settings) {
+        planModeSetting = changes.settings.newValue?.planMode || 'auto';
       }
       // customCommands 已移至 local storage，不在此監聽
       // 右鍵選單從 background 寫入 sync，sidepanel 透過此監聽同步
@@ -2243,6 +2254,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     updateCharCounter();
 
     currentSession.messages.forEach(msg => {
+      // 計畫歷程卡
+      if (msg.role === 'plan') {
+        const statusLabel = msg.status === 'approved' ? '✓ 已批准' : msg.status === 'cancelled' ? '✗ 已取消' : '⏳ 待處理';
+        const statusClass = msg.status === 'approved' ? 'approved' : msg.status === 'cancelled' ? 'cancelled' : 'pending';
+        const div = document.createElement('div');
+        div.className = `plan-history-record plan-history-${statusClass}`;
+        div.innerHTML = `<span class="plan-history-icon">☷</span><span class="plan-history-summary">${escapeHtml(msg.summary || msg.originalMessage || '計畫')}</span><span class="plan-history-status">${statusLabel}</span>`;
+        chatMessages.appendChild(div);
+        return;
+      }
       // 歷史訊息不知道當時語言設定，用內容自動偵測
       const ttsLang = detectLang(msg.content);
       if (msg.role === 'assistant' && msg.searchLog?.length > 0) {
@@ -2327,6 +2348,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     // 有待執行指令時，用輸入框文字作為 args 執行
     let commandDisplayLabel = null;
     let planModeForSend = false;
+    // 強制計畫模式：每次發送都需批准
+    if (planModeSetting === 'always' && !planModeForSend && !programmaticMessage) {
+      planModeForSend = true;
+    }
     const pendingWasSet = !!pendingCommand;
     if (!programmaticMessage && pendingCommand) {
       const { cmd } = pendingCommand;
@@ -2587,6 +2612,11 @@ document.addEventListener('DOMContentLoaded', async () => {
       } else {
         messageInput.focus();
       }
+    }
+
+    // 若計畫模式設為關閉，強制 reset（不觸發計畫批准流程）
+    if (planModeSetting === 'off') {
+      planModeForSend = false;
     }
 
     const requestData = {
@@ -2995,6 +3025,27 @@ document.addEventListener('DOMContentLoaded', async () => {
       : String(plan?.text || '').split(/\n+/).map(s => s.replace(/^\d+[\).\s-]*/, '').trim()).filter(Boolean).slice(0, 6);
     const tools = Array.isArray(plan?.tools) && plan.tools.length > 0 ? plan.tools : ['既有 Agent 工具'];
     const sites = Array.isArray(plan?.sites) && plan.sites.length > 0 ? plan.sites : [];
+
+    // 計畫持久化：寫入 session（pending 狀態）
+    if (currentSession) {
+      const planRecord = {
+        role: 'plan',
+        status: 'pending',
+        summary: plan?.summary || '',
+        tools: plan?.tools || [],
+        risk: plan?.risk || '',
+        originalMessage: requestData?.message || ''
+      };
+      currentSession.messages.push(planRecord);
+      _currentPlanRecordIndex = currentSession.messages.length - 1;
+      saveCurrentSession();
+    }
+
+    // 風險等級
+    const riskText = plan?.risk || '';
+    const riskLevel = /高/.test(riskText) ? 'high' : /中/.test(riskText) ? 'medium' : 'low';
+    const riskLabel = { high: '高風險', medium: '中風險', low: '低風險' }[riskLevel];
+
     const card = document.createElement('div');
     card.className = 'agent-plan-card';
     card.innerHTML = `
@@ -3005,6 +3056,10 @@ document.addEventListener('DOMContentLoaded', async () => {
       <div class="agent-plan-body">
         ${sites.length ? `<div class="agent-plan-section"><span>允許存取</span><strong>${sites.map(escapeHtml).join('、')}</strong></div>` : ''}
         <div class="agent-plan-section"><span>可用工具</span><strong>${tools.map(escapeHtml).join('、')}</strong></div>
+        <div class="agent-plan-section">
+          <span>風險等級</span>
+          <strong class="plan-risk-badge plan-risk-${riskLevel}">${riskLabel}${riskText && riskText !== riskLabel ? ` — ${escapeHtml(riskText)}` : ''}</strong>
+        </div>
         <div class="agent-plan-section">
           <span>執行步驟</span>
           <ol>${steps.map(step => `<li>${escapeHtml(step)}</li>`).join('')}</ol>
@@ -3017,11 +3072,34 @@ document.addEventListener('DOMContentLoaded', async () => {
       <div class="agent-plan-footnote">批准後才會執行工具。高風險 API / SSH 工具未啟用。</div>
     `;
     card.querySelector('.agent-plan-approve').addEventListener('click', () => {
+      // 更新 session 狀態為 approved
+      if (_currentPlanRecordIndex >= 0 && currentSession?.messages[_currentPlanRecordIndex]?.role === 'plan') {
+        currentSession.messages[_currentPlanRecordIndex].status = 'approved';
+        saveCurrentSession();
+        _currentPlanRecordIndex = -1;
+      }
       card.remove();
       runApprovedPlan(requestData, plan);
     });
     card.querySelector('.agent-plan-cancel').addEventListener('click', () => {
+      // 更新 session 狀態為 cancelled
+      if (_currentPlanRecordIndex >= 0 && currentSession?.messages[_currentPlanRecordIndex]?.role === 'plan') {
+        currentSession.messages[_currentPlanRecordIndex].status = 'cancelled';
+        saveCurrentSession();
+        _currentPlanRecordIndex = -1;
+      }
       card.remove();
+      // 把原始任務帶回輸入框，恢復 /plan chip
+      const originalMsg = requestData?.message || '';
+      const planCmd = BUILTIN_COMMANDS.find(c => c.trigger === '/plan');
+      if (planCmd && originalMsg) {
+        showCommandChip(planCmd, originalMsg);
+      } else if (originalMsg) {
+        messageInput.value = originalMsg;
+        messageInput.style.height = 'auto';
+        messageInput.style.height = Math.min(messageInput.scrollHeight, 120) + 'px';
+        updateSendButton();
+      }
       messageInput.focus();
     });
     return card;

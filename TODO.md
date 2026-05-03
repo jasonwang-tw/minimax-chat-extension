@@ -104,14 +104,6 @@
 - Added a unified chat attachment model while preserving legacy `images` / `fileInfos` compatibility.
 - Added OpenRouter image output attachment extraction and chat rendering.
 
-## Done (v1.24.x)
-
-- 瀏覽器自動化 Phase 1：8 個 browser_* Agent Tools（click / fill / select / get_text / get_html / scroll / wait_for / navigate）
-- `executeBrowserTool()` 使用 `chrome.scripting.executeScript` 直接執行 DOM 操作，相容 React/Vue
-- `AGENT_TOOLS_BROWSER` 永遠加入 Agent tools 清單，不依賴搜尋 API Key
-- Agent 狀態列與操作歷程面板新增瀏覽器工具圖示（🖱 ✏️ 🌐 等）
-- `toolDisplayQuery()` helper 讓 tool_start 顯示有意義的 selector / URL / 方向資訊
-
 ## Done (v1.23.x)
 
 - Added dynamic Context window UI:
@@ -138,6 +130,22 @@
   - `Approve plan` continues through existing Agent/tool flow
   - high-risk API/SSH tools intentionally not enabled yet
 
+## Done (v1.25.0)
+
+- Plan Approval 計畫模式補完：
+  - 新增計畫模式設定（off / auto / always），在設定頁「對話設定」區塊可配置
+  - 計畫卡顯示工具風險分級（低/中/高，綠/橘/紅色標示）
+  - 計畫卡狀態（pending / approved / cancelled）寫入 session，切換對話後可追蹤歷程
+  - `Make changes` 按鈕改為把原始任務帶回輸入框並恢復 `/plan` chip，而非單純取消
+
+## Done (v1.24.x)
+
+- 瀏覽器自動化 Phase 1：8 個 browser_* Agent Tools（click / fill / select / get_text / get_html / scroll / wait_for / navigate）
+- `executeBrowserTool()` 使用 `chrome.scripting.executeScript` 直接執行 DOM 操作，相容 React/Vue
+- `AGENT_TOOLS_BROWSER` 永遠加入 Agent tools 清單，不依賴搜尋 API Key
+- Agent 狀態列與操作歷程面板新增瀏覽器工具圖示（🖱 ✏️ 🌐 等）
+- `toolDisplayQuery()` helper 讓 tool_start 顯示有意義的 selector / URL / 方向資訊
+
 ---
 
 ## 待議事項
@@ -152,14 +160,14 @@
 
 | 優先度 | 功能 | 說明 |
 |--------|------|------|
-| 🔴 P0 | AI Agent Loop 基礎建設 | 其他 Agent 功能的前提 |
-| 🔴 P0 | MiniMax 圖像生成 | 高價值、差異化功能 |
+| ✅ Done | AI Agent Loop 基礎建設 | 完成於 v1.19.x |
+| 🔴 P0 | MiniMax 圖像生成 | 需 Plus 方案（$20/月）；高價值差異化功能 |
 | 🟠 P1 | AI 設定 & 記憶工具 | 搭配 Agent Loop |
-| 🟠 P1 | Plan Approval / 計畫模式 | 高風險工具前置審核與批准流程 |
-| 🟠 P1 | 瀏覽器自動化 Phase 1 | Content Script 工具（click / fill / read） |
+| ✅ Done | Plan Approval / 計畫模式 | 完成於 v1.25.0（含 off/auto/always 設定、風險分級、持久化、Make changes 回填） |
+| ✅ Done | 瀏覽器自動化 Phase 1 | 完成於 v1.24.x |
 | 🟠 P1 | API Tool Registry | HTTP API 工具 schema、金鑰、allowlist、read/write 權限 |
 | 🟠 P1 | SSH / Server Tool | Native Messaging 或後端 proxy，強制 Plan Approval |
-| 🟠 P1 | MiniMax TTS 升級 | 現有 Google TTS 直接替換 |
+| 🟠 P1 | MiniMax TTS 升級 | 需 Plus 方案（$20/月）；現有 Google TTS 直接替換 |
 | 🟠 P1 | System Prompt 壓縮 | M2.7 200k token 充分利用 |
 | 🟡 P2 | 瀏覽器自動化 Phase 2 | chrome.debugger CDP（截圖、JS 執行、網路攔截） |
 | 🟡 P2 | 任務腳本（Task Script） | 長任務腳本化，搭配 Agent |
@@ -167,10 +175,10 @@
 | 🟡 P2 | Spaces 多空間 | tab-based 切換，搭配多窗口策略 |
 | 🟡 P2 | 部落格助手 | jasonsbase-blog 實裝 |
 | 🟢 P3 | 瀏覽器自動化 Phase 3 | Native Messaging + Playwright（完整多 tab 自動化） |
-| 🟢 P3 | MiniMax 影片生成 | 非同步任務，複雜度高 |
-| 🟢 P3 | Skill 執行工具 | run_skill，搭配任務腳本 |
+| 🟢 P3 | MiniMax 影片生成 | 需 Max 方案（$50/月）；非同步任務，複雜度高 |
+| 🔵 P4 | Skill 執行工具 | run_skill；Agent Loop + API Tool 已夠用，只有需要「保證固定步驟的可重複流程」時才有額外價值 |
 | 🟢 P3 | 財經功能 | /stock、/twstock、/news |
-| 🔵 P4 | MiniMax 音樂生成 | 較小眾 |
+| 🔵 P4 | MiniMax 音樂生成 | 需 Max 方案（$50/月）；較小眾 |
 | 🔵 P4 | 自動化 Gmail Digest | chrome.alarms + chrome.identity |
 | 🔵 P4 | Token lifecycle policy | expiration / rotation / cleanup |
 | 🔵 P4 | Encrypted backup | 設定備份加密 |
@@ -534,10 +542,10 @@
 - [x] **Plan card UI**：顯示可用工具、允許站點、執行步驟、批准/取消操作
 - [x] **批准後執行**：`Approve plan` 將原始 request 交回既有 Agent/tool 流程
 - [x] **已批准計畫注入**：background 將 approved plan 合入 system prompt，約束後續執行
-- [ ] **計畫模式設定**：新增 `off / auto / always`，讓使用者決定是否強制先批准計畫
-- [ ] **工具風險分級**：`low`（搜尋）/ `medium`（API read）/ `high`（API write、SSH）
-- [ ] **計畫卡持久化**：批准/取消狀態寫入 session，切換對話後仍可追蹤
-- [ ] **計畫修正流程**：`Make changes` 可把計畫帶回輸入框供使用者修改，而非單純取消
+- [x] **計畫模式設定**：新增 `off / auto / always`，讓使用者決定是否強制先批准計畫
+- [x] **工具風險分級**：計畫卡顯示低/中/高風險標示，以顏色區分（綠/橘/紅）
+- [x] **計畫卡持久化**：批准/取消狀態寫入 session，切換對話後可追蹤歷程
+- [x] **計畫修正流程**：`Make changes` 把計畫帶回輸入框並恢復 /plan chip 供修改
 
 ### Phase 3 — 搜尋工具整合（P2）✅ 已完成 v1.19.x
 
@@ -553,7 +561,9 @@
 - [ ] **`list_notes()`**：列出所有筆記
 - [ ] **筆記 UI**：側邊欄筆記列表與預覽
 
-### Phase 5 — Skill 執行工具（P3，選做）
+### Phase 5 — Skill 執行工具（P4，選做）
+
+> **優先度降級（2025-05-03）**：Agent Loop 已可動態決定工具調用順序；API write tool 搭配 Plan Approval 即可安全執行寫入操作，不需要 Skill 工具作為前置。Skill 工具唯一的額外價值是「使用者自訂的保證固定步驟流程」，屬於錦上添花，待 API Tool Registry 完成後再評估是否實作。
 
 - [ ] **`run_skill(name, params)`**：AI 調用預定義 skill（流程化任務）
 - [ ] **Skill 定義格式**：JSON 結構定義每個 skill 的步驟與工具調用序列
@@ -587,7 +597,11 @@
 
 ## 🔴 P0 — MiniMax API 擴充整合
 
-> **前提**：以下圖像 / 影片 / 音樂 / TTS 功能需要 **Token Plan 訂閱**，與現有文字 API Key 不同。
+> **方案需求確認（2025-05-03）**：
+> - 圖像生成 / TTS：需 **Plus 方案（$20/月）** 以上
+> - 影片生成 / 音樂生成：需 **Max 方案（$50/月）**
+> - Starter（$10/月）只提供文字 API + 圖片理解（understand_image）
+> - Starter 的「image understanding and web search MCP」是給 Claude Code / Cursor 等 IDE 使用的 MCP server，**不是給 Extension 直接呼叫的 API**
 
 ### 圖像生成（P0）
 
@@ -614,8 +628,11 @@
 
 ### MiniMax Web Search（替代/補充 Brave，評估中）
 
-- [ ] 評估 MiniMax 內建搜尋品質 vs Brave，決定是否切換或並存
-- [ ] MiniMax `understand_image` 作為 Gemini 視覺理解的備援選項
+> **注意（2025-05-03）**：Starter 方案的「web search & image understanding MCP」是透過 `minimax-coding-plan-mcp` 套件，專供 Claude Code / Cursor / OpenCode 等 IDE 使用，**並非可供 Extension 直接呼叫的 REST API**。Extension 目前已用 Brave/Exa 搜尋，MiniMax 搜尋 API 需另行評估是否開放給一般 Token Plan。
+
+- [ ] 確認 MiniMax 是否提供獨立的 `/v1/search` REST endpoint（非 MCP 形式）
+- [ ] 若有，評估 MiniMax 內建搜尋品質 vs Brave，決定是否切換或並存
+- [ ] MiniMax `understand_image` 作為 Gemini 視覺理解的備援選項（Starter 方案已有視覺理解能力，透過 M2.7 chat API 傳入圖片即可）
 
 ---
 
