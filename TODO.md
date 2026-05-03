@@ -147,7 +147,9 @@
 | 🔴 P0 | AI Agent Loop 基礎建設 | 其他 Agent 功能的前提 |
 | 🔴 P0 | MiniMax 圖像生成 | 高價值、差異化功能 |
 | 🟠 P1 | AI 設定 & 記憶工具 | 搭配 Agent Loop |
-| 🟠 P1 | Plan Approval / Tool Registry | API/SSH 等高風險工具前置審核 |
+| 🟠 P1 | Plan Approval / 計畫模式 | 高風險工具前置審核與批准流程 |
+| 🟠 P1 | API Tool Registry | HTTP API 工具 schema、金鑰、allowlist、read/write 權限 |
+| 🟠 P1 | SSH / Server Tool | Native Messaging 或後端 proxy，強制 Plan Approval |
 | 🟠 P1 | MiniMax TTS 升級 | 現有 Google TTS 直接替換 |
 | 🟠 P1 | System Prompt 壓縮 | M2.7 200k token 充分利用 |
 | 🟡 P2 | 任務腳本（Task Script） | 長任務腳本化，搭配 Agent |
