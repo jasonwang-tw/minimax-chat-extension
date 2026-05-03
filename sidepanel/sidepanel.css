@@ -13,6 +13,9 @@
   --border-color: rgba(255, 255, 255, 0.08);
   --danger: #EF4444;
   --success: #10B981;
+  --knowledge-accent: #5eead4;
+  --knowledge-accent-bg: rgba(20, 184, 166, 0.1);
+  --knowledge-accent-border: rgba(45, 212, 191, 0.28);
   --border-radius: 20px;
   --border-radius-small: 10px;
   --border-radius-large: 30px;
@@ -604,6 +607,9 @@ body {
 }
 
 .suggestion-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 20px;
@@ -908,14 +914,103 @@ body {
 }
 
 .char-counter {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 6px 14px 0;
+  display: block;
+  margin: 8px 12px 0;
+  padding: 0;
   font-size: 11px;
   color: var(--text-secondary);
-  opacity: 0.7;
-  transition: color 0.2s;
+  opacity: 0.88;
+  outline: none;
+  position: relative;
+  transition: color 0.2s, opacity 0.2s;
+}
+
+.char-counter-summary {
+  display: grid;
+  grid-template-columns: minmax(88px, 1fr) auto 12px;
+  align-items: center;
+  gap: 8px;
+  line-height: 1.2;
+}
+
+.char-counter-label {
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.char-counter-value {
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.char-counter-arrow {
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 1;
+  transform: translateY(-1px);
+}
+
+.char-counter-track {
+  height: 3px;
+  margin-top: 5px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.char-counter-fill {
+  width: 0;
+  height: 100%;
+  border-radius: inherit;
+  background: #3b82f6;
+  transition: width 0.2s ease, background 0.2s ease;
+}
+
+.char-counter-details {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 8px);
+  z-index: 20;
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  background: rgba(38, 38, 38, 0.98);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.36);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(4px);
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+.char-counter-details div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.char-counter-details span {
+  color: var(--text-secondary);
+}
+
+.char-counter-details strong {
+  color: var(--text-primary);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.char-counter:hover .char-counter-details,
+.char-counter:focus .char-counter-details,
+.char-counter:focus-within .char-counter-details {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
 }
 
 .char-counter.warn {
@@ -923,9 +1018,17 @@ body {
   opacity: 1;
 }
 
+.char-counter.warn .char-counter-fill {
+  background: #f59e0b;
+}
+
 .char-counter.danger {
   color: #ef4444;
   opacity: 1;
+}
+
+.char-counter.danger .char-counter-fill {
+  background: #ef4444;
   animation: char-pulse 1s ease-in-out infinite;
 }
 
@@ -937,7 +1040,7 @@ body {
 .input-container textarea {
   display: block;
   width: 100%;
-  padding: 12px 14px 4px;
+  padding: 10px 14px 4px;
   max-height: 120px;
 }
 
@@ -2411,38 +2514,52 @@ mark {
   flex-shrink: 0;
 }
 
-/* ── Page Context Chip ───────────────────────────────── */
-.command-chip {
+.context-chip-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 10px 0;
+}
+
+/* ── Context Chips ───────────────────────────────────── */
+.command-chip,
+.page-context-chip,
+.kb-chip {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 10px;
+  height: 24px;
+  box-sizing: border-box;
+  padding: 0 10px;
   background: rgba(236, 41, 112, 0.1);
   border: 1px solid rgba(236, 41, 112, 0.3);
   border-radius: 20px;
   font-size: 11px;
+  line-height: 1;
   color: var(--primary);
-  margin: 0 0 10px 0;
+  margin: 0;
 }
-.command-chip.hidden {
+
+.command-chip.hidden,
+.page-context-chip.hidden,
+.knowledge-chips.hidden {
   display: none;
 }
 
-.page-context-chip {
+.chip-leading-icon {
+  width: 13px;
+  height: 13px;
+  flex: 0 0 13px;
+  display: block;
+}
+
+#commandChipLabel,
+#pageContextLabel,
+.kb-chip-label {
   display: inline-flex;
   align-items: center;
-  gap: 10px;
-  padding: 4px 10px;
-  background: rgba(59, 130, 246, 0.12);
-  border: 1px solid rgba(59, 130, 246, 0.3);
-  border-radius: 20px;
-  font-size: 11px;
-  color: #60a5fa;
-  margin: 0 0 10px 0;
-}
-
-.page-context-chip.hidden {
-  display: none;
+  height: 14px;
 }
 
 .btn-chip-remove {
@@ -2451,14 +2568,38 @@ mark {
   color: #ec2970;
   cursor: pointer;
   padding: 0;
+  width: 14px;
+  height: 14px;
   display: flex;
   align-items: center;
+  justify-content: center;
   opacity: 0.7;
   transition: opacity 0.15s;
 }
 
+.btn-chip-remove svg {
+  width: 10px;
+  height: 10px;
+  display: block;
+}
+
 .btn-chip-remove:hover {
   opacity: 1;
+}
+
+.knowledge-chips {
+  display: contents;
+}
+
+.kb-chip {
+  background: var(--knowledge-accent-bg);
+  border-color: var(--knowledge-accent-border);
+  color: var(--knowledge-accent);
+  max-width: 180px;
+}
+
+.kb-chip-remove {
+  color: var(--knowledge-accent);
 }
 
 /* ── Memory Modal ────────────────────────────────────── */
@@ -2956,30 +3097,6 @@ mark {
 }
 
 /* ── Knowledge Base ──────────────────────────────────── */
-.knowledge-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  padding: 6px 14px 2px;
-}
-
-.knowledge-chips.hidden {
-  display: none;
-}
-
-.kb-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  background: rgba(236, 41, 112, 0.12);
-  border: 1px solid rgba(236, 41, 112, 0.35);
-  border-radius: 12px;
-  padding: 3px 6px 3px 10px;
-  font-size: 11px;
-  color: var(--primary);
-  max-width: 180px;
-}
-
 .kb-chip-label {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2990,12 +3107,14 @@ mark {
   background: transparent;
   border: none;
   cursor: pointer;
-  color: var(--primary);
   padding: 0;
+  width: 14px;
+  height: 14px;
   line-height: 1;
   font-size: 14px;
   display: flex;
   align-items: center;
+  justify-content: center;
   opacity: 0.7;
   flex-shrink: 0;
 }

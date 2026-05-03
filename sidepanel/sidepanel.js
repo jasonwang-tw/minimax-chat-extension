@@ -36,11 +36,22 @@ let customCommands = [];      // 使用者自訂指令
 let pageContext = null;       // 當前分頁內容（/page 指令觸發後）
 let messageQueue = [];       // 串流中排入的待發送訊息 [{ message, images, pageCtx }]
 let cmdPaletteIndex = -1;     // 指令選單鍵盤選取游標
+const APPROX_CHARS_PER_TOKEN = 2;
+const DEFAULT_CONTEXT_TOKENS = 20000;
+const MODEL_CONTEXT_LIMITS = {
+  'MiniMax-M2.7': { tokens: 200000, source: 'MiniMax 預設' }
+};
 
 document.addEventListener('DOMContentLoaded', async () => {
   const messageInput = document.getElementById('messageInput');
   const charCounter = document.getElementById('charCounter');
   const charCountText = document.getElementById('charCountText');
+  const charCounterFill = document.getElementById('charCounterFill');
+  const charLimitText = document.getElementById('charLimitText');
+  const charHistoryText = document.getElementById('charHistoryText');
+  const charInputText = document.getElementById('charInputText');
+  const charExtraText = document.getElementById('charExtraText');
+  const charStatusText = document.getElementById('charStatusText');
   const queuePanel = document.getElementById('queuePanel');
   const queuePanelToggle = document.getElementById('queuePanelToggle');
   const queueListEl = document.getElementById('queueList');
@@ -235,6 +246,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const OPENROUTER_MODELS_API_URL = 'https://openrouter.ai/api/v1/models';
   const MODEL_PRICING_CACHE_KEY = 'openrouterModelPricingCache';
   let modelPickerSort = { key: 'name', direction: 'asc' };
+  let modelContextById = { ...MODEL_CONTEXT_LIMITS };
 
   function pricePerMillion(value) {
     const n = Number(value);
@@ -279,6 +291,22 @@ document.addEventListener('DOMContentLoaded', async () => {
       const result = av - bv;
       return modelPickerSort.direction === 'asc' ? result : -result;
     });
+  }
+
+  function normalizeContextTokens(value) {
+    const tokens = Number(value);
+    return Number.isFinite(tokens) && tokens > 0 ? Math.round(tokens) : null;
+  }
+
+  function getModelContextInfo(modelId = currentModel) {
+    const known = modelContextById[modelId] || MODEL_CONTEXT_LIMITS[modelId];
+    const tokens = normalizeContextTokens(known?.tokens || known?.contextLength);
+    if (tokens) return { tokens, source: known?.source || '模型 metadata' };
+    return { tokens: DEFAULT_CONTEXT_TOKENS, source: '預設保守值' };
+  }
+
+  function getCurrentContextCharBudget() {
+    return getModelContextInfo().tokens * APPROX_CHARS_PER_TOKEN;
   }
 
   async function getOpenRouterPricingMap(apiKey) {
@@ -351,12 +379,18 @@ document.addEventListener('DOMContentLoaded', async () => {
     const sections = [];
 
     // MiniMax 永遠顯示
-    sections.push({ title: null, items: [{ label: 'MiniMax', modelId: 'MiniMax-M2.7' }] });
+    sections.push({ title: null, items: [{ label: 'MiniMax', modelId: 'MiniMax-M2.7', contextLength: MODEL_CONTEXT_LIMITS['MiniMax-M2.7'].tokens }] });
 
     if (openrouterApiKey) {
       const enrich = m => {
-        const priceText = formatModelPrice(pricingMap[m.modelId]);
-        return { ...m, priceText: priceText || '價格未知', pricing: pricingMap[m.modelId]?.pricing || null };
+        const metadata = pricingMap[m.modelId] || {};
+        const priceText = formatModelPrice(metadata);
+        return {
+          ...m,
+          priceText: priceText || '價格未知',
+          pricing: metadata.pricing || null,
+          contextLength: normalizeContextTokens(m.contextLength || metadata.contextLength)
+        };
       };
       const custom = (Array.isArray(customModels) ? customModels : [])
         .filter(m => m.modelId)
@@ -370,6 +404,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   function renderModelPicker(sections) {
     modelPickerDropdown.innerHTML = '';
     const allItems = sections.flatMap(s => s.items);
+    modelContextById = { ...MODEL_CONTEXT_LIMITS };
+    allItems.forEach(m => {
+      const tokens = normalizeContextTokens(m.contextLength);
+      if (m.modelId && tokens) modelContextById[m.modelId] = { tokens, source: m.modelId === 'MiniMax-M2.7' ? 'MiniMax 預設' : 'OpenRouter metadata' };
+    });
     const currentValid = allItems.some(m => m.modelId === currentModel);
     if (!currentValid && allItems.length > 0) {
       currentModel = allItems[0].modelId;
@@ -422,6 +461,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           modelPickerDropdown.classList.add('hidden');
           modelPickerBtn.classList.remove('open');
           modelPickerDropdown.querySelectorAll('.model-picker-item').forEach(el => el.classList.toggle('active', el === btn));
+          updateCharCounter();
         });
         modelPickerDropdown.appendChild(btn);
       });
@@ -429,6 +469,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     const active = allItems.find(m => m.modelId === currentModel);
     if (active) modelPickerLabel.textContent = active.label;
+    updateCharCounter();
   }
 
   function escSp(str) {
@@ -509,21 +550,70 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   // 自動調整輸入框高度 + 指令選單 + 知識庫 @ palette
-  // 計算對話歷史使用率（對話完成後更新，非逐鍵更新）
-  const MAX_CONTEXT_CHARS = 40000;
+  // Context window 使用率：使用目前模型的 contextLength，並以字元 / 2 粗估 token。
+  function compactTokenCount(value) {
+    const count = Math.max(0, Number(value) || 0);
+    if (count >= 1000000) return `${(count / 1000000).toFixed(1)}m`;
+    if (count >= 1000) return `${(count / 1000).toFixed(1)}k`;
+    return String(count);
+  }
+
+  function estimateTextLength(value) {
+    return typeof value === 'string' ? value.length : 0;
+  }
+
+  function estimateKnowledgeLength() {
+    return selectedKnowledge.reduce((sum, item) => {
+      return sum
+        + estimateTextLength(item.title)
+        + estimateTextLength(item.summary)
+        + Math.min(estimateTextLength(item.content), 2000);
+    }, 0);
+  }
+
+  function estimatePageContextLength() {
+    if (!pageContext) return 0;
+    return estimateTextLength(pageContext.title)
+      + estimateTextLength(pageContext.url)
+      + estimateTextLength(pageContext.description)
+      + estimateTextLength(pageContext.text);
+  }
+
   function updateCharCounter() {
-    const totalChars = (currentSession?.messages || [])
+    const historyChars = (currentSession?.messages || [])
       .reduce((sum, m) => sum + (typeof m.content === 'string' ? m.content.length : 0), 0);
-    const pct = Math.min(Math.round(totalChars / MAX_CONTEXT_CHARS * 100), 999);
-    charCounter.classList.remove('warn', 'danger');
-    if (pct < 60) {
-      charCounter.classList.add('hidden');
+    const inputChars = estimateTextLength(messageInput?.value || '');
+    const extraChars = estimateKnowledgeLength() + estimatePageContextLength();
+    const totalChars = historyChars + inputChars + extraChars;
+    const historyTokens = Math.ceil(historyChars / APPROX_CHARS_PER_TOKEN);
+    const inputTokens = Math.ceil(inputChars / APPROX_CHARS_PER_TOKEN);
+    const extraTokens = Math.ceil(extraChars / APPROX_CHARS_PER_TOKEN);
+    const totalTokens = historyTokens + inputTokens + extraTokens;
+    const contextInfo = getModelContextInfo();
+    const pct = Math.min(Math.round(totalTokens / contextInfo.tokens * 100), 999);
+    charCounter.classList.remove('warn', 'danger', 'over');
+    charCountText.textContent = `~${compactTokenCount(totalTokens)} / ${compactTokenCount(contextInfo.tokens)} (${pct}%)`;
+    charCounterFill.style.width = `${Math.min(pct, 100)}%`;
+    charLimitText.textContent = `${compactTokenCount(contextInfo.tokens)} token`;
+    charHistoryText.textContent = `~${compactTokenCount(historyTokens)}`;
+    charInputText.textContent = `~${compactTokenCount(inputTokens)}`;
+    charExtraText.textContent = `~${compactTokenCount(extraTokens)}`;
+    if (pct >= 100) {
+      charStatusText.textContent = '已超出，送出時會嘗試裁切歷史';
+    } else if (pct >= 80) {
+      charStatusText.textContent = '接近上限，送出時可能壓縮';
+    } else if (pct >= 60) {
+      charStatusText.textContent = '偏高';
     } else {
-      charCounter.classList.remove('hidden');
-      charCountText.textContent = `${pct}%`;
-      if (pct >= 80) charCounter.classList.add('danger');
-      else charCounter.classList.add('warn');
+      charStatusText.textContent = `正常（${contextInfo.source}）`;
     }
+    charCounter.setAttribute(
+      'aria-label',
+      `Context window 使用量約 ${pct}%，${totalTokens} / ${contextInfo.tokens} token。歷史約 ${historyTokens}，目前輸入約 ${inputTokens}，附加 context 約 ${extraTokens}。`
+    );
+    if (pct >= 100) charCounter.classList.add('danger', 'over');
+    else if (pct >= 80) charCounter.classList.add('danger');
+    else if (pct >= 60) charCounter.classList.add('warn');
   }
 
   messageInput.addEventListener('input', () => {
@@ -532,7 +622,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     updateSendButton();
     handleCommandPaletteInput();
     handleKbPaletteInput();
+    updateCharCounter();
   });
+  updateCharCounter();
 
   // 發送 / 停止
   sendBtn.addEventListener('click', async () => {
@@ -692,7 +784,18 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Suggestion chips（空白頁預設提示）
   document.querySelectorAll('.suggestion-chip').forEach(btn => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', async () => {
+      if (btn.dataset.action === 'summarize-page') {
+        await attachPageContext({ focusInput: true });
+        if (pageContext) {
+          messageInput.value = '請摘要目前頁面的重點。';
+          messageInput.style.height = 'auto';
+          messageInput.style.height = Math.min(messageInput.scrollHeight, 120) + 'px';
+          updateSendButton();
+          updateCharCounter();
+        }
+        return;
+      }
       messageInput.value = btn.dataset.prompt;
       messageInput.style.height = 'auto';
       messageInput.style.height = Math.min(messageInput.scrollHeight, 120) + 'px';
@@ -1187,8 +1290,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   // ── 歷史面板 ───────────────────────────────────────────
-  newSessionBtn.addEventListener('click', () => {
-    startNewSession();
+  newSessionBtn.addEventListener('click', async () => {
+    await startNewSessionWithPageContext();
     historyPanel.classList.add('hidden');
   });
 
@@ -2106,6 +2209,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     chatMessages.innerHTML = '';
     emptyState.classList.remove('hidden');
     updateCurrentSessionBar();
+    updateCharCounter();
+  }
+
+  async function startNewSessionWithPageContext() {
+    startNewSession();
+    clearPageContext();
+    await attachPageContext({ focusInput: false });
   }
 
   function renderQueueList() {
@@ -2162,7 +2272,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         const filled = cmd.template.replace('{input}', args);
         if (!filled.trim()) { messageInput.focus(); return; }
         // 記錄縮減顯示標籤
-        commandDisplayLabel = cmd.trigger + (args ? ` · ${args}` : '');
+        commandDisplayLabel = cmd.name + (args ? ` · ${args}` : '');
         messageInput.value = filled;
         messageInput.style.height = 'auto';
         messageInput.style.height = Math.min(messageInput.scrollHeight, 120) + 'px';
@@ -2328,9 +2438,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
         if (next.pageCtx) {
           pageContext = next.pageCtx;
-          const shortTitle = next.pageCtx.title.slice(0, 25) + (next.pageCtx.title.length > 25 ? '...' : '');
-          pageContextLabel.textContent = `📄 ${shortTitle}`;
-          pageContextChip.classList.remove('hidden');
+          renderPageContextChip();
         }
         updateSendButton();
         updateQueueIndicator();
@@ -2489,6 +2597,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         images: snapshotImages,
         translateConfig,
         model: currentModel,
+        contextCharBudget: getCurrentContextCharBudget(),
         systemPrompt,
         memoryContext,
         sessionId: currentSession?.id,
@@ -3035,12 +3144,19 @@ document.addEventListener('DOMContentLoaded', async () => {
   function applyCommand(cmd, inputVal, tabComplete = false) {
     hideCommandPalette();
     const args = inputVal.slice(cmd.trigger.length).trim();
+    if ((cmd.trigger === '/page' || cmd.trigger === '/page-code') && !args) {
+      messageInput.value = '';
+      messageInput.style.height = 'auto';
+      updateSendButton();
+      executeAction(cmd.trigger, args);
+      return;
+    }
     showCommandChip(cmd, args);
   }
 
   function showCommandChip(cmd, prefillArgs = '') {
     pendingCommand = { cmd };
-    commandChipLabel.textContent = cmd.trigger + (prefillArgs ? ' ' + prefillArgs : '');
+    commandChipLabel.textContent = cmd.name + (prefillArgs ? ` · ${prefillArgs}` : '');
     commandChip.classList.remove('hidden');
     // 把 prefillArgs 填入輸入框讓使用者繼續編輯（template 以外的補充文字）
     messageInput.value = prefillArgs;
@@ -3062,10 +3178,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         fetchPageContext();
         break;
       case '/page-code':
-        handlePageCodeAnalysis(args);
+        attachPageCodeContext({ question: args, focusInput: true });
         break;
       case '/new':
-        startNewSession();
+        startNewSessionWithPageContext();
         historyPanel.classList.add('hidden');
         break;
       case '/clear':
@@ -3210,6 +3326,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         images: [],
         translateConfig: null,
         model: currentModel,
+        contextCharBudget: getCurrentContextCharBudget(),
         systemPrompt,
         memoryContext
       }
@@ -3566,6 +3683,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     knowledgeChips.innerHTML = '';
     if (selectedKnowledge.length === 0) {
       knowledgeChips.classList.add('hidden');
+      updateCharCounter();
       return;
     }
     knowledgeChips.classList.remove('hidden');
@@ -3580,6 +3698,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       });
       knowledgeChips.appendChild(chip);
     });
+    updateCharCounter();
   }
 
   // @ palette
@@ -3827,6 +3946,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         images: [],
         translateConfig: null,
         model: currentModel,
+        contextCharBudget: getCurrentContextCharBudget(),
         systemPrompt: '你是精準的語言學習助手，擅長從對話萃取高價值詞彙，並嚴格輸出指定 JSON 格式。',
         memoryContext: ''
       }
@@ -3927,6 +4047,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         images: [],
         translateConfig: null,
         model: currentModel,
+        contextCharBudget: getCurrentContextCharBudget(),
         systemPrompt: '你是一位專業的對話總結助手，請以繁體中文生成簡潔且有條理的摘要。',
         memoryContext: ''
       }
@@ -4490,23 +4611,38 @@ document.addEventListener('DOMContentLoaded', async () => {
   // ── Page Context ─────────────────────────────────────────
 
   async function fetchPageContext() {
+    return attachPageContext({ focusInput: true });
+  }
+
+  async function attachPageContext({ focusInput = false } = {}) {
     setStatus('讀取頁面中...');
     try {
       const response = await chrome.runtime.sendMessage({ type: 'READ_PAGE' });
       if (!response.success) throw new Error(response.error);
       pageContext = response.data;
-      const shortTitle = pageContext.title.slice(0, 25) + (pageContext.title.length > 25 ? '...' : '');
-      pageContextLabel.textContent = `📄 ${shortTitle}`;
-      pageContextChip.classList.remove('hidden');
+      pageContext.kind = 'page';
+      renderPageContextChip();
       clearStatus();
       updateSendButton();
-      messageInput.focus();
+      updateCharCounter();
+      if (focusInput) messageInput.focus();
+      return pageContext;
     } catch (err) {
       setStatus('無法讀取頁面：' + err.message, true, 4000);
+      return null;
     }
   }
 
-  async function handlePageCodeAnalysis(question) {
+  function renderPageContextChip() {
+    if (!pageContext) return;
+    const rawTitle = pageContext.title || pageContext.url || '目前頁面';
+    const shortTitle = rawTitle.slice(0, 25) + (rawTitle.length > 25 ? '...' : '');
+    const suffix = pageContext.kind === 'code' ? '（分析程式碼與樣式）' : '';
+    pageContextLabel.textContent = `${shortTitle}${suffix}`;
+    pageContextChip.classList.remove('hidden');
+  }
+
+  async function attachPageCodeContext({ question = '', focusInput = false } = {}) {
     if (isLoading) return;
     setStatus('讀取頁面代碼中...');
     let pageData;
@@ -4526,104 +4662,31 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (cssLinks) codeContent += `\n=== 外部 CSS 路徑 ===\n${cssLinks}\n`;
     if (styles) codeContent += `\n=== 內嵌 <style> ===\n${styles}\n`;
     codeContent += `\n=== HTML 原始碼 ===\n${html}`;
-
-    // 編碼為 base64 text file，透過現有 text files pipeline 分批分析
-    const base64 = btoa(unescape(encodeURIComponent(codeContent)));
-    const fakeFile = { dataUrl: `data:text/plain;base64,${base64}`, fileType: 'text', fileName: `${title || url}.html` };
-
-    const displayMsg = question ? `🔬 ${question}` : `🔬 分析頁面代碼：${(title || url).slice(0, 40)}`;
-    const apiMsg = question || '';
-
-    if (!currentSession) startNewSession();
-    isLoading = true;
-    setStreamingMode(true);
-    messageInput.disabled = true;
-    typingIndicator.classList.add('hidden');
-    emptyState.classList.add('hidden');
+    pageContext = {
+      kind: 'code',
+      title,
+      url,
+      description: '分析程式碼與樣式',
+      text: codeContent
+    };
+    renderPageContextChip();
     clearStatus();
-
-    currentSession.messages.push({ role: 'user', content: displayMsg });
-    addMessage(displayMsg, 'user');
-
-    const historyForApi = currentSession.messages.slice(0, -1).map(m => ({
-      role: m.role, content: m.content, images: m.images || null
-    }));
-
-    const liveDiv = createLiveMessageDiv();
-    currentLiveDiv = liveDiv;
-    currentRawContent = '';
-    let rawContent = '';
-
-    const port = chrome.runtime.connect({ name: 'chat-stream' });
-    currentPort = port;
-
-    function resetLoadingCode() {
-      isLoading = false;
-      currentPort = null;
-      currentLiveDiv = null;
-      currentRawContent = '';
-      setStreamingMode(false);
-      messageInput.disabled = false;
-      messageInput.focus();
+    updateSendButton();
+    updateCharCounter();
+    if (question) {
+      messageInput.value = question;
+      messageInput.style.height = 'auto';
+      messageInput.style.height = Math.min(messageInput.scrollHeight, 120) + 'px';
+      updateSendButton();
     }
-
-    port.onMessage.addListener(async (msg) => {
-      if (msg.type === 'status') { setStatus(msg.text); return; }
-      if (msg.type === 'compressed') { setStatus('歷史對話已自動壓縮，保留最近輪次', false, 3000); return; }
-      if (msg.type === 'chunk') {
-        rawContent = msg.full;
-        currentRawContent = rawContent;
-        updateLiveMessageContent(liveDiv, rawContent);
-        scrollToBottom();
-        return;
-      }
-      if (msg.type === 'done') {
-        const reply = msg.reply;
-        const attachments = Array.isArray(msg.attachments) && msg.attachments.length > 0 ? msg.attachments : null;
-        currentSession.messages.push({ role: 'assistant', content: reply, ...(attachments && { attachments }) });
-        finalizeLiveMessage(liveDiv, rawContent, reply, undefined, attachments);
-        clearStatus();
-        port.disconnect();
-        resetLoadingCode();
-        await saveCurrentSession();
-        await loadHistory();
-        updateCharCounter();
-        return;
-      }
-      if (msg.type === 'error') {
-        liveDiv.remove();
-        addMessage(`錯誤: ${msg.message}`, 'error');
-        clearStatus();
-        port.disconnect();
-        resetLoadingCode();
-      }
-    });
-
-    port.onDisconnect.addListener(() => {
-      if (!isLoading) return;
-      clearStatus();
-      liveDiv.remove();
-      resetLoadingCode();
-    });
-
-    port.postMessage({
-      type: 'STREAM_MESSAGE',
-      data: {
-        message: apiMsg,
-        history: historyForApi,
-        images: [fakeFile],
-        translateConfig: null,
-        model: currentModel,
-        systemPrompt: null,
-        memoryContext: buildMemoryBlock(),
-        sessionId: currentSession?.id
-      }
-    });
+    if (focusInput) messageInput.focus();
+    return pageContext;
   }
 
   function clearPageContext() {
     pageContext = null;
     pageContextChip.classList.add('hidden');
+    updateCharCounter();
   }
 
   const PAGE_INLINE_LIMIT = 6000; // 超過此字數改用分段分析 pipeline
@@ -4635,7 +4698,8 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (userMessage) return userMessage;
       return ''; // 純 /page 時，message 由 pipeline 負責
     }
-    const parts = [`【當前頁面】`, `標題：${pageContext.title}`, `網址：${pageContext.url}`];
+    const contextTitle = pageContext.kind === 'code' ? '【當前頁面程式碼與樣式】' : '【當前頁面】';
+    const parts = [contextTitle, `標題：${pageContext.title}`, `網址：${pageContext.url}`];
     if (pageContext.description) parts.push(`描述：${pageContext.description}`);
     parts.push(`內容：\n${pageContext.text}`);
     if (userMessage) parts.push(`\n使用者問題：\n${userMessage}`);
@@ -4646,13 +4710,13 @@ document.addEventListener('DOMContentLoaded', async () => {
   // 長頁時把 pageContext 轉成 text file，走 streamTextFilesPipeline
   function buildPageContextFile() {
     if (!pageContext || pageContext.text.length <= PAGE_INLINE_LIMIT) return null;
-    const { title, url, description, text } = pageContext;
+    const { kind, title, url, description, text } = pageContext;
     let content = `標題：${title}\n網址：${url}\n`;
     if (description) content += `描述：${description}\n`;
     content += `\n內容：\n${text}`;
     const b64 = btoa(unescape(encodeURIComponent(content)));
     clearPageContext();
-    return { dataUrl: `data:text/plain;base64,${b64}`, fileType: 'text', fileName: `${title || url}.txt` };
+    return { dataUrl: `data:text/plain;base64,${b64}`, fileType: 'text', fileName: `${title || url}.${kind === 'code' ? 'html' : 'txt'}` };
   }
 
   // ── 工具函式 ────────────────────────────────────────────

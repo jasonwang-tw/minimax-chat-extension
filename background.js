@@ -1,4 +1,4 @@
-// background.js - Service Worker for MiniMax API + Gemini Vision
+// background.js - Service Worker for Open Chat Hub providers
 
 import { SyncService, DEFAULT_SYNC_SETTINGS } from './sync/sync-service.js';
 
@@ -31,6 +31,12 @@ const syncService = new SyncService();
 function toNumber(value) {
   const n = Number(value);
   return Number.isFinite(n) && n >= 0 ? n : null;
+}
+
+function normalizeContextCharBudget(value) {
+  const budget = Number(value);
+  if (!Number.isFinite(budget) || budget <= 0) return MAX_CONTEXT_CHARS;
+  return Math.max(1000, Math.round(budget));
 }
 
 function normalizeUsage(usage) {
@@ -873,16 +879,16 @@ chrome.runtime.onConnect.addListener(port => {
   });
 });
 
-async function streamHandleMessage({ message, history, images, image, mode, translateConfig, model, systemPrompt, memoryContext, sessionId, skipTools }, port) {
+async function streamHandleMessage({ message, history, images, image, mode, translateConfig, model, contextCharBudget, systemPrompt, memoryContext, sessionId, skipTools }, port) {
   const fileList = images && images.length > 0
     ? images
     : (image ? [{ dataUrl: image, mode: mode || 'upload', fileType: 'image' }] : null);
 
   if (!fileList || fileList.length === 0) {
     if (skipTools || translateConfig?.enabled) {
-      await streamMiniMaxChat(message, history, translateConfig, model, systemPrompt, memoryContext, port, sessionId);
+      await streamMiniMaxChat(message, history, translateConfig, model, systemPrompt, memoryContext, port, sessionId, contextCharBudget);
     } else {
-      await streamAgentChat(message, history, translateConfig, model, systemPrompt, memoryContext, port, sessionId);
+      await streamAgentChat(message, history, translateConfig, model, systemPrompt, memoryContext, port, sessionId, contextCharBudget);
     }
     return;
   }
@@ -903,7 +909,7 @@ async function streamHandleMessage({ message, history, images, image, mode, tran
 
     if (imageFiles.length === 0 && pdfFiles.length > 0 && pdfRoute === 'openrouter-pdf') {
       try {
-        await streamOpenRouterPdfChat(message, history, textFiles, pdfFiles, translateConfig, model, systemPrompt, memoryContext, port, sessionId);
+        await streamOpenRouterPdfChat(message, history, textFiles, pdfFiles, translateConfig, model, systemPrompt, memoryContext, port, sessionId, contextCharBudget);
         return;
       } catch (err) {
         const fileNames = formatFileNames(pdfFiles);
@@ -964,15 +970,15 @@ async function streamHandleMessage({ message, history, images, image, mode, tran
       const userQ = combinedMessage ? `\n\n使用者問題：${combinedMessage}` : '';
       minimaxPrompt = `以下是圖片分析結果：\n\n${geminiResult}${userQ}\n\n請根據以上分析，提供清晰、有條理的回應。`;
     }
-    await streamMiniMaxChat(minimaxPrompt, history, null, model, null, memoryContext, port, sessionId);
+    await streamMiniMaxChat(minimaxPrompt, history, null, model, null, memoryContext, port, sessionId, contextCharBudget);
     return;
   }
 
   // 純文字檔 → 分批分析 + stream 合併
-  await streamTextFilesPipeline(textFiles, message, history, translateConfig, model, systemPrompt, memoryContext, port);
+  await streamTextFilesPipeline(textFiles, message, history, translateConfig, model, systemPrompt, memoryContext, port, contextCharBudget);
 }
 
-async function streamTextFilesPipeline(textFiles, userMessage, history, translateConfig, model, systemPrompt, memoryContext, port) {
+async function streamTextFilesPipeline(textFiles, userMessage, history, translateConfig, model, systemPrompt, memoryContext, port, contextCharBudget) {
   const CHUNK_SIZE = 6000;
   const MAX_TOTAL_CHARS = 30000;
 
@@ -1005,7 +1011,7 @@ async function streamTextFilesPipeline(textFiles, userMessage, history, translat
 
   if (chunks.length === 1) {
     const prompt = `以下是附加的檔案內容：\n\n=== ${chunks[0].label} ===\n${chunks[0].content}${userMessage ? `\n\n使用者問題：${userMessage}` : '\n\n請分析並整理以上內容。'}${truncateNotice}`;
-    await streamMiniMaxChat(prompt, history, translateConfig, model, systemPrompt, memoryContext, port);
+    await streamMiniMaxChat(prompt, history, translateConfig, model, systemPrompt, memoryContext, port, undefined, contextCharBudget);
     return;
   }
 
@@ -1018,7 +1024,7 @@ async function streamTextFilesPipeline(textFiles, userMessage, history, translat
   }
   port.postMessage({ type: 'status', text: '整合結果中...' });
   const mergePrompt = `以下是對文件各段落的分析摘要，請整合成完整報告：\n\n${segmentResults.join('\n\n')}${userMessage ? `\n\n使用者問題：${userMessage}` : ''}${truncateNotice}`;
-  await streamMiniMaxChat(mergePrompt, history, translateConfig, model, systemPrompt, memoryContext, port);
+  await streamMiniMaxChat(mergePrompt, history, translateConfig, model, systemPrompt, memoryContext, port, undefined, contextCharBudget);
 }
 
 function getDataUrlBase64(dataUrl) {
@@ -1081,7 +1087,7 @@ function describeVisualRoute(imageFiles, pdfFiles, pdfRoute, model) {
   return '分析方式：使用 Gemini 視覺分析。';
 }
 
-async function streamOpenRouterPdfChat(message, history, textFiles, pdfFiles, translateConfig, model, systemPrompt, memoryContext, port, sessionId) {
+async function streamOpenRouterPdfChat(message, history, textFiles, pdfFiles, translateConfig, model, systemPrompt, memoryContext, port, sessionId, contextCharBudget) {
   const { defaultPrompts, globalPrompt: storedGlobal, openrouterApiKey } =
     await chrome.storage.sync.get(['defaultPrompts', 'globalPrompt', 'openrouterApiKey']);
 
@@ -1102,15 +1108,15 @@ async function streamOpenRouterPdfChat(message, history, textFiles, pdfFiles, tr
 
   const textAppend = buildTextFilesAppend(textFiles);
   const userText = `${message || '請分析這份 PDF。'}${textAppend}`.trim();
-  const messages = buildPdfMessages(userText, history || [], translateConfig, finalSystemPrompt, globalPrompt, pdfFiles);
+  const messages = buildPdfMessages(userText, history || [], translateConfig, finalSystemPrompt, globalPrompt, pdfFiles, contextCharBudget);
 
   const response = await fetchWithTimeout(OPENROUTER_API_URL, {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${openrouterApiKey}`,
       'Content-Type': 'application/json',
-      'HTTP-Referer': 'chrome-extension://minimax-chat',
-      'X-Title': 'MiniMax AI Chat'
+      'HTTP-Referer': 'chrome-extension://open-chat-hub',
+      'X-Title': 'Open Chat Hub'
     },
     body: JSON.stringify({
       model: requestedModel,
@@ -1157,7 +1163,7 @@ function buildTextFilesAppend(textFiles) {
   return '\n\n[附加文字檔案內容]\n' + parts.join('\n\n');
 }
 
-function buildPdfMessages(userText, history, translateConfig, systemPrompt, globalPrompt, pdfFiles) {
+function buildPdfMessages(userText, history, translateConfig, systemPrompt, globalPrompt, pdfFiles, contextCharBudget = MAX_CONTEXT_CHARS) {
   const messages = [];
   if (translateConfig && translateConfig.enabled) {
     const { sourceLang, targetLang } = translateConfig;
@@ -1173,7 +1179,7 @@ function buildPdfMessages(userText, history, translateConfig, systemPrompt, glob
   }
 
   const textOnlyHistory = (history || []).filter(item => !(item.images || item.image));
-  trimHistoryForContext(textOnlyHistory, Math.max(0, MAX_CONTEXT_CHARS - userText.length)).forEach(item => {
+  trimHistoryForContext(textOnlyHistory, Math.max(0, normalizeContextCharBudget(contextCharBudget) - userText.length)).forEach(item => {
     messages.push({ role: item.role, content: item.content });
   });
 
@@ -1261,7 +1267,7 @@ function extractImageOutputAttachments(messageOrData, text = '') {
   return attachments;
 }
 
-async function streamMiniMaxChat(message, history, translateConfig, model, systemPrompt, memoryContext, port, sessionId) {
+async function streamMiniMaxChat(message, history, translateConfig, model, systemPrompt, memoryContext, port, sessionId, contextCharBudget) {
   const { apiKey, defaultPrompts, globalPrompt: storedGlobal, openrouterApiKey } =
     await chrome.storage.sync.get(['apiKey', 'defaultPrompts', 'globalPrompt', 'openrouterApiKey']);
 
@@ -1279,8 +1285,9 @@ async function streamMiniMaxChat(message, history, translateConfig, model, syste
 
   const finalSystemPrompt = [memoryContext, globalPrompt, modePrompt].filter(Boolean).join('\n\n');
 
+  const effectiveContextChars = normalizeContextCharBudget(contextCharBudget);
   const fixedChars = (finalSystemPrompt?.length || 0) + message.length;
-  const historyBudget = Math.max(0, MAX_CONTEXT_CHARS - fixedChars);
+  const historyBudget = Math.max(0, effectiveContextChars - fixedChars);
   const compressKey = useOpenRouter ? openrouterApiKey : apiKey;
   const { history: compressedHistory, summary } = await compressHistoryIfNeeded(sessionId, history || [], compressKey, useModel, historyBudget);
 
@@ -1290,12 +1297,12 @@ async function streamMiniMaxChat(message, history, translateConfig, model, syste
     ? `${finalSystemPrompt ? finalSystemPrompt + '\n\n' : ''}[對話前段摘要]\n${summary}`
     : finalSystemPrompt;
 
-  const messages = buildMessages(message, compressedHistory, translateConfig, effectiveSystemPrompt, globalPrompt);
+  const messages = buildMessages(message, compressedHistory, translateConfig, effectiveSystemPrompt, globalPrompt, effectiveContextChars);
 
   const chatUrl = useOpenRouter ? OPENROUTER_API_URL : MINIMAX_API_URL;
   const chatKey = useOpenRouter ? openrouterApiKey : apiKey;
   const extraHeaders = useOpenRouter
-    ? { 'HTTP-Referer': 'chrome-extension://minimax-chat', 'X-Title': 'MiniMax AI Chat' }
+    ? { 'HTTP-Referer': 'chrome-extension://open-chat-hub', 'X-Title': 'Open Chat Hub' }
     : {};
 
   const response = await fetch(chatUrl, {
@@ -1445,7 +1452,7 @@ async function handleToolCall(name, args) {
 }
 
 // ── Agent 對話（帶 Tool Use）──────────────────────────────────
-async function streamAgentChat(message, history, translateConfig, model, systemPrompt, memoryContext, port, sessionId) {
+async function streamAgentChat(message, history, translateConfig, model, systemPrompt, memoryContext, port, sessionId, contextCharBudget) {
   const { apiKey, defaultPrompts, globalPrompt: storedGlobal, openrouterApiKey } =
     await chrome.storage.sync.get(['apiKey', 'defaultPrompts', 'globalPrompt', 'openrouterApiKey']);
 
@@ -1466,7 +1473,7 @@ async function streamAgentChat(message, history, translateConfig, model, systemP
       text: '未啟用搜尋工具，已改用一般對話回覆。可在設定頁加入 Brave 或 Exa API Key 啟用 Agent 搜尋。',
       level: 'info'
     });
-    return streamMiniMaxChat(message, history, translateConfig, model, systemPrompt, memoryContext, port, sessionId);
+    return streamMiniMaxChat(message, history, translateConfig, model, systemPrompt, memoryContext, port, sessionId, contextCharBudget);
   }
 
   const useModel = requestedModel;
@@ -1479,14 +1486,14 @@ async function streamAgentChat(message, history, translateConfig, model, systemP
         text: `目前模型不支援 tool use，已改用一般對話回覆。可切換支援 tools 的 OpenRouter 模型或 MiniMax。`,
         level: 'warning'
       });
-      return streamMiniMaxChat(message, history, translateConfig, model, systemPrompt, memoryContext, port, sessionId);
+      return streamMiniMaxChat(message, history, translateConfig, model, systemPrompt, memoryContext, port, sessionId, contextCharBudget);
     }
   }
 
   const agentKey = useOpenRouter ? openrouterApiKey : apiKey;
   const agentUrl = useOpenRouter ? OPENROUTER_API_URL : MINIMAX_API_URL;
   const agentExtraHeaders = useOpenRouter
-    ? { 'HTTP-Referer': 'chrome-extension://minimax-chat', 'X-Title': 'MiniMax AI Chat' }
+    ? { 'HTTP-Referer': 'chrome-extension://open-chat-hub', 'X-Title': 'Open Chat Hub' }
     : {};
 
   const globalPrompt = storedGlobal?.trim() || '';
@@ -1502,8 +1509,9 @@ async function streamAgentChat(message, history, translateConfig, model, systemP
   const dateContext = `當前日期：${dateStr}。搜尋資訊時，除非使用者明確指定時間範圍，否則一律以接近當前日期的資訊為準。回答中引用網路搜尋結果時，來源必須以 Markdown 超連結格式標注，例如：[標題](https://example.com)，不可只寫來源名稱而不附 URL。`;
 
   const finalSystemPrompt = [dateContext, memoryContext, globalPrompt, modePrompt].filter(Boolean).join('\n\n');
+  const effectiveContextChars = normalizeContextCharBudget(contextCharBudget);
   const fixedChars = (finalSystemPrompt?.length || 0) + message.length;
-  const historyBudget = Math.max(0, MAX_CONTEXT_CHARS - fixedChars);
+  const historyBudget = Math.max(0, effectiveContextChars - fixedChars);
   const { history: compressedHistory, summary } = await compressHistoryIfNeeded(sessionId, history || [], agentKey, useModel, historyBudget);
   if (summary) port.postMessage({ type: 'compressed' });
 
@@ -1511,7 +1519,7 @@ async function streamAgentChat(message, history, translateConfig, model, systemP
     ? `${finalSystemPrompt ? finalSystemPrompt + '\n\n' : ''}[對話前段摘要]\n${summary}`
     : finalSystemPrompt;
 
-  const messages = buildMessages(message, compressedHistory, translateConfig, effectiveSystemPrompt, globalPrompt);
+  const messages = buildMessages(message, compressedHistory, translateConfig, effectiveSystemPrompt, globalPrompt, effectiveContextChars);
 
   let toolsExecuted = false;
   const MAX_ITER = 6;
@@ -1573,7 +1581,7 @@ async function streamAgentChat(message, history, translateConfig, model, systemP
         text: `Agent 分析請求失敗：${err.message} 已改用一般串流回覆。`,
         level: 'warning'
       });
-      return streamMiniMaxChat(message, history, translateConfig, model, systemPrompt, memoryContext, port, sessionId);
+      return streamMiniMaxChat(message, history, translateConfig, model, systemPrompt, memoryContext, port, sessionId, contextCharBudget);
     }
 
     if (!resp.ok) {
@@ -1669,7 +1677,7 @@ async function streamAgentChat(message, history, translateConfig, model, systemP
         text: 'AI 未呼叫工具且未產生有效內容，已改用一般串流回覆。',
         level: 'warning'
       });
-      return streamMiniMaxChat(message, history, translateConfig, model, systemPrompt, memoryContext, port, sessionId);
+      return streamMiniMaxChat(message, history, translateConfig, model, systemPrompt, memoryContext, port, sessionId, contextCharBudget);
     }
 
     // 工具執行完畢後的最終回答：清除 XML/think 後直接送出
@@ -2124,7 +2132,7 @@ function trimHistoryForContext(history, budgetChars) {
 }
 
 // 建立訊息陣列（支援翻譯模式、預設提示詞、回覆模式）
-function buildMessages(newMessage, history, translateConfig, systemPrompt, globalPrompt = '') {
+function buildMessages(newMessage, history, translateConfig, systemPrompt, globalPrompt = '', contextCharBudget = MAX_CONTEXT_CHARS) {
   const messages = [];
 
   // 翻譯模式：翻譯指令 + 全局提示詞
@@ -2145,7 +2153,7 @@ function buildMessages(newMessage, history, translateConfig, systemPrompt, globa
 
   // 歷史訊息（自動裁切避免超出 context window）
   const fixedChars = (systemPrompt?.length || 0) + newMessage.length;
-  const historyBudget = Math.max(0, MAX_CONTEXT_CHARS - fixedChars);
+  const historyBudget = Math.max(0, normalizeContextCharBudget(contextCharBudget) - fixedChars);
   const trimmedHistory = trimHistoryForContext(history, historyBudget);
 
   if (trimmedHistory.length > 0) {

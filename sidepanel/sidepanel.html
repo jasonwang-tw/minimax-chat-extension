@@ -113,7 +113,10 @@
             <h2 class="empty-state-title">有什麼需要幫忙的？</h2>
             <p class="empty-state-sub">輸入訊息，或使用 <code>/</code> 指令開始</p>
             <div class="empty-state-suggestions">
-              <button class="suggestion-chip" data-prompt="幫我摘要這個頁面的內容">📄 摘要頁面</button>
+              <button class="suggestion-chip" data-action="summarize-page">
+                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                摘要頁面
+              </button>
               <button class="suggestion-chip" data-prompt="幫我翻譯以下文字：">🌐 翻譯文字</button>
               <button class="suggestion-chip" data-prompt="幫我解釋這段程式碼：">💻 解釋程式碼</button>
               <button class="suggestion-chip" data-prompt="幫我改善這段文字的語氣和可讀性：">✍️ 潤飾文字</button>
@@ -189,27 +192,26 @@
         </div>
       </div>
 
-      <!-- 指令 Chip -->
-      <div id="commandChip" class="command-chip hidden">
-        <span id="commandChipLabel"></span>
-        <button id="commandChipRemove" class="btn-chip-remove" title="取消指令">
-          <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-        </button>
+      <div class="context-chip-row">
+        <!-- 指令 Chip -->
+        <div id="commandChip" class="command-chip hidden">
+          <span id="commandChipLabel"></span>
+          <button id="commandChipRemove" class="btn-chip-remove" title="取消指令">
+            <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+
+        <!-- 頁面上下文 Chip -->
+        <div id="pageContextChip" class="page-context-chip hidden">
+          <svg class="chip-leading-icon" xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+          <span id="pageContextLabel">已附加頁面內容</span>
+          <button id="pageContextRemove" class="btn-chip-remove" title="移除頁面內容">
+            <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+        <!-- 知識庫 Chips（已選取） -->
+        <div id="knowledgeChips" class="knowledge-chips hidden"></div>
       </div>
-
-      <!-- 頁面上下文 Chip -->
-      <div id="pageContextChip" class="page-context-chip hidden">
-        <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-        <span id="pageContextLabel">已附加頁面內容</span>
-        <button id="pageContextRemove" class="btn-chip-remove" title="移除頁面內容">
-          <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-        </button>
-      </div>
-
-      
-
-      <!-- 知識庫 Chips（已選取） -->
-      <div id="knowledgeChips" class="knowledge-chips hidden"></div>
 
       <!-- 斜線指令 Palette -->
       <div id="commandPalette" class="command-palette hidden"></div>
@@ -229,9 +231,23 @@
 
       <!-- 統一輸入容器 -->
       <div class="input-container">
-        <div id="charCounter" class="char-counter hidden" title="對話歷史使用率（超過 80% 將自動壓縮）">
-          <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-          <span id="charCountText">0%</span>
+        <div id="charCounter" class="char-counter" tabindex="0" role="status" aria-label="Context window 使用量">
+          <div class="char-counter-summary">
+            <span class="char-counter-label">Context window</span>
+            <span id="charCountText" class="char-counter-value">~0 / 200.0k (0%)</span>
+            <span class="char-counter-arrow">›</span>
+          </div>
+          <div class="char-counter-track" aria-hidden="true">
+            <div id="charCounterFill" class="char-counter-fill"></div>
+          </div>
+          <div id="charCounterDetails" class="char-counter-details">
+            <div><span>計算方式</span><strong>字元 / 2 估算 token</strong></div>
+            <div><span>模型上限</span><strong id="charLimitText">200.0k</strong></div>
+            <div><span>對話歷史</span><strong id="charHistoryText">0</strong></div>
+            <div><span>目前輸入</span><strong id="charInputText">0</strong></div>
+            <div><span>附加 context</span><strong id="charExtraText">0</strong></div>
+            <div><span>狀態</span><strong id="charStatusText">正常</strong></div>
+          </div>
         </div>
         <textarea id="messageInput" placeholder="輸入訊息或輸入 / 使用指令..." rows="1"></textarea>
         <div class="input-bottom-bar">
