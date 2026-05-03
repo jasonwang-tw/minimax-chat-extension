@@ -2231,11 +2231,14 @@ function buildMessages(newMessage, history, translateConfig, systemPrompt, globa
   if (trimmedHistory.length > 0) {
     trimmedHistory.forEach(item => {
       const histImgs = item.images || (item.image ? [item.image] : null);
-      if (histImgs && histImgs.length > 0) {
+      const imageOnlyUrls = histImgs ? histImgs.filter(url =>
+        typeof url === 'string' && (url.startsWith('data:image/') || /^https?:\/\//.test(url))
+      ) : null;
+      if (imageOnlyUrls && imageOnlyUrls.length > 0) {
         messages.push({
           role: 'user',
           content: [
-            ...histImgs.map(url => ({ type: 'image_url', image_url: { url } })),
+            ...imageOnlyUrls.map(url => ({ type: 'image_url', image_url: { url } })),
             { type: 'text', text: item.content || '請描述這張圖片' }
           ]
         });
