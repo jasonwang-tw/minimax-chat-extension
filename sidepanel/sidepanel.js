@@ -2262,6 +2262,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     // 有待執行指令時，用輸入框文字作為 args 執行
     let commandDisplayLabel = null;
     let planModeForSend = false;
+    const pendingWasSet = !!pendingCommand;
     if (pendingCommand) {
       const { cmd } = pendingCommand;
       const args = messageInput.value.trim();
@@ -2295,6 +2296,41 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     let message = messageInput.value.trim();
     if (!message && !currentImages.length && !pageContext) return;
+
+    // 意圖偵測：自動對應指令（僅在非載入中、無明確 /指令、無待執行指令時）
+    if (!isLoading && !pendingWasSet && message && !message.startsWith('/')) {
+      const intent = detectCommandIntent(message, getAllCommands());
+      if (intent) {
+        if (intent.type === 'fetch-page' || intent.type === 'fetch-page-code') {
+          if (!pageContext) {
+            let ctx;
+            if (intent.type === 'fetch-page') {
+              ctx = await attachPageContext({ focusInput: false });
+            } else {
+              ctx = await attachPageCodeContext({ question: message, focusInput: false });
+            }
+            if (!ctx) return;
+          }
+          // pageContext 已設定，繼續走正常發送流程
+        } else if (intent.type === 'execute') {
+          messageInput.value = '';
+          messageInput.style.height = 'auto';
+          updateSendButton();
+          executeAction(intent.trigger, intent.args);
+          return;
+        } else if (intent.type === 'template') {
+          const filled = intent.cmd.template.replace('{input}', intent.args);
+          if (filled.trim()) {
+            message = filled;
+            messageInput.value = filled;
+            messageInput.style.height = 'auto';
+            messageInput.style.height = Math.min(messageInput.scrollHeight, 120) + 'px';
+            commandDisplayLabel = intent.cmd.name;
+            updateSendButton();
+          }
+        }
+      }
+    }
 
     // 串流中：入佇列，等待當前回覆完成後自動送出
     if (isLoading) {
@@ -3411,6 +3447,61 @@ document.addEventListener('DOMContentLoaded', async () => {
         break;
     }
     messageInput.focus();
+  }
+
+  // 意圖偵測：判斷訊息是否隱含指令意圖，回傳對應動作或 null
+  function detectCommandIntent(message, allCmds) {
+    // /page-code（比 /page 更具體，優先偵測）
+    if (
+      /(?:分析|看|查看|檢查|查一下)(?:一下)?(?:當前|這個?|此|目前)?(?:頁面|網頁)(?:的)?(?:原始碼|源碼|代碼|HTML|CSS|JS)/i.test(message) ||
+      /(?:頁面|網頁)(?:原始碼|源碼|代碼)/i.test(message)
+    ) {
+      return { type: 'fetch-page-code' };
+    }
+
+    // /page
+    if (
+      /(?:分析|總結|摘要|閱讀|讀取|理解|翻譯|幫我看)(?:一下)?(?:當前|這個?|此|目前)?(?:頁面|網頁|文章|這篇)/i.test(message) ||
+      /(?:當前|這個?|目前)(?:頁面|網頁|文章)(?:說|在說|寫|內容|是什麼|說什麼|的重點|的摘要)/i.test(message) ||
+      /(?:summarize|analyze|read|explain|translate)\s+(?:this|current|the)\s+(?:page|article|content)/i.test(message) ||
+      /what\s+(?:is|does|do)\s+(?:this|the current)\s+page/i.test(message)
+    ) {
+      return { type: 'fetch-page' };
+    }
+
+    // /remember（嚴格前綴：訊息必須以記住相關詞開頭）
+    const rememberMatch = message.match(/^(?:記住|幫(?:我)?記住|請記住|幫我記)[：:，,\s]+(.+)/s);
+    if (rememberMatch) {
+      return { type: 'execute', trigger: '/remember', args: rememberMatch[1].trim() };
+    }
+
+    // /deep-search（比 /search 更具體，優先偵測）
+    const deepSearchMatch = message.match(/^(?:深度搜尋|深度搜索|深入搜尋|深入搜索|詳細搜尋)[：:，,\s]+(.+)/);
+    if (deepSearchMatch) {
+      return { type: 'execute', trigger: '/deep-search', args: deepSearchMatch[1].trim() };
+    }
+
+    // /search（嚴格前綴：避免與 agent 自動搜尋衝突）
+    const searchMatch = message.match(/^(?:搜尋|搜索|幫(?:我)?搜|查一下)[：:，,\s]+(.+)/);
+    if (searchMatch) {
+      return { type: 'execute', trigger: '/search', args: searchMatch[1].trim() };
+    }
+
+    // 自訂 template 指令：名稱前綴匹配（需有 args，必須以空格/符號分隔）
+    const customTemplateCmds = allCmds.filter(c => c.isCustom && c.type === 'template' && c.name);
+    for (const cmd of customTemplateCmds) {
+      const msgLC = message.toLowerCase();
+      const nameLC = cmd.name.toLowerCase();
+      if (msgLC.startsWith(nameLC)) {
+        const afterName = message.slice(cmd.name.length);
+        if (afterName && !/^[：:，,\s]/.test(afterName)) continue; // 需要分隔符
+        const args = afterName.replace(/^[：:，,\s]+/, '').trim();
+        if (!args) continue; // 沒有 args 就跳過
+        return { type: 'template', cmd, args };
+      }
+    }
+
+    return null;
   }
 
   async function handleWebSearch(query, searchType = 'WEB_SEARCH') {

@@ -106,6 +106,15 @@ npm run build:css
 
 ## Changelog
 
+## [1.23.0] - 2026-05-03
+### Added
+- 新增自然語言意圖偵測系統：輸入類似指令語意的句子時，自動對應並執行對應指令，無需手動輸入 `/指令`
+- `/page`：偵測「分析/總結/摘要 + 當前/這個頁面」等句式，自動讀取頁面內容後帶入問題送出
+- `/page-code`：偵測「原始碼/代碼/HTML/CSS」相關意圖，自動讀取頁面原始碼
+- `/remember`：偵測「記住/幫我記住 + 內容」前綴，直接執行記憶儲存
+- `/search`、`/deep-search`：偵測「搜尋/查一下」、「深度搜尋」前綴，直接觸發對應搜尋
+- 自訂 template 指令：訊息以指令名稱開頭時自動套用 template 展開後送出
+
 ## [1.22.0] - 2026-05-01
 ### Added
 - 新增 OpenRouter PDF 分流：文字型 PDF 優先使用 OpenRouter PDF Inputs（Cloudflare AI parser），圖片型／掃描型 PDF 維持 Gemini 視覺分析。
