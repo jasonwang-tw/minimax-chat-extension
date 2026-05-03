@@ -1,15 +1,15 @@
-# MiniMax Chat Extension — TODO
+# Open Chat Hub — TODO
 
 ## Done
 
 - Installed `wordpress/minimax-sync` on `https://jasonsbase.com`
-- Activated the `MiniMax Sync Bridge` plugin
+- Activated the `Open Chat Hub Sync Bridge` plugin
 - Confirmed WordPress registration flow for self-service signup
 - Reloaded Chrome extension on branch `codex/plan-synchronization-for-settings-and-data`
 - Verified `設定 > 同步` WordPress login flow (`使用 WordPress 登入`)
 - Verified manual backup flow (`立即備份設定`)
 - Verified restore flow (`從雲端還原`) after local settings changes
-- Verified admin page `Settings > MiniMax Sync`:
+- Verified admin page `Settings > Open Chat Hub Sync`:
   - recent backups
   - active tokens
   - revoke action
@@ -108,9 +108,9 @@
 
 ## 待議事項
 
-- [ ] **品牌名稱重新評估**：extension 現已支援 OpenRouter（Claude、GPT-4o、Gemini 等）與 MiniMax，考慮是否將 app 名稱、description、設定頁 header 等 MiniMax 相關敘述改為更中性的名稱。方向有三：(A) 全面改品牌名稱、(B) 保留名稱但改說明文字、(C) 只改 description。目前擱置，待決策後實作。
-- [ ] **版本資訊整理**：README 頂部仍標示 `v1.13.0`，但 Changelog 已到 `v1.21.0`；package.json 仍是 `1.0.0`。需決定是否同步版本來源。
-- [ ] **備份範圍文件一致性**：README `Latest Sync Update` 仍提到每日 auto-backup 與 `chatSessions/sessionSummaries` 備份，但目前程式碼已改為即時備份且移除對話紀錄雲端備份。
+- [x] **品牌名稱重新評估**：採用 `Open Chat Hub` 作為公開產品名，保留 MiniMax 作為預設模型/provider 名稱。
+- [x] **版本資訊整理**：README、manifest、package.json、package-lock.json 統一為 `1.22.0`。
+- [x] **備份範圍文件一致性**：README 改寫為目前實作狀態，雲端備份不再宣稱包含 `chatSessions/sessionSummaries`。
 
 ---
 

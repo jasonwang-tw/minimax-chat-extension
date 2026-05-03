@@ -1,8 +1,8 @@
 <?php
 /**
- * Plugin Name: MiniMax Sync Bridge
+ * Plugin Name: Open Chat Hub Sync Bridge
  * Plugin URI: https://jasonsbase.com/
- * Description: Provides WordPress-backed login and settings backup endpoints for the MiniMax AI Chat extension.
+ * Description: Provides WordPress-backed login and settings backup endpoints for the Open Chat Hub extension.
  * Version: 0.1.6
  * Author: Jason Wang
  * License: GPLv2 or later
@@ -122,7 +122,7 @@ final class Minimax_Sync_Bridge {
         }
 
         if (!self::is_enabled()) {
-            self::render_message_page('MiniMax Sync 暫停中', '站台管理者目前已停用同步授權。請稍後再試。');
+            self::render_message_page('Open Chat Hub Sync 暫停中', '站台管理者目前已停用同步授權。請稍後再試。');
         }
 
         $redirect_uri = isset($_GET['redirect_uri']) ? esc_url_raw(wp_unslash($_GET['redirect_uri'])) : '';
@@ -145,7 +145,7 @@ final class Minimax_Sync_Bridge {
                 'state' => $state,
             ], $redirect_uri);
 
-            wp_redirect($target, 302, 'MiniMax Sync Bridge');
+            wp_redirect($target, 302, 'Open Chat Hub Sync Bridge');
             exit;
         }
 
@@ -285,8 +285,8 @@ final class Minimax_Sync_Bridge {
 
     public static function register_admin_page(): void {
         add_options_page(
-            'MiniMax Sync',
-            'MiniMax Sync',
+            'Open Chat Hub Sync',
+            'Open Chat Hub Sync',
             'manage_options',
             'minimax-sync',
             [self::class, 'render_admin_page']
@@ -317,7 +317,7 @@ final class Minimax_Sync_Bridge {
         $log_info = self::read_recent_debug_logs();
         ?>
         <div class="wrap">
-            <h1>MiniMax Sync</h1>
+            <h1>Open Chat Hub Sync</h1>
             <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
                 <?php wp_nonce_field('minimax_sync_save_settings'); ?>
                 <input type="hidden" name="action" value="minimax_sync_save_settings">
@@ -400,7 +400,7 @@ final class Minimax_Sync_Bridge {
             <div id="minimax-sync-log-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:99999;">
                 <div style="max-width:920px;margin:40px auto;background:#fff;border-radius:8px;box-shadow:0 10px 30px rgba(0,0,0,0.35);overflow:hidden;">
                     <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid #e5e5e5;">
-                        <strong>MiniMax Sync 最近 Debug Log</strong>
+                        <strong>Open Chat Hub Sync 最近 Debug Log</strong>
                         <div>
                             <button type="button" class="button" id="minimax-sync-log-refresh-btn">重新整理</button>
                             <button type="button" class="button" id="minimax-sync-log-close-btn">關閉</button>
@@ -503,7 +503,7 @@ final class Minimax_Sync_Bridge {
         <head>
             <meta charset="utf-8">
             <meta name="viewport" content="width=device-width,initial-scale=1">
-            <title>MiniMax Sync 授權</title>
+            <title>Open Chat Hub Sync 授權</title>
             <style>
                 body { font-family: sans-serif; background:#111827; color:#f9fafb; padding:32px; }
                 .card { max-width:560px; margin:0 auto; background:#1f2937; border:1px solid #374151; border-radius:16px; padding:24px; }
@@ -515,8 +515,8 @@ final class Minimax_Sync_Bridge {
         </head>
         <body>
             <div class="card">
-                <h1>MiniMax Sync 授權</h1>
-                <p>此頁面會將你的 WordPress 帳號授權給 MiniMax AI Chat extension，用於備份與還原設定快照。</p>
+                <h1>Open Chat Hub Sync 授權</h1>
+                <p>此頁面會將你的 WordPress 帳號授權給 Open Chat Hub extension，用於備份與還原設定快照。</p>
                 <?php if (!is_user_logged_in()): ?>
                     <p>你尚未登入。請先登入或註冊 WordPress 帳號後，再回到此頁完成授權。</p>
                     <a class="primary" href="<?php echo esc_url(wp_login_url($current_url)); ?>">登入</a>
@@ -785,7 +785,7 @@ final class Minimax_Sync_Bridge {
             }
         }
 
-        error_log('[MiniMax Sync] failed writing plugin debug log: ' . $message);
+        error_log('[Open Chat Hub Sync] failed writing plugin debug log: ' . $message);
     }
 
     private static function format_admin_datetime_taipei(string $value): string {

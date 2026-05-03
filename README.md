@@ -1,161 +1,90 @@
-# MiniMax AI Chat Extension
+# Open Chat Hub
 
-## Latest UI Update (2026-04-21)
+Open Chat Hub 是一個多模型 AI 側邊欄工作台，讓你在瀏覽器內直接聊天、讀網頁、分析截圖與檔案、整理知識庫、累積單字與同步設定。
 
-This update adds explicit current-session controls directly in the side panel:
-
-- A new **current session bar** under the header that shows the active session name
-- A **rename current session** button next to the current session name
-- A new **delete current session** button in the right toolbar
-- Deleting the current session now **immediately creates and switches to a new session**
-- Session name display now stays in sync when:
-  - creating a new session
-  - loading a session from history
-  - renaming a session
-  - deleting the active session
-
-## Latest Modal Recovery Update (2026-04-21)
-
-Restored and completed modal features for Long-term Memory / Vocabulary / Knowledge Base:
-
-- Restored **Long-term Memory search** in the memory modal
-- Restored **Knowledge Base search** (title / summary / tags / content / URL)
-- Restored **Knowledge tag management**:
-  - Added `管理標籤` button next to `管理分類`
-  - Added tag manager panel to remove tags globally from all KB items
-  - Tag counts are shown in manager list
-- Restored **Vocabulary language filter** (dynamic options based on stored languages)
-- Kept existing UI behavior:
-  - Knowledge analysis re-run button
-  - Summary hover to view full text
-  - Knowledge tag filter bar horizontal scroll layout
-
-## Latest Session Workflow Update (2026-04-21)
-
-This update improves side toolbar workflow and session post-processing:
-
-- Moved **delete current session** button to the last position in the right toolbar
-- Added **session to vocabulary** button:
-  - Extracts vocabulary from current session via AI
-  - Deduplicates against existing vocabulary entries
-  - Saves new entries into vocabulary storage
-- Added persistent **chat-end process status messages** when:
-  - session-to-vocabulary finishes
-  - summarize-now finishes
-- Updated assistant message container width to full available area (`max-width: 100%`)
-- Swapped modal bar order for Memory / Knowledge:
-  - search bar above filter bar
-
-## Latest Sync Update
-
-This branch delivers the WordPress-based sync flow with expanded backup scope and admin/debug hardening.
-
-What is included:
-- WordPress fallback provider for extension sync
-- External WordPress login flow using `chrome.identity.launchWebAuthFlow`
-- Manual `backup settings` and `restore settings` actions in the sync settings page
-- Daily auto-backup schedule (`auto backup time`)
-- Backup scope expanded to settings + memories + knowledge base + vocabulary + chat sessions
-- Settings page navigation changed to sticky left sidebar
-- Deployable WordPress plugin scaffold under `wordpress/minimax-sync/`
-- Plugin-side debug log file for sync troubleshooting: `wp-content/plugins/minimax-sync/minimax-sync-debug.log`
-
-MVP scope:
-- Uses WordPress sync as the primary active path
-- Backs up settings + `memories` + `knowledgeBase` + `vocabulary` + `chatSessions` + `sessionSummaries`
-- Google Drive sync UI is currently hidden in settings
-
-Main files:
-- `sync/sync-service.js`
-- `sync/providers/wordpress-provider.js`
-- `sync/settings-backup.js`
-- `wordpress/minimax-sync/minimax-sync.php`
-- `options/options.html`
-- `options/options.js`
-
-Quick deployment notes:
-1. Copy `wordpress/minimax-sync` into `wp-content/plugins/`
-2. Activate `MiniMax Sync Bridge` in WordPress
-3. Enable WordPress user registration if self-service signup is needed
-4. Reload the Chrome extension and test login from the `同步` page
-
-串接 MiniMax + Gemini Vision API 的 Chrome 擴充功能，支援側邊欄對話、區域截圖、OCR 文字辨識、翻譯、TTS 語音輸出、歷史紀錄管理。
+它採用 BYOK（bring your own key）模式：你可以使用自己的 MiniMax、Gemini、OpenRouter、Brave Search、Exa Search API Key。API Key 儲存在 Chrome 本機/同步儲存區，AI 請求會直接送往你設定的第三方 provider。
 
 ## 版本
 
-**v1.13.0** (2026-04-21)
+**v1.22.0** (2026-05-01)
 
 ## 功能特色
 
 ### 對話
-- 點擊擴充圖示即可開啟側邊欄進行 AI 對話
-- **雙引擎架構**：文字對話走 MiniMax（MiniMax-M2.7），圖片分析走 Gemini（gemini-2.5-flash-lite）
+- 點擊擴充圖示即可開啟側邊欄進行 AI 對話。
+- 預設支援 MiniMax-M2.7，並可透過 OpenRouter 自訂 Claude、GPT、Gemini、Llama、DeepSeek、Mistral 等模型。
+- 側邊欄模型選擇器會顯示模型價格、context 與用途資訊。
 
-### 圖片 / 視覺分析
-- **全頁截圖**：一鍵截取目前分頁畫面
-- **區域截圖**：拖曳選取範圍，內建 canvas 裁切 modal
-- **圖片上傳**：支援上傳本地圖片
-- 截圖/上傳均顯示縮圖標籤（全頁截圖 / 區域截圖 / 上傳 / OCR），送出後 Gemini 分析 → MiniMax 整理輸出
+### 截圖 / 圖片 / 檔案分析
+- 全頁截圖、區域截圖與圖片上傳。
+- OCR 文字辨識與圖片內容分析。
+- 支援 PDF、圖片、文字、Markdown、CSV、JSON、程式碼等檔案輸入。
+- 文字型 PDF 優先使用 OpenRouter PDF Inputs，圖片型或掃描型 PDF 維持 Gemini 視覺分析。
 
 ### OCR & 翻譯
-- **OCR 文字辨識**：Gemini 提取圖片文字 → MiniMax 整理格式化
-- **翻譯模式**：切換按鈕開啟雙向翻譯，支援 10 種語言（中文、英文、日文、韓文、法文、德文、西班牙文、葡萄牙文、俄文、阿拉伯文）
+- OCR 可擷取圖片文字並交由 AI 整理格式。
+- 翻譯模式支援中文、英文、日文、韓文、法文、德文、西班牙文、葡萄牙文、俄文、阿拉伯文。
+- TTS 可朗讀訊息，預設使用 Google Translate TTS，失敗時 fallback 至 Web Speech API。
 
-### 語音
-- **TTS 語音輸出**：每則訊息旁有小喇叭按鈕，使用 Google Translate TTS 高品質朗讀
-- **自動語言偵測**：TTS 依訊息內容自動切換語言（中文/英文/日文/韓文等）
+### Agent 搜尋
+- AI Agent 可自行決定是否呼叫 `web_search` 或 `deep_search`。
+- Brave Search 與 Exa Search 可互為 fallback。
+- 回答完成後保留可展開的搜尋歷程與來源連結。
 
-### 歷史紀錄
-- 對話 Session 自動保存（最多 50 筆）
-- **個別刪除**：每筆紀錄旁有垃圾桶按鈕
-- **批次刪除**：選取模式可勾選多筆一次刪除，支援全選
-- **重新命名**：點擊編輯圖示可 inline 重新命名 Session
-- **釘選**：重要對話釘選置頂，顯示紫色左邊框
-- **搜尋**：即時搜尋 Session 名稱或訊息內容，關鍵字高亮
+### 知識與學習
+- 長期記憶：用 `/remember` 儲存重要資訊，也可開啟 AI 自動萃取。
+- Knowledge Base：保存網頁、摘要、標籤與分類，支援搜尋與重新分析。
+- Vocabulary：從對話萃取單字，支援分類、語言篩選與翻譯補齊。
 
-### 斜線指令 /Commands
-- 輸入框輸入 `/` 即彈出指令選單，支援鍵盤 ↑/↓/Enter/Tab/Esc 導航
-- **內建指令**：`/screenshot`、`/region`、`/ocr`、`/page`、`/new`、`/clear`、`/remember`、`/forget`、`/mode`、`/summarize`
-- **自訂指令**：在設定頁面新增模板類型指令，`{input}` 替換為 / 後輸入的文字
+### 對話工作流
+- 對話 Session 自動保存，支援搜尋、釘選、重新命名、個別刪除與批次刪除。
+- 輸入列支援訊息 queue，串流中仍可繼續排入下一則訊息。
+- 對話內搜尋、TOC 目錄、圖片 lightbox 導航、Markdown 強化渲染。
 
-### 長期記憶
-- `/remember <內容>` 新增記憶，AI 在每次對話時都會記住這些資訊
-- `/forget` 開啟記憶管理面板，可刪除個別條目或清空全部
-- **AI 自動萃取**（選擇性開啟）：每次對話後自動分析並記住重要使用者事實
+### 斜線指令
+- 輸入 `/` 開啟指令選單，支援鍵盤導覽。
+- 內建指令包含 `/screenshot`、`/region`、`/ocr`、`/page`、`/new`、`/clear`、`/remember`、`/forget`、`/summarize`。
+- 可在設定頁建立自訂模板指令，使用 `{input}` 插入使用者文字。
 
-### 頁面讀取 Skill
-- `/page <問題>` 讀取當前分頁標題、描述與正文（前 8000 字），附加至訊息後送出
-- 輸入框上方顯示「已附加頁面內容」chip，可點 × 移除
+### 同步與備份
+- 本機 JSON 匯出/匯入。
+- Open Chat Hub Sync Bridge 可備份設定、提示詞、記憶、知識庫、Vocabulary、分類、自訂指令與 provider 設定。
+- 對話紀錄與 session summaries 因資料量大，目前不納入雲端備份。
 
-### 模型與回覆模式
-- **模型選擇**：⚡ 快速 / 🔵 一般 / 💻 程式碼，可在對話視窗即時切換
-- **回覆模式**：💬 標準 / 🔍 討論模式（多角度推理），支援在設定頁面自訂無限模式
-- **預設提示詞**：在設定頁面分別設定一般問答、圖像分析、OCR 的 System Prompt
-
-### 其他
-- **複製按鈕**：每則訊息旁新增複製圖示，一鍵複製訊息內容
-- API Key 安全儲存在本機（chrome.storage.sync）
-- 深色主題 UI 設計
+### 使用量與費用
+- OpenRouter token usage ledger。
+- 依模型統計 input/output tokens、請求數與估算費用。
+- OpenRouter 模型費用表可搜尋、排序與依用途篩選。
 
 ## 安裝方式
 
 1. 開啟 `chrome://extensions/`
 2. 開啟右上角「開發人員模式」
 3. 點擊「載入未封裝項目」
-4. 選擇 `minimax-chat-extension` 資料夾
+4. 選擇此專案資料夾
 
 ## 使用方式
 
 1. 點擊擴充圖示，進入設定頁面
-2. 輸入 **MiniMax API Key**（文字對話必填）
-3. 輸入 **Gemini API Key**（截圖 / 圖片分析 / OCR / 翻譯必填）
-4. 點擊對應的「測試連線」確認 API 可用
-5. 儲存設定後即可開始使用
+2. 輸入 MiniMax API Key，或設定 OpenRouter API Key 與自訂模型
+3. 如需截圖、圖片、OCR 或掃描型 PDF 分析，輸入 Gemini API Key
+4. 如需 Agent 搜尋，輸入 Brave Search 或 Exa Search API Key
+5. 點擊對應的「測試連線」確認 API 可用
+6. 儲存設定後即可開始使用
 
 ## API Key 取得
 
 - **MiniMax API Key**：至 [MiniMax Platform](https://platform.minimax.chat/) 取得
 - **Gemini API Key**：至 [Google AI Studio](https://aistudio.google.com/) 取得
+- **OpenRouter API Key**：至 [OpenRouter Keys](https://openrouter.ai/keys) 取得
+- **Brave Search API Key**：至 [Brave Search API](https://brave.com/search/api/) 取得
+- **Exa Search API Key**：至 [Exa](https://exa.ai/) 取得
+
+## 隱私與資料
+
+Open Chat Hub 不會自行販售或分享使用者資料。你輸入的訊息、頁面內容、截圖、檔案與搜尋查詢，只有在你主動使用對應功能時才會送往你設定的第三方 provider。
+
+詳細資料處理範圍請見 [PRIVACY.md](PRIVACY.md)。
 
 ## 開發
 
@@ -170,7 +99,7 @@ npm run build:css
 ## 技術架構
 
 - **Manifest V3**：最新 Chrome 擴充功能格式
-- **Service Worker**：背景處理 API 請求（MiniMax 文字 / Gemini 圖片分流）
+- **Service Worker**：背景處理 MiniMax、OpenRouter、Gemini、Brave Search、Exa Search 等 provider 請求
 - **Side Panel**：側邊欄 UI
 - **Google Translate TTS**：高品質多語言語音輸出，失敗時 fallback 至 Web Speech API
 - **TailwindCSS + SCSS**：樣式設計
@@ -693,7 +622,7 @@ npm run build:css
 
 ## [1.0.0] - 2026-04-06
 ### Added
-- 初始版本：MiniMax AI Chat Chrome Extension
+- 初始版本：AI Chat Chrome Extension，後續公開產品名調整為 Open Chat Hub。
 
 ## License
 

@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "MiniMax AI Chat",
+  "name": "Open Chat Hub",
   "version": "1.22.0",
-  "description": "串接 MiniMax API 的 AI 對話擴充功能，點擊即可開啟側邊欄與 AI 對話",
+  "description": "多模型 AI 側邊欄工作台，支援聊天、網頁閱讀、截圖、OCR、翻譯、檔案分析、知識庫與同步備份",
   "permissions": [
     "storage",
     "sidePanel",
@@ -34,7 +34,7 @@
       "48": "icons/icon48.png",
       "128": "icons/icon128.png"
     },
-    "default_title": "MiniMax AI Chat"
+    "default_title": "Open Chat Hub"
   },
   "side_panel": {
     "default_path": "sidepanel/sidepanel.html"

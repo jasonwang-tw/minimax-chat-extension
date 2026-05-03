@@ -1,6 +1,6 @@
-# MiniMax Sync Bridge
+# Open Chat Hub Sync Bridge
 
-WordPress plugin for the MiniMax AI Chat extension fallback sync flow.
+WordPress plugin for the Open Chat Hub fallback sync flow.
 
 ## Features
 
@@ -13,14 +13,14 @@ WordPress plugin for the MiniMax AI Chat extension fallback sync flow.
   - `POST /wp-json/minimax-sync/v1/backup/settings`
   - `PUT /wp-json/minimax-sync/v1/backup/settings`
   - `POST /wp-json/minimax-sync/v1/auth/logout`
-- Admin page under `Settings > MiniMax Sync`
+- Admin page under `Settings > Open Chat Hub Sync`
 - Plugin-local debug log file (`minimax-sync-debug.log`)
 - Admin `顯示日誌` button with modal for recent debug logs
 
 ## Install
 
 1. Copy the `minimax-sync` folder into `wp-content/plugins/`
-2. Activate `MiniMax Sync Bridge`
+2. Activate `Open Chat Hub Sync Bridge`
 3. Ensure WordPress user registration is enabled if self-service signup is required
 4. Keep the site on HTTPS
 

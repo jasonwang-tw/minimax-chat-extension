@@ -364,7 +364,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           'Authorization': `Bearer ${key}`,
           'Content-Type': 'application/json',
           'HTTP-Referer': chrome.runtime.getURL(''),
-          'X-Title': 'MiniMax AI Chat'
+          'X-Title': 'Open Chat Hub'
         },
         body: JSON.stringify({
           model: rawModel,
