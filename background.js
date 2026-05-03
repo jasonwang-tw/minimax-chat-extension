@@ -1527,6 +1527,284 @@ const AGENT_TOOLS_SEARCH = [
   }
 ];
 
+const AGENT_TOOLS_BROWSER = [
+  {
+    type: 'function',
+    function: {
+      name: 'browser_click',
+      description: '點擊頁面上的指定元素（按鈕、連結、核取方塊等）。優先使用 id、data-testid、aria-label 定位，再考慮 CSS class。',
+      parameters: {
+        type: 'object',
+        properties: {
+          selector: { type: 'string', description: 'CSS selector，例如 #submit、[aria-label="搜尋"]、.btn-primary' }
+        },
+        required: ['selector']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'browser_fill',
+      description: '填入文字到輸入框（input、textarea）。填入後自動觸發 input 與 change 事件，相容 React / Vue 應用。',
+      parameters: {
+        type: 'object',
+        properties: {
+          selector: { type: 'string', description: 'CSS selector，例如 #email、[name="username"]' },
+          value: { type: 'string', description: '要填入的文字' }
+        },
+        required: ['selector', 'value']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'browser_select',
+      description: '選擇 <select> 下拉選單的選項，支援依 value 屬性或顯示文字匹配。',
+      parameters: {
+        type: 'object',
+        properties: {
+          selector: { type: 'string', description: 'CSS selector 指向 <select> 元素' },
+          value: { type: 'string', description: '選項的 value 屬性值或顯示文字' }
+        },
+        required: ['selector', 'value']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'browser_get_text',
+      description: '取得頁面元素或整頁的文字內容。省略 selector 時自動擷取主要內容區域（main / article），最多回傳 8000 字元。',
+      parameters: {
+        type: 'object',
+        properties: {
+          selector: { type: 'string', description: 'CSS selector（可省略，省略時取整頁主要內容）' }
+        },
+        required: []
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'browser_get_html',
+      description: '取得頁面元素的 HTML 原始碼，用於分析頁面結構或找到正確的 selector。最多回傳 5000 字元。',
+      parameters: {
+        type: 'object',
+        properties: {
+          selector: { type: 'string', description: 'CSS selector（可省略，省略時取 body HTML）' }
+        },
+        required: []
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'browser_scroll',
+      description: '捲動頁面。direction 可為 up/down（相對捲動）或 top/bottom（捲到頁首/頁尾）。',
+      parameters: {
+        type: 'object',
+        properties: {
+          direction: { type: 'string', enum: ['up', 'down', 'top', 'bottom'], description: '捲動方向' },
+          amount: { type: 'number', description: '捲動像素（direction 為 top/bottom 時忽略，預設 300）' }
+        },
+        required: ['direction']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'browser_wait_for',
+      description: '等待頁面出現指定元素，適用於頁面載入或動態內容渲染後的操作。預設最多等待 5 秒。',
+      parameters: {
+        type: 'object',
+        properties: {
+          selector: { type: 'string', description: '要等待的元素 CSS selector' },
+          timeout: { type: 'number', description: '最長等待毫秒數（預設 5000，上限 15000）' }
+        },
+        required: ['selector']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'browser_navigate',
+      description: '在新分頁中開啟指定 URL，不影響使用者當前頁面。同一 session 內的後續 browser_* 操作都會在此新分頁執行。導航後可搭配 browser_wait_for 等待頁面載入完成。',
+      parameters: {
+        type: 'object',
+        properties: {
+          url: { type: 'string', description: '完整 URL，例如 https://example.com' }
+        },
+        required: ['url']
+      }
+    }
+  }
+];
+
+// ── Session 層級瀏覽器分頁追蹤 ───────────────────────────────
+// key: sessionId → tabId（該 session 的 agent 分頁）
+const agentBrowserSessions = new Map();
+
+async function getAgentTabId(sessionId) {
+  const tabId = agentBrowserSessions.get(sessionId);
+  if (!tabId) return null;
+  // 確認分頁仍存在
+  try {
+    await chrome.tabs.get(tabId);
+    return tabId;
+  } catch {
+    agentBrowserSessions.delete(sessionId);
+    return null;
+  }
+}
+
+// ── 取得使用者當前活動分頁 ────────────────────────────────────
+async function getActivePageTab() {
+  return new Promise((resolve) => {
+    chrome.windows.getLastFocused({ windowTypes: ['normal'] }, (win) => {
+      if (chrome.runtime.lastError || !win) { resolve(null); return; }
+      chrome.tabs.query({ active: true, windowId: win.id }, (tabs) => {
+        resolve(tabs?.[0] || null);
+      });
+    });
+  });
+}
+
+// ── tool_start 顯示文字 ───────────────────────────────────────
+function toolDisplayQuery(name, args) {
+  if (args.query) return args.query;
+  if (args.selector) return args.selector;
+  if (args.url) return args.url;
+  if (args.direction) return args.amount ? `${args.direction} ${args.amount}px` : args.direction;
+  if (args.value) return String(args.value).slice(0, 40);
+  return '';
+}
+
+// ── 瀏覽器工具執行 ────────────────────────────────────────────
+async function executeBrowserTool(toolName, args, sessionId) {
+  // browser_navigate：永遠開新分頁，儲存至 session
+  if (toolName === 'browser_navigate') {
+    try {
+      const tab = await chrome.tabs.create({ url: args.url, active: false });
+      if (sessionId) agentBrowserSessions.set(sessionId, tab.id);
+      return { success: true, url: args.url, tabId: tab.id };
+    } catch (e) {
+      return { error: e.message };
+    }
+  }
+
+  // 其他工具：優先使用 session agent 分頁，否則使用使用者當前分頁
+  let tabId;
+  if (sessionId) {
+    tabId = await getAgentTabId(sessionId);
+  }
+  if (!tabId) {
+    const tab = await getActivePageTab();
+    if (!tab) return { error: '找不到活動分頁' };
+    tabId = tab.id;
+  }
+
+  async function exec(func, funcArgs = []) {
+    try {
+      const results = await chrome.scripting.executeScript({ target: { tabId }, func, args: funcArgs });
+      return results[0].result;
+    } catch (e) {
+      return { error: e.message };
+    }
+  }
+
+  if (toolName === 'browser_click') {
+    return await exec((sel) => {
+      const el = document.querySelector(sel);
+      if (!el) return { error: `找不到元素: ${sel}` };
+      el.click();
+      return { success: true, tag: el.tagName.toLowerCase(), text: (el.textContent || '').trim().slice(0, 60) };
+    }, [args.selector]);
+  }
+
+  if (toolName === 'browser_fill') {
+    return await exec((sel, val) => {
+      const el = document.querySelector(sel);
+      if (!el) return { error: `找不到元素: ${sel}` };
+      const inputProto = window.HTMLInputElement.prototype;
+      const textareaProto = window.HTMLTextAreaElement.prototype;
+      const nativeSetter = Object.getOwnPropertyDescriptor(inputProto, 'value')?.set
+        || Object.getOwnPropertyDescriptor(textareaProto, 'value')?.set;
+      if (nativeSetter) nativeSetter.call(el, val);
+      else el.value = val;
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+      return { success: true, value: val };
+    }, [args.selector, args.value]);
+  }
+
+  if (toolName === 'browser_select') {
+    return await exec((sel, val) => {
+      const el = document.querySelector(sel);
+      if (!el || el.tagName !== 'SELECT') return { error: `找不到 <select> 元素: ${sel}` };
+      const opt = Array.from(el.options).find(o => o.value === val || o.text === val);
+      if (!opt) return { error: `找不到選項: ${val}` };
+      el.value = opt.value;
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+      return { success: true, selected: opt.text };
+    }, [args.selector, args.value]);
+  }
+
+  if (toolName === 'browser_get_text') {
+    return await exec((sel) => {
+      let el;
+      if (sel) {
+        el = document.querySelector(sel);
+        if (!el) return { error: `找不到元素: ${sel}` };
+      } else {
+        el = document.querySelector('main, [role="main"], article, #main-content, #content, .main-content') || document.body;
+      }
+      const text = el.innerText || '';
+      return { text: text.length > 8000 ? text.slice(0, 8000) + '\n...（已截斷）' : text, length: text.length };
+    }, [args.selector || '']);
+  }
+
+  if (toolName === 'browser_get_html') {
+    return await exec((sel) => {
+      const el = sel ? document.querySelector(sel) : document.body;
+      if (!el) return { error: `找不到元素: ${sel}` };
+      const html = el.innerHTML || '';
+      return { html: html.length > 5000 ? html.slice(0, 5000) + '\n...（已截斷）' : html, length: html.length };
+    }, [args.selector || '']);
+  }
+
+  if (toolName === 'browser_scroll') {
+    return await exec((direction, amount) => {
+      const px = amount || 300;
+      if (direction === 'top') window.scrollTo({ top: 0, behavior: 'smooth' });
+      else if (direction === 'bottom') window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+      else if (direction === 'up') window.scrollBy({ top: -px, behavior: 'smooth' });
+      else window.scrollBy({ top: px, behavior: 'smooth' });
+      return { success: true, scrollY: window.scrollY };
+    }, [args.direction, args.amount || 300]);
+  }
+
+  if (toolName === 'browser_wait_for') {
+    const selector = args.selector;
+    const timeout = Math.min(args.timeout || 5000, 15000);
+    const start = Date.now();
+    while (Date.now() - start < timeout) {
+      const found = await exec((sel) => !!document.querySelector(sel), [selector]);
+      if (found === true) return { success: true, selector };
+      if (found?.error) return found;
+      await new Promise(r => setTimeout(r, 300));
+    }
+    return { error: `等待逾時 (${timeout}ms)：找不到 ${selector}` };
+  }
+
+  return { error: `未知瀏覽器工具: ${toolName}` };
+}
+
 // ── XML 工具呼叫解析（MiniMax M2.7 使用 XML 格式而非 OpenAI tool_calls）──
 function parseXmlToolCalls(content) {
   if (!content || typeof content !== 'string') return null;
@@ -1547,7 +1825,7 @@ function parseXmlToolCalls(content) {
 }
 
 // ── Tool 執行路由 ─────────────────────────────────────────────
-async function handleToolCall(name, args) {
+async function handleToolCall(name, args, sessionId) {
   if (name === 'web_search') {
     const r = await braveSearch(args.query);
     if (r.success) return { results: r.results, provider: r.provider };
@@ -1559,6 +1837,9 @@ async function handleToolCall(name, args) {
     if (r.success) return { results: r.results, provider: r.provider };
     const fallback = await braveSearch(args.query);
     return fallback.success ? { results: fallback.results, provider: fallback.provider } : { error: r.error };
+  }
+  if (name.startsWith('browser_')) {
+    return await executeBrowserTool(name, args, sessionId);
   }
   return { error: `未知工具: ${name}` };
 }
@@ -1572,21 +1853,11 @@ async function streamAgentChat(message, history, translateConfig, model, systemP
   const useOpenRouter = !!(openrouterApiKey && requestedModel !== MODEL_NAME);
   if (!useOpenRouter && !apiKey) throw new Error('請先在設定頁面輸入 API Key');
 
-  // 決定可用工具
+  // 決定可用工具（瀏覽器工具永遠可用，搜尋工具視 API Key 決定）
   const { braveApiKey, exaApiKey } = await chrome.storage.sync.get(['braveApiKey', 'exaApiKey']);
-  const tools = [];
+  const tools = [...AGENT_TOOLS_BROWSER];
   if (braveApiKey || exaApiKey) tools.push(AGENT_TOOLS_SEARCH[0]); // web_search
   if (exaApiKey) tools.push(AGENT_TOOLS_SEARCH[1]);                 // deep_search
-
-  // 無工具可用 → 直接使用正常 streaming
-  if (tools.length === 0) {
-    port.postMessage({
-      type: 'agent_notice',
-      text: '未啟用搜尋工具，已改用一般對話回覆。可在設定頁加入 Brave 或 Exa API Key 啟用 Agent 搜尋。',
-      level: 'info'
-    });
-    return streamMiniMaxChat(message, history, translateConfig, model, systemPrompt, memoryContext, port, sessionId, contextCharBudget);
-  }
 
   const useModel = requestedModel;
   if (useOpenRouter) {
@@ -1728,9 +1999,9 @@ async function streamAgentChat(message, history, translateConfig, model, systemP
           const name = tc.function?.name || tc.name || '';
           let args = {};
           try { args = JSON.parse(tc.function?.arguments || tc.arguments || '{}'); } catch {}
-          port.postMessage({ type: 'tool_start', tool: name, query: args.query || '' });
+          port.postMessage({ type: 'tool_start', tool: name, query: toolDisplayQuery(name, args) });
           let result;
-          try { result = await handleToolCall(name, args); } catch (e) { result = { error: e.message }; }
+          try { result = await handleToolCall(name, args, sessionId); } catch (e) { result = { error: e.message }; }
           if (result.error) {
             port.postMessage({
               type: 'agent_notice',
@@ -1751,9 +2022,9 @@ async function streamAgentChat(message, history, translateConfig, model, systemP
 
         const resultParts = [];
         for (const tc of xmlToolCalls) {
-          port.postMessage({ type: 'tool_start', tool: tc.name, query: tc.args.query || '' });
+          port.postMessage({ type: 'tool_start', tool: tc.name, query: toolDisplayQuery(tc.name, tc.args) });
           let result;
-          try { result = await handleToolCall(tc.name, tc.args); } catch (e) { result = { error: e.message }; }
+          try { result = await handleToolCall(tc.name, tc.args, sessionId); } catch (e) { result = { error: e.message }; }
           if (result.error) {
             port.postMessage({
               type: 'agent_notice',

@@ -2553,7 +2553,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         return;
       }
       if (msg.type === 'tool_start') {
-        const label = msg.tool === 'deep_search' ? '🔎 深度搜尋' : '🔍 搜尋網路';
+        const label = getAgentToolLabel(msg.tool);
         updateAgentStatus(`第 ${_agentIter} 輪 · ${label}：${msg.query}`);
         _agentSearchLog.push({ tool: msg.tool, query: msg.query, count: null });
         return;
@@ -2821,11 +2821,41 @@ document.addEventListener('DOMContentLoaded', async () => {
     _agentIter = 0;
   }
 
+  function getBrowserToolIcon(tool) {
+    const map = {
+      browser_click: '🖱', browser_fill: '✏️', browser_select: '🔽',
+      browser_get_text: '📄', browser_get_html: '🧩',
+      browser_scroll: '↕️', browser_wait_for: '⏳', browser_navigate: '🌐'
+    };
+    return map[tool] || '🔧';
+  }
+
+  function getBrowserToolLabel(tool) {
+    const map = {
+      browser_click: '點擊', browser_fill: '填入', browser_select: '選擇',
+      browser_get_text: '讀取文字', browser_get_html: '讀取 HTML',
+      browser_scroll: '捲動', browser_wait_for: '等待元素', browser_navigate: '開新分頁'
+    };
+    return map[tool] || tool;
+  }
+
+  function getAgentToolLabel(tool) {
+    if (tool === 'deep_search') return '🔎 深度搜尋';
+    if (tool === 'web_search') return '🔍 搜尋網路';
+    if (tool?.startsWith('browser_')) return `${getBrowserToolIcon(tool)} ${getBrowserToolLabel(tool)}`;
+    return `🔧 ${tool}`;
+  }
+
   function buildSearchHistoryEl(log) {
     const total = log.length;
+    const hasBrowser = log.some(e => e.tool?.startsWith('browser_'));
+    const summaryText = hasBrowser ? `已執行 ${total} 次操作` : `已執行 ${total} 次搜尋`;
     const items = log.map(e => {
-      const icon = e.tool === 'deep_search' ? '🔎' : '🔍';
-      const label = e.tool === 'deep_search' ? '深度搜尋' : '搜尋';
+      let icon, label;
+      if (e.tool === 'deep_search') { icon = '🔎'; label = '深度搜尋'; }
+      else if (e.tool === 'web_search') { icon = '🔍'; label = '搜尋'; }
+      else if (e.tool?.startsWith('browser_')) { icon = getBrowserToolIcon(e.tool); label = getBrowserToolLabel(e.tool); }
+      else { icon = '🔧'; label = e.tool; }
       const countStr = e.error
         ? `<span class="agent-sh-count error">失敗</span>`
         : (e.count != null ? `<span class="agent-sh-count">${e.count} 筆</span>` : '');
@@ -2836,7 +2866,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     div.className = 'agent-search-history';
     div.innerHTML =
       `<details class="agent-search-details">` +
-      `<summary><span class="agent-sh-summary-text">已執行 ${total} 次搜尋</span><span class="agent-sh-chevron">▾</span></summary>` +
+      `<summary><span class="agent-sh-summary-text">${summaryText}</span><span class="agent-sh-chevron">▾</span></summary>` +
       `<ul class="agent-search-log">${items}</ul>` +
       `</details>`;
     return div;
@@ -2931,7 +2961,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         return;
       }
       if (msg.type === 'tool_start') {
-        const label = msg.tool === 'deep_search' ? '🔎 深度搜尋' : '🔍 搜尋網路';
+        const label = getAgentToolLabel(msg.tool);
         updateAgentStatus(`第 ${_agentIter} 輪 · ${label}：${msg.query}`);
         _agentSearchLog.push({ tool: msg.tool, query: msg.query, count: null });
         return;
