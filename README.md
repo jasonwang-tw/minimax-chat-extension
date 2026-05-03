@@ -106,6 +106,15 @@ npm run build:css
 
 ## Changelog
 
+## [1.24.0] - 2026-05-03
+### Added
+- 瀏覽器自動化 Phase 1：新增 8 個 browser_* Agent Tools（`browser_click`、`browser_fill`、`browser_select`、`browser_get_text`、`browser_get_html`、`browser_scroll`、`browser_wait_for`、`browser_navigate`）
+- 透過 `chrome.scripting.executeScript` 直接執行 DOM 操作，無需額外 content script，相容 React / Vue 應用（native value setter + 事件觸發）
+- `browser_wait_for` 採輪詢機制，支援動態渲染頁面，逾時上限 15 秒
+- `browser_navigate` 使用 `chrome.tabs.update`，整合 `browser_wait_for` 可等待頁面載入
+- Agent 狀態列與操作歷程面板支援瀏覽器工具圖示（🖱 ✏️ 🌐 等）與動作標籤
+- 瀏覽器工具永遠可用，不依賴搜尋 API Key
+
 ## [1.23.1] - 2026-05-03
 ### Added
 - 新增 `/plan` 自然語言意圖偵測：「幫我計畫/規劃/制定計畫 + 任務」等自然句型自動進入計畫模式，無需輸入 `/plan`

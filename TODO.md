@@ -104,6 +104,14 @@
 - Added a unified chat attachment model while preserving legacy `images` / `fileInfos` compatibility.
 - Added OpenRouter image output attachment extraction and chat rendering.
 
+## Done (v1.24.x)
+
+- 瀏覽器自動化 Phase 1：8 個 browser_* Agent Tools（click / fill / select / get_text / get_html / scroll / wait_for / navigate）
+- `executeBrowserTool()` 使用 `chrome.scripting.executeScript` 直接執行 DOM 操作，相容 React/Vue
+- `AGENT_TOOLS_BROWSER` 永遠加入 Agent tools 清單，不依賴搜尋 API Key
+- Agent 狀態列與操作歷程面板新增瀏覽器工具圖示（🖱 ✏️ 🌐 等）
+- `toolDisplayQuery()` helper 讓 tool_start 顯示有意義的 selector / URL / 方向資訊
+
 ## Done (v1.23.x)
 
 - Added dynamic Context window UI:
@@ -148,14 +156,17 @@
 | 🔴 P0 | MiniMax 圖像生成 | 高價值、差異化功能 |
 | 🟠 P1 | AI 設定 & 記憶工具 | 搭配 Agent Loop |
 | 🟠 P1 | Plan Approval / 計畫模式 | 高風險工具前置審核與批准流程 |
+| 🟠 P1 | 瀏覽器自動化 Phase 1 | Content Script 工具（click / fill / read） |
 | 🟠 P1 | API Tool Registry | HTTP API 工具 schema、金鑰、allowlist、read/write 權限 |
 | 🟠 P1 | SSH / Server Tool | Native Messaging 或後端 proxy，強制 Plan Approval |
 | 🟠 P1 | MiniMax TTS 升級 | 現有 Google TTS 直接替換 |
 | 🟠 P1 | System Prompt 壓縮 | M2.7 200k token 充分利用 |
+| 🟡 P2 | 瀏覽器自動化 Phase 2 | chrome.debugger CDP（截圖、JS 執行、網路攔截） |
 | 🟡 P2 | 任務腳本（Task Script） | 長任務腳本化，搭配 Agent |
 | 🟡 P2 | 筆記工具（MD Notes） | write/read/list note |
 | 🟡 P2 | Spaces 多空間 | tab-based 切換，搭配多窗口策略 |
 | 🟡 P2 | 部落格助手 | jasonsbase-blog 實裝 |
+| 🟢 P3 | 瀏覽器自動化 Phase 3 | Native Messaging + Playwright（完整多 tab 自動化） |
 | 🟢 P3 | MiniMax 影片生成 | 非同步任務，複雜度高 |
 | 🟢 P3 | Skill 執行工具 | run_skill，搭配任務腳本 |
 | 🟢 P3 | 財經功能 | /stock、/twstock、/news |
@@ -390,6 +401,108 @@
 - [ ] **精選圖片生成**：整合 MiniMax Image API（或 Gemini Flash Image），依文章主題生成封面圖
 - [ ] **圖片上傳 WP Media**：`POST /wp-json/wp/v2/media`，設定為文章 `featured_media`
 - [ ] **alt text 自動填入**：含 SEO 關鍵字
+
+---
+
+## 🟠 P1 / 🟡 P2 / 🟢 P3 — 瀏覽器自動化（Browser Automation）
+
+讓 AI Agent 能直接操控瀏覽器，實現「點擊、填表、擷取、截圖、腳本化流程」等自動化行為。  
+架構採三階段漸進，無需外部工具即可覆蓋 80% 使用情境。
+
+> **技術選型說明**：`browser-use`、`Playwright MCP` 等開源工具均為 Python/Node.js Server，無法直接整合進 Chrome Extension。Extension 本身即在瀏覽器環境內，使用原生 API 是最低成本且最穩定的路徑。
+
+---
+
+### Phase 1 — Content Script 基礎工具（P1）✅ 已完成 v1.24.0
+
+透過 `chrome.scripting.executeScript` 在當前 tab 執行 DOM 操作，整合進現有 `handleToolCall()`。
+
+**新增 Agent Tools**
+
+- [x] **`browser_click(selector)`**：點擊指定 CSS selector 元素
+- [x] **`browser_fill(selector, value)`**：填入表單欄位（React/Vue native setter 相容）
+- [x] **`browser_select(selector, value)`**：選擇 `<select>` 下拉選項（value / text 雙模式）
+- [x] **`browser_get_text(selector?)`**：擷取元素或整頁文字（截斷 8000 字元）
+- [x] **`browser_get_html(selector?)`**：擷取元素 HTML 結構（截斷 5000 字元）
+- [x] **`browser_scroll(direction, amount?)`**：捲動頁面（up / down / top / bottom）
+- [x] **`browser_wait_for(selector, timeout?)`**：輪詢等待元素出現（上限 15 秒）
+- [x] **`browser_navigate(url)`**：使用 `chrome.tabs.update` 導航至指定 URL
+
+**實作細節**
+
+- `chrome.scripting.executeScript` 內聯函式，無需獨立 content script
+- background.js `handleToolCall()` 新增 `browser_*` 分支，路由至 `executeBrowserTool()`
+- 瀏覽器工具永遠加入 Agent tools 清單，不依賴 API Key
+- sidepanel.js 新增 `getBrowserToolIcon/Label`、`getAgentToolLabel` helper
+- 操作歷程面板支援瀏覽器工具圖示與標籤，summary 改為「已執行 N 次操作」
+
+---
+
+### Phase 2 — chrome.debugger CDP 工具（P2）
+
+使用 `chrome.debugger` API 存取 Chrome DevTools Protocol，提供截圖、JS 執行、網路攔截等進階能力。
+
+> **UX 注意**：附加 debugger 時頁面頂部會出現黃色「正在偵錯此標籤頁」警告條，需於 UI 明確告知使用者。
+
+**新增 Agent Tools**
+
+- [ ] **`browser_screenshot()`**：截取當前 tab 畫面，以 base64 image 回傳給 AI 視覺分析
+- [ ] **`browser_eval(script)`**：在頁面執行任意 JS，回傳結果（需 Plan Approval）
+- [ ] **`browser_get_network_log()`**：擷取頁面最近 N 筆網路請求（URL、status、body 摘要）
+- [ ] **`browser_block_request(urlPattern)`**：封鎖特定資源請求（廣告/tracker 過濾場景）
+- [ ] **`browser_emulate_device(device)`**：切換 viewport/UA 至手機/平板模擬
+
+**實作細節**
+
+- 需在 manifest.json 新增 `"debugger"` permission
+- background.js 管理 debugger 附加/分離生命週期（對話結束後自動 detach）
+- `browser_eval` 強制要求 Plan Approval，且結果長度超過 2000 字元自動截斷
+- 截圖結果以 attachment 形式顯示在聊天視窗（複用現有圖片渲染邏輯）
+
+---
+
+### Phase 3 — Native Messaging + Playwright（P3）
+
+透過 Native Messaging 橋接本地 Node.js 執行器，運行 Playwright 實現完整多 tab 自動化。
+
+> **安裝門檻**：使用者需執行一次安裝腳本（`install-host.sh`），設定 Native Messaging host。適合進階使用者或企業場景。
+
+**架構**
+
+```
+Extension (background.js)
+  │  chrome.runtime.sendNativeMessage
+  ▼
+Native Host (Node.js / minimax-browser-host)
+  │  Playwright API
+  ▼
+Chromium / Chrome
+```
+
+**功能範圍**
+
+- [ ] **Native Messaging host**：Node.js 執行器，接收 JSON 指令、回傳結果
+- [ ] **多 tab 自動化**：開啟新 tab、切換、關閉，跨頁面操作序列
+- [ ] **`browser_run_script(steps[])`**：執行多步驟自動化腳本（支援 loop / condition）
+- [ ] **`browser_extract_structured(schema)`**：依 JSON schema 擷取結構化資料（價格、列表、表格等）
+- [ ] **無頭截圖 / PDF 輸出**：背景截圖不影響使用者操作中的頁面
+- [ ] **安裝流程 UI**：設定頁面偵測 native host 是否已安裝，引導使用者執行安裝腳本
+- [ ] **Host 版本管理**：extension 與 native host 版本不符時提示升級
+
+**安全限制**
+
+- 所有 Playwright 操作強制經過 Plan Approval
+- host allowlist：只允許連線至使用者預先設定的網域
+- 命令白名單模式（可選）：限制只能執行預定義腳本，不允許任意 JS
+
+---
+
+### 跨 Phase 共用設計
+
+- **selector 策略**：優先 `data-testid` > `aria-label` > CSS selector > XPath，AI 生成時依此順序嘗試
+- **錯誤處理**：操作失敗回傳結構化 error（`{ error, selector, suggestion }`），AI 可自動重試或修正 selector
+- **操作紀錄 UI**：Agent 搜尋歷程區塊擴充支援瀏覽器操作記錄（圖示 + 操作摘要 + 結果狀態）
+- **隱私保護**：不在 `chatSessions` 或雲端備份中記錄頁面內容，操作記錄僅存於當前 session
 
 ---
 

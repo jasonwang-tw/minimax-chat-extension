@@ -1377,20 +1377,24 @@ async function streamMiniMaxChat(message, history, translateConfig, model, syste
     ? { 'HTTP-Referer': 'chrome-extension://open-chat-hub', 'X-Title': 'Open Chat Hub' }
     : {};
 
+  const requestBody = {
+    model: useModel,
+    messages,
+    stream: true,
+    ...(useOpenRouter ? { stream_options: { include_usage: true } } : {})
+  };
+  console.log(`[Stream] 送出請求 model=${useModel} msgs=${messages.length} histChars=${messages.reduce((s, m) => s + (typeof m.content === 'string' ? m.content.length : 0), 0)}`);
+
   const response = await fetch(chatUrl, {
     method: 'POST',
     headers: { 'Authorization': `Bearer ${chatKey}`, 'Content-Type': 'application/json', ...extraHeaders },
-    body: JSON.stringify({
-      model: useModel,
-      messages,
-      stream: true,
-      ...(useOpenRouter ? { stream_options: { include_usage: true } } : {})
-    })
+    body: JSON.stringify(requestBody)
   });
 
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));
     const rawMsg = extractApiErrorMessage(errorData, response.status);
+    console.error(`[Stream] HTTP 錯誤 ${response.status}:`, rawMsg);
     if (rawMsg.toLowerCase().includes('context window')) {
       throw new Error('對話內容或歷史過長，已超出模型限制。請試著縮短輸入，或點擊「+」開啟新對話。');
     }
@@ -1403,6 +1407,8 @@ async function streamMiniMaxChat(message, history, translateConfig, model, syste
   let fullContent = '';
   let finalUsage = null;
   let outputAttachments = [];
+  let lastFinishReason = null;
+  let streamError = null;
 
   try {
     while (true) {
@@ -1418,28 +1424,54 @@ async function streamMiniMaxChat(message, history, translateConfig, model, syste
         try {
           const json = JSON.parse(data);
           if (json.usage) finalUsage = json.usage;
+          // 擷取 API 層級錯誤（mid-stream error）
+          if (json.error) {
+            const errCode = json.error.code || json.error.status_code || '';
+            const errMsg = json.error.message || JSON.stringify(json.error);
+            console.error(`[Stream] API mid-stream error code=${errCode}:`, errMsg);
+            streamError = errMsg;
+          }
           if (useOpenRouter) {
             const deltaAttachments = extractImageOutputAttachments(json, fullContent);
             if (deltaAttachments.length > 0) {
               outputAttachments = [...outputAttachments, ...deltaAttachments.filter(a => !outputAttachments.some(existing => existing.url === a.url))];
             }
           }
-          const delta = json.choices?.[0]?.delta?.content || '';
+          const choice = json.choices?.[0];
+          if (choice?.finish_reason) lastFinishReason = choice.finish_reason;
+          const delta = choice?.delta?.content || '';
           if (delta) {
             fullContent += delta;
             port.postMessage({ type: 'chunk', text: delta, full: fullContent });
           }
-        } catch {}
+        } catch (e) {
+          console.warn('[Stream] SSE 解析失敗:', e.message, '| raw:', line.slice(0, 120));
+        }
       }
     }
   } finally {
     reader.releaseLock();
   }
 
+  if (lastFinishReason && lastFinishReason !== 'stop') {
+    console.warn(`[Stream] finish_reason=${lastFinishReason} model=${useModel}`);
+  }
+
   const cleaned = fullContent
     .replace(/<think>[\s\S]*?<\/think>/gi, '')
     .replace(/<result>[\s\S]*?<\/result>/gi, '')
     .trim();
+
+  if (!cleaned && !fullContent) {
+    const reason = streamError
+      ? `API 錯誤：${streamError}`
+      : lastFinishReason === 'length'
+        ? '對話歷史過長，模型在回覆前即達 token 上限。請點擊「+」開啟新對話。'
+        : '模型回傳空內容，可能為暫時性錯誤，請稍後重試。';
+    const debugLine = `[Debug] model=${useModel} msgs=${messages.length} finish=${lastFinishReason ?? 'none'} err=${streamError ?? 'none'}`;
+    console.error(`[Stream] 空回應 ${debugLine}`);
+    throw new Error(`${reason}\n${debugLine}`);
+  }
 
   if (useOpenRouter) {
     const textAttachments = extractImageOutputAttachments(null, cleaned || fullContent);
@@ -1448,6 +1480,7 @@ async function streamMiniMaxChat(message, history, translateConfig, model, syste
     }
   }
 
+  console.log(`[Stream] 完成 chars=${fullContent.length} finish_reason=${lastFinishReason}`);
   port.postMessage({ type: 'done', reply: cleaned || fullContent, attachments: outputAttachments });
   if (useOpenRouter && finalUsage) {
     recordOpenRouterUsage({ modelId: useModel, usage: finalUsage, apiKey: openrouterApiKey, sessionId, source: 'chat' })
@@ -1487,6 +1520,258 @@ const AGENT_TOOLS_SEARCH = [
   }
 ];
 
+const AGENT_TOOLS_BROWSER = [
+  {
+    type: 'function',
+    function: {
+      name: 'browser_click',
+      description: '點擊頁面上的指定元素（按鈕、連結、核取方塊等）。優先使用 id、data-testid、aria-label 定位，再考慮 CSS class。',
+      parameters: {
+        type: 'object',
+        properties: {
+          selector: { type: 'string', description: 'CSS selector，例如 #submit、[aria-label="搜尋"]、.btn-primary' }
+        },
+        required: ['selector']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'browser_fill',
+      description: '填入文字到輸入框（input、textarea）。填入後自動觸發 input 與 change 事件，相容 React / Vue 應用。',
+      parameters: {
+        type: 'object',
+        properties: {
+          selector: { type: 'string', description: 'CSS selector，例如 #email、[name="username"]' },
+          value: { type: 'string', description: '要填入的文字' }
+        },
+        required: ['selector', 'value']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'browser_select',
+      description: '選擇 <select> 下拉選單的選項，支援依 value 屬性或顯示文字匹配。',
+      parameters: {
+        type: 'object',
+        properties: {
+          selector: { type: 'string', description: 'CSS selector 指向 <select> 元素' },
+          value: { type: 'string', description: '選項的 value 屬性值或顯示文字' }
+        },
+        required: ['selector', 'value']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'browser_get_text',
+      description: '取得頁面元素或整頁的文字內容。省略 selector 時自動擷取主要內容區域（main / article），最多回傳 8000 字元。',
+      parameters: {
+        type: 'object',
+        properties: {
+          selector: { type: 'string', description: 'CSS selector（可省略，省略時取整頁主要內容）' }
+        },
+        required: []
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'browser_get_html',
+      description: '取得頁面元素的 HTML 原始碼，用於分析頁面結構或找到正確的 selector。最多回傳 5000 字元。',
+      parameters: {
+        type: 'object',
+        properties: {
+          selector: { type: 'string', description: 'CSS selector（可省略，省略時取 body HTML）' }
+        },
+        required: []
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'browser_scroll',
+      description: '捲動頁面。direction 可為 up/down（相對捲動）或 top/bottom（捲到頁首/頁尾）。',
+      parameters: {
+        type: 'object',
+        properties: {
+          direction: { type: 'string', enum: ['up', 'down', 'top', 'bottom'], description: '捲動方向' },
+          amount: { type: 'number', description: '捲動像素（direction 為 top/bottom 時忽略，預設 300）' }
+        },
+        required: ['direction']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'browser_wait_for',
+      description: '等待頁面出現指定元素，適用於頁面載入或動態內容渲染後的操作。預設最多等待 5 秒。',
+      parameters: {
+        type: 'object',
+        properties: {
+          selector: { type: 'string', description: '要等待的元素 CSS selector' },
+          timeout: { type: 'number', description: '最長等待毫秒數（預設 5000，上限 15000）' }
+        },
+        required: ['selector']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'browser_navigate',
+      description: '在當前分頁導航至指定 URL。導航後可搭配 browser_wait_for 等待頁面載入完成。',
+      parameters: {
+        type: 'object',
+        properties: {
+          url: { type: 'string', description: '完整 URL，例如 https://example.com' }
+        },
+        required: ['url']
+      }
+    }
+  }
+];
+
+// ── 取得使用者當前活動分頁 ────────────────────────────────────
+async function getActivePageTab() {
+  return new Promise((resolve) => {
+    chrome.windows.getLastFocused({ windowTypes: ['normal'] }, (win) => {
+      if (chrome.runtime.lastError || !win) { resolve(null); return; }
+      chrome.tabs.query({ active: true, windowId: win.id }, (tabs) => {
+        resolve(tabs?.[0] || null);
+      });
+    });
+  });
+}
+
+// ── tool_start 顯示文字 ───────────────────────────────────────
+function toolDisplayQuery(name, args) {
+  if (args.query) return args.query;
+  if (args.selector) return args.selector;
+  if (args.url) return args.url;
+  if (args.direction) return args.amount ? `${args.direction} ${args.amount}px` : args.direction;
+  if (args.value) return args.value;
+  return '';
+}
+
+// ── 瀏覽器工具執行 ────────────────────────────────────────────
+async function executeBrowserTool(toolName, args) {
+  const tab = await getActivePageTab();
+  if (!tab) return { error: '找不到活動分頁' };
+  const tabId = tab.id;
+
+  async function exec(func, funcArgs = []) {
+    try {
+      const results = await chrome.scripting.executeScript({ target: { tabId }, func, args: funcArgs });
+      return results[0].result;
+    } catch (e) {
+      return { error: e.message };
+    }
+  }
+
+  if (toolName === 'browser_click') {
+    return await exec((sel) => {
+      const el = document.querySelector(sel);
+      if (!el) return { error: `找不到元素: ${sel}` };
+      el.click();
+      return { success: true, tag: el.tagName.toLowerCase(), text: (el.textContent || '').trim().slice(0, 60) };
+    }, [args.selector]);
+  }
+
+  if (toolName === 'browser_fill') {
+    return await exec((sel, val) => {
+      const el = document.querySelector(sel);
+      if (!el) return { error: `找不到元素: ${sel}` };
+      const inputProto = window.HTMLInputElement.prototype;
+      const textareaProto = window.HTMLTextAreaElement.prototype;
+      const nativeSetter = Object.getOwnPropertyDescriptor(inputProto, 'value')?.set
+        || Object.getOwnPropertyDescriptor(textareaProto, 'value')?.set;
+      if (nativeSetter) nativeSetter.call(el, val);
+      else el.value = val;
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+      return { success: true, value: val };
+    }, [args.selector, args.value]);
+  }
+
+  if (toolName === 'browser_select') {
+    return await exec((sel, val) => {
+      const el = document.querySelector(sel);
+      if (!el || el.tagName !== 'SELECT') return { error: `找不到 <select> 元素: ${sel}` };
+      const opt = Array.from(el.options).find(o => o.value === val || o.text === val);
+      if (!opt) return { error: `找不到選項: ${val}` };
+      el.value = opt.value;
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+      return { success: true, selected: opt.text };
+    }, [args.selector, args.value]);
+  }
+
+  if (toolName === 'browser_get_text') {
+    return await exec((sel) => {
+      let el;
+      if (sel) {
+        el = document.querySelector(sel);
+        if (!el) return { error: `找不到元素: ${sel}` };
+      } else {
+        el = document.querySelector('main, [role="main"], article, #main-content, #content, .main-content') || document.body;
+      }
+      const text = el.innerText || '';
+      return { text: text.length > 8000 ? text.slice(0, 8000) + '\n...（已截斷）' : text, length: text.length };
+    }, [args.selector || '']);
+  }
+
+  if (toolName === 'browser_get_html') {
+    return await exec((sel) => {
+      const el = sel ? document.querySelector(sel) : document.body;
+      if (!el) return { error: `找不到元素: ${sel}` };
+      const html = el.innerHTML || '';
+      return { html: html.length > 5000 ? html.slice(0, 5000) + '\n...（已截斷）' : html, length: html.length };
+    }, [args.selector || '']);
+  }
+
+  if (toolName === 'browser_scroll') {
+    return await exec((direction, amount) => {
+      const px = amount || 300;
+      if (direction === 'top') window.scrollTo({ top: 0, behavior: 'smooth' });
+      else if (direction === 'bottom') window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+      else if (direction === 'up') window.scrollBy({ top: -px, behavior: 'smooth' });
+      else window.scrollBy({ top: px, behavior: 'smooth' });
+      return { success: true, scrollY: window.scrollY };
+    }, [args.direction, args.amount || 300]);
+  }
+
+  if (toolName === 'browser_wait_for') {
+    const selector = args.selector;
+    const timeout = Math.min(args.timeout || 5000, 15000);
+    const start = Date.now();
+    while (Date.now() - start < timeout) {
+      const found = await exec((sel) => !!document.querySelector(sel), [selector]);
+      if (found === true) return { success: true, selector };
+      if (found?.error) return found;
+      await new Promise(r => setTimeout(r, 300));
+    }
+    return { error: `等待逾時 (${timeout}ms)：找不到 ${selector}` };
+  }
+
+  if (toolName === 'browser_navigate') {
+    try {
+      await chrome.tabs.update(tabId, { url: args.url });
+      return { success: true, url: args.url };
+    } catch (e) {
+      return { error: e.message };
+    }
+  }
+
+  return { error: `未知瀏覽器工具: ${toolName}` };
+}
+
 // ── XML 工具呼叫解析（MiniMax M2.7 使用 XML 格式而非 OpenAI tool_calls）──
 function parseXmlToolCalls(content) {
   if (!content || typeof content !== 'string') return null;
@@ -1520,6 +1805,9 @@ async function handleToolCall(name, args) {
     const fallback = await braveSearch(args.query);
     return fallback.success ? { results: fallback.results, provider: fallback.provider } : { error: r.error };
   }
+  if (name.startsWith('browser_')) {
+    return await executeBrowserTool(name, args);
+  }
   return { error: `未知工具: ${name}` };
 }
 
@@ -1532,21 +1820,11 @@ async function streamAgentChat(message, history, translateConfig, model, systemP
   const useOpenRouter = !!(openrouterApiKey && requestedModel !== MODEL_NAME);
   if (!useOpenRouter && !apiKey) throw new Error('請先在設定頁面輸入 API Key');
 
-  // 決定可用工具
+  // 決定可用工具（瀏覽器工具永遠可用，搜尋工具視 API Key 決定）
   const { braveApiKey, exaApiKey } = await chrome.storage.sync.get(['braveApiKey', 'exaApiKey']);
-  const tools = [];
+  const tools = [...AGENT_TOOLS_BROWSER];
   if (braveApiKey || exaApiKey) tools.push(AGENT_TOOLS_SEARCH[0]); // web_search
   if (exaApiKey) tools.push(AGENT_TOOLS_SEARCH[1]);                 // deep_search
-
-  // 無工具可用 → 直接使用正常 streaming
-  if (tools.length === 0) {
-    port.postMessage({
-      type: 'agent_notice',
-      text: '未啟用搜尋工具，已改用一般對話回覆。可在設定頁加入 Brave 或 Exa API Key 啟用 Agent 搜尋。',
-      level: 'info'
-    });
-    return streamMiniMaxChat(message, history, translateConfig, model, systemPrompt, memoryContext, port, sessionId, contextCharBudget);
-  }
 
   const useModel = requestedModel;
   if (useOpenRouter) {
@@ -1688,7 +1966,7 @@ async function streamAgentChat(message, history, translateConfig, model, systemP
           const name = tc.function?.name || tc.name || '';
           let args = {};
           try { args = JSON.parse(tc.function?.arguments || tc.arguments || '{}'); } catch {}
-          port.postMessage({ type: 'tool_start', tool: name, query: args.query || '' });
+          port.postMessage({ type: 'tool_start', tool: name, query: toolDisplayQuery(name, args) });
           let result;
           try { result = await handleToolCall(name, args); } catch (e) { result = { error: e.message }; }
           if (result.error) {
@@ -1711,7 +1989,7 @@ async function streamAgentChat(message, history, translateConfig, model, systemP
 
         const resultParts = [];
         for (const tc of xmlToolCalls) {
-          port.postMessage({ type: 'tool_start', tool: tc.name, query: tc.args.query || '' });
+          port.postMessage({ type: 'tool_start', tool: tc.name, query: toolDisplayQuery(tc.name, tc.args) });
           let result;
           try { result = await handleToolCall(tc.name, tc.args); } catch (e) { result = { error: e.message }; }
           if (result.error) {
@@ -2231,11 +2509,14 @@ function buildMessages(newMessage, history, translateConfig, systemPrompt, globa
   if (trimmedHistory.length > 0) {
     trimmedHistory.forEach(item => {
       const histImgs = item.images || (item.image ? [item.image] : null);
-      if (histImgs && histImgs.length > 0) {
+      const imageOnlyUrls = histImgs ? histImgs.filter(url =>
+        typeof url === 'string' && (url.startsWith('data:image/') || /^https?:\/\//.test(url))
+      ) : null;
+      if (imageOnlyUrls && imageOnlyUrls.length > 0) {
         messages.push({
           role: 'user',
           content: [
-            ...histImgs.map(url => ({ type: 'image_url', image_url: { url } })),
+            ...imageOnlyUrls.map(url => ({ type: 'image_url', image_url: { url } })),
             { type: 'text', text: item.content || '請描述這張圖片' }
           ]
         });
