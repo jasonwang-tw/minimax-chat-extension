@@ -1377,20 +1377,24 @@ async function streamMiniMaxChat(message, history, translateConfig, model, syste
     ? { 'HTTP-Referer': 'chrome-extension://open-chat-hub', 'X-Title': 'Open Chat Hub' }
     : {};
 
+  const requestBody = {
+    model: useModel,
+    messages,
+    stream: true,
+    ...(useOpenRouter ? { stream_options: { include_usage: true } } : {})
+  };
+  console.log(`[Stream] 送出請求 model=${useModel} msgs=${messages.length} histChars=${messages.reduce((s, m) => s + (typeof m.content === 'string' ? m.content.length : 0), 0)}`);
+
   const response = await fetch(chatUrl, {
     method: 'POST',
     headers: { 'Authorization': `Bearer ${chatKey}`, 'Content-Type': 'application/json', ...extraHeaders },
-    body: JSON.stringify({
-      model: useModel,
-      messages,
-      stream: true,
-      ...(useOpenRouter ? { stream_options: { include_usage: true } } : {})
-    })
+    body: JSON.stringify(requestBody)
   });
 
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));
     const rawMsg = extractApiErrorMessage(errorData, response.status);
+    console.error(`[Stream] HTTP 錯誤 ${response.status}:`, rawMsg);
     if (rawMsg.toLowerCase().includes('context window')) {
       throw new Error('對話內容或歷史過長，已超出模型限制。請試著縮短輸入，或點擊「+」開啟新對話。');
     }
@@ -1403,6 +1407,8 @@ async function streamMiniMaxChat(message, history, translateConfig, model, syste
   let fullContent = '';
   let finalUsage = null;
   let outputAttachments = [];
+  let lastFinishReason = null;
+  let streamError = null;
 
   try {
     while (true) {
@@ -1418,28 +1424,53 @@ async function streamMiniMaxChat(message, history, translateConfig, model, syste
         try {
           const json = JSON.parse(data);
           if (json.usage) finalUsage = json.usage;
+          // 擷取 API 層級錯誤（mid-stream error）
+          if (json.error) {
+            const errCode = json.error.code || json.error.status_code || '';
+            const errMsg = json.error.message || JSON.stringify(json.error);
+            console.error(`[Stream] API mid-stream error code=${errCode}:`, errMsg);
+            streamError = errMsg;
+          }
           if (useOpenRouter) {
             const deltaAttachments = extractImageOutputAttachments(json, fullContent);
             if (deltaAttachments.length > 0) {
               outputAttachments = [...outputAttachments, ...deltaAttachments.filter(a => !outputAttachments.some(existing => existing.url === a.url))];
             }
           }
-          const delta = json.choices?.[0]?.delta?.content || '';
+          const choice = json.choices?.[0];
+          if (choice?.finish_reason) lastFinishReason = choice.finish_reason;
+          const delta = choice?.delta?.content || '';
           if (delta) {
             fullContent += delta;
             port.postMessage({ type: 'chunk', text: delta, full: fullContent });
           }
-        } catch {}
+        } catch (e) {
+          console.warn('[Stream] SSE 解析失敗:', e.message, '| raw:', line.slice(0, 120));
+        }
       }
     }
   } finally {
     reader.releaseLock();
   }
 
+  if (lastFinishReason && lastFinishReason !== 'stop') {
+    console.warn(`[Stream] finish_reason=${lastFinishReason} model=${useModel}`);
+  }
+
   const cleaned = fullContent
     .replace(/<think>[\s\S]*?<\/think>/gi, '')
     .replace(/<result>[\s\S]*?<\/result>/gi, '')
     .trim();
+
+  if (!cleaned && !fullContent) {
+    const reason = streamError
+      ? `API 錯誤：${streamError}`
+      : lastFinishReason === 'length'
+        ? '對話歷史過長，模型在回覆前即達 token 上限。請點擊「+」開啟新對話。'
+        : '模型回傳空內容，可能為暫時性錯誤，請稍後重試。';
+    console.error(`[Stream] 空回應 finish_reason=${lastFinishReason} streamError=${streamError}`);
+    throw new Error(reason);
+  }
 
   if (useOpenRouter) {
     const textAttachments = extractImageOutputAttachments(null, cleaned || fullContent);
@@ -1448,6 +1479,7 @@ async function streamMiniMaxChat(message, history, translateConfig, model, syste
     }
   }
 
+  console.log(`[Stream] 完成 chars=${fullContent.length} finish_reason=${lastFinishReason}`);
   port.postMessage({ type: 'done', reply: cleaned || fullContent, attachments: outputAttachments });
   if (useOpenRouter && finalUsage) {
     recordOpenRouterUsage({ modelId: useModel, usage: finalUsage, apiKey: openrouterApiKey, sessionId, source: 'chat' })
