@@ -974,6 +974,14 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
   tocClose.addEventListener('click', closeToc);
 
+  // 當 TOC 面板開啟時，監聽聊天區域 DOM 變動並自動更新目錄
+  const tocObserver = new MutationObserver(() => {
+    if (!tocPanel.classList.contains('hidden')) {
+      buildToc();
+    }
+  });
+  tocObserver.observe(chatMessages, { childList: true, subtree: true });
+
   // Session Search
   let sessionSearchMatches = []; // 每個元素為 <mark> DOM 節點
   let sessionSearchIndex = -1;
