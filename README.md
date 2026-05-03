@@ -6,7 +6,7 @@ Open Chat Hub 是一個多模型 AI 側邊欄工作台，讓你在瀏覽器內�
 
 ## 版本
 
-**v1.22.0** (2026-05-01)
+**v1.23.2** (2026-05-03)
 
 ## 功能特色
 
@@ -105,6 +105,10 @@ npm run build:css
 - **TailwindCSS + SCSS**：樣式設計
 
 ## Changelog
+
+## [1.23.2] - 2026-05-03
+### Fixed
+- 修復歷史訊息含頁面文字（text file）時，被錯誤當成圖片傳給 MiniMax 導致 error 2013 "dataURL is not image" 的問題
 
 ## [1.23.1] - 2026-05-03
 ### Added
