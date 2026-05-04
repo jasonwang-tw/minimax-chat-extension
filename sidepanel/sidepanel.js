@@ -329,6 +329,19 @@ document.addEventListener('DOMContentLoaded', async () => {
       : String(values || '').split('+').map(v => v.trim().toLowerCase()).filter(Boolean);
   }
 
+  function getInputModalities(model) {
+    const values = model?.architecture?.input_modalities || model?.input_modalities || model?.inputModalities || [];
+    return Array.isArray(values)
+      ? values.map(v => String(v).trim().toLowerCase()).filter(Boolean)
+      : String(values || '').split('+').map(v => v.trim().toLowerCase()).filter(Boolean);
+  }
+
+  async function currentModelSupportsOpenRouterImages(openrouterApiKey) {
+    if (!openrouterApiKey || currentModel === 'MiniMax-M2.7') return false;
+    const pricingMap = await getOpenRouterPricingMap(openrouterApiKey);
+    return getInputModalities(pricingMap[currentModel] || {}).includes('image');
+  }
+
   async function getOpenRouterPricingMap(apiKey) {
     const now = Date.now();
     const { [MODEL_PRICING_CACHE_KEY]: cache } = await chrome.storage.local.get([MODEL_PRICING_CACHE_KEY]);
@@ -529,6 +542,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           modelPickerBtn.classList.remove('open');
           modelPickerDropdown.querySelectorAll('.model-picker-item').forEach(el => el.classList.toggle('active', el === btn));
           updateCharCounter();
+          checkApiKey();
         });
         modelPickerDropdown.appendChild(btn);
       });
@@ -537,6 +551,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const active = allItems.find(m => m.modelId === currentModel);
     if (active) modelPickerLabel.textContent = active.label;
     updateCharCounter();
+    checkApiKey();
   }
 
   function escSp(str) {
@@ -564,7 +579,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   chrome.storage.onChanged.addListener((changes, area) => {
     // sync area：API Key、設定、長期記憶、分類（跨裝置同步的資料）
     if (area === 'sync') {
-      if (changes.geminiApiKey || changes.apiKey) {
+      if (changes.geminiApiKey || changes.apiKey || changes.openrouterApiKey || changes.customModels) {
         checkApiKey();
       }
       if (changes.settings) {
@@ -2016,10 +2031,15 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   async function checkApiKey() {
-    const { apiKey, geminiApiKey } = await chrome.storage.sync.get(['apiKey', 'geminiApiKey']);
+    const { apiKey, geminiApiKey, openrouterApiKey } =
+      await chrome.storage.sync.get(['apiKey', 'geminiApiKey', 'openrouterApiKey']);
+    const usingMiniMax = currentModel === 'MiniMax-M2.7';
+    const hasActiveChatKey = usingMiniMax ? !!apiKey : !!openrouterApiKey;
+    const canDirectImageInput = await currentModelSupportsOpenRouterImages(openrouterApiKey);
+    const canAnalyzeImages = !!geminiApiKey || canDirectImageInput;
 
-    if (!apiKey) {
-      setStatus('請先設定 MiniMax API Key', true);
+    if (!hasActiveChatKey) {
+      setStatus(usingMiniMax ? '請先設定 MiniMax API Key' : '請先設定 OpenRouter API Key', true);
       messageInput.disabled = true;
       sendBtn.disabled = true;
       screenshotBtn.disabled = true;
@@ -2031,16 +2051,16 @@ document.addEventListener('DOMContentLoaded', async () => {
       messageInput.disabled = false;
     }
 
-    if (!geminiApiKey) {
+    if (!canAnalyzeImages) {
       screenshotBtn.disabled = true;
       uploadBtn.disabled = true;
       regionScreenshotBtn.disabled = true;
       ocrBtn.disabled = true;
       if (currentImages.length > 0) {
-        setStatus('請先設定 Gemini API Key 才能分析圖片', true);
+        setStatus('目前模型不支援直接圖片輸入，請先設定 Gemini API Key 才能分析圖片', true);
       }
     } else {
-      if (apiKey) {
+      if (hasActiveChatKey) {
         screenshotBtn.disabled = false;
         uploadBtn.disabled = false;
         regionScreenshotBtn.disabled = false;
@@ -2673,7 +2693,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (msg.type === 'agent_thinking') {
         _agentIter = msg.iter;
         if (!agentStatusEl) startAgentStatus();
-        updateAgentStatus(msg.maxIter ? `第 ${msg.iter}/${msg.maxIter} 輪，AI 分析中...` : `第 ${msg.iter} 輪，AI 分析中...`);
+        updateAgentStatus(msg.maxIter ? `第 ${msg.iter}/${msg.maxIter} 輪，AI 思考中...` : `第 ${msg.iter} 輪，AI 思考中...`);
         return;
       }
       if (msg.type === 'tool_start') {
@@ -2935,7 +2955,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     statusNoticeEl.textContent = text;
     chatMessages.appendChild(statusNoticeEl);
     scrollToBottom();
-    if (duration > 0) setTimeout(() => { if (statusNoticeEl) { statusNoticeEl.remove(); statusNoticeEl = null; } }, duration);
+    const currentNotice = statusNoticeEl;
+    if (duration > 0) {
+      setTimeout(() => {
+        if (statusNoticeEl === currentNotice) {
+          statusNoticeEl.remove();
+          statusNoticeEl = null;
+        }
+      }, duration);
+    }
   }
   function clearStatus() { setStatus(''); }
 
@@ -2946,7 +2974,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     agentStatusEl.className = 'agent-status-bar';
     agentStatusEl.innerHTML =
       '<span class="agent-status-dot"></span>' +
-      '<span class="agent-status-text">AI 分析中...</span>' +
+      '<span class="agent-status-text">AI 思考中...</span>' +
       '<span class="agent-status-timer">0s</span>';
     chatMessages.appendChild(agentStatusEl);
     scrollToBottom();
@@ -3161,7 +3189,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (msg.type === 'agent_thinking') {
         _agentIter = msg.iter;
         if (!agentStatusEl) startAgentStatus();
-        updateAgentStatus(msg.maxIter ? `第 ${msg.iter}/${msg.maxIter} 輪，AI 分析中...` : `第 ${msg.iter} 輪，AI 分析中...`);
+        updateAgentStatus(msg.maxIter ? `第 ${msg.iter}/${msg.maxIter} 輪，AI 思考中...` : `第 ${msg.iter} 輪，AI 思考中...`);
         return;
       }
       if (msg.type === 'tool_start') {

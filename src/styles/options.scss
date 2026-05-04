@@ -1,7 +1,4 @@
 @charset "UTF-8";
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
 :root {
   --primary: #EC2970;
   --primary-dark: #d01f62;
@@ -1127,14 +1124,27 @@ input.cmd-trigger {
   }
 
   // .input-wrapper 內還原透明（type 切換後不套用深色框）
+  .input-wrapper {
+    align-items: center;
+    height: 36px;
+    padding: 0 4px 0 13px;
+
+    .btn-icon {
+      width: 30px;
+      height: 30px;
+      border-radius: 8px;
+    }
+  }
+
   .input-wrapper input[type=text],
   .input-wrapper input[type=password] {
     background: transparent;
     border: none;
     border-radius: 0;
-    padding: 10px 0;
+    height: 100%;
+    padding: 0;
     width: 100%;
-    font-size: 14px;
+    font-size: 13px;
 
     &:focus { border-color: transparent; }
   }
@@ -1272,14 +1282,27 @@ input.cmd-trigger {
   }
 
   // .input-wrapper 內的 input 還原為透明（type 切換後不套用深色框）
+  .input-wrapper {
+    align-items: center;
+    height: 36px;
+    padding: 0 4px 0 13px;
+
+    .btn-icon {
+      width: 30px;
+      height: 30px;
+      border-radius: 8px;
+    }
+  }
+
   .input-wrapper input[type=text],
   .input-wrapper input[type=password] {
     background: transparent;
     border: none;
     border-radius: 0;
-    padding: 10px 0;
+    height: 100%;
+    padding: 0;
     width: 100%;
-    font-size: 14px;
+    font-size: 13px;
 
     &:focus { border-color: transparent; }
   }
