@@ -1228,11 +1228,39 @@ input.cmd-trigger {
   cursor: pointer;
   color: var(--text-secondary);
   flex-shrink: 0;
+  margin-bottom: 0;
 }
 .atf-p-required-label input[type=checkbox] {
-  width: 13px;
-  height: 13px;
+  appearance: none;
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  border: 1.5px solid rgba(255, 255, 255, 0.25);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.05);
   cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.15s, border-color 0.15s;
+  position: relative;
+}
+.atf-p-required-label input[type=checkbox]:checked {
+  background: var(--primary);
+  border-color: var(--primary);
+}
+.atf-p-required-label input[type=checkbox]:checked::after {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 0px;
+  width: 5px;
+  height: 9px;
+  border: 2px solid #fff;
+  border-top: none;
+  border-left: none;
+  transform: rotate(45deg);
+}
+.atf-p-required-label input[type=checkbox]:hover {
+  border-color: rgba(236, 41, 112, 0.5);
 }
 
 .api-tool-form-actions {
