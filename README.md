@@ -106,6 +106,14 @@ npm run build:css
 
 ## Changelog
 
+## [1.26.0] - 2026-05-04
+### Added
+- API Tool Registry：使用者可在設定頁新增自訂 HTTP API 工具（GET/POST/PUT/PATCH/DELETE）
+- 工具支援 query / path / body / header 參數，AI Agent 可在對話中自行判斷並呼叫
+- Auth 支援 Bearer Token、API Key（Header/Query），Secret 僅存本機不傳送給模型
+- 工具啟用/停用切換、回傳長度上限設定
+- 操作歷程面板使用 🔌 圖示標示 API 工具呼叫
+
 ## [1.25.1] - 2026-05-04
 ### Changed
 - 模型費用表推薦用途 badges 前新增「適合」label，提升視覺可讀性

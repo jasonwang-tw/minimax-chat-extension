@@ -75,6 +75,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   let customCommands = [];
   let customModels = [];
+  let apiToolRegistry = [];
+  let editingToolId = null;
   let pricingSort = { key: 'input', direction: 'asc' };
   let pricingPage = 1;
   const PRICING_PAGE_SIZE = 50;
@@ -1143,6 +1145,193 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
+  // ── API Tool Registry ──────────────────────────────────────
+  function generateToolId() {
+    return 'tool_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  }
+
+  function renderApiToolRegistry() {
+    const listEl = document.getElementById('apiToolsList');
+    if (!listEl) return;
+    if (!apiToolRegistry.length) {
+      listEl.innerHTML = '<p class="hint" style="text-align:center;padding:14px 0">尚未建立任何 API 工具</p>';
+      return;
+    }
+    listEl.innerHTML = '';
+    for (const tool of apiToolRegistry) {
+      const card = document.createElement('div');
+      card.className = 'api-tool-card';
+      card.dataset.id = tool.id;
+      const method = tool.method || 'GET';
+      card.innerHTML = `
+        <div class="api-tool-card-header">
+          <span class="api-tool-name">🔌 ${escapeVal(tool.name || '未命名')}</span>
+          <span class="api-method-badge api-method-${method}">${escapeVal(method)}</span>
+          <label class="api-tool-toggle" title="啟用/停用">
+            <input type="checkbox" class="api-tool-enabled" ${tool.enabled ? 'checked' : ''} />
+            <span>${tool.enabled ? '啟用' : '停用'}</span>
+          </label>
+        </div>
+        <div class="api-tool-card-body">
+          <div class="api-tool-desc">${escapeVal(tool.description || '無說明')}</div>
+          <div class="api-tool-url">${escapeVal(tool.url || '')}</div>
+        </div>
+        <div class="api-tool-card-actions">
+          <button class="btn-secondary api-tool-edit">編輯</button>
+          <button class="btn-mode-delete api-tool-delete" title="刪除">
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+          </button>
+        </div>`;
+      card.querySelector('.api-tool-enabled').addEventListener('change', async (e) => {
+        tool.enabled = e.target.checked;
+        e.target.nextElementSibling.textContent = tool.enabled ? '啟用' : '停用';
+        await chrome.storage.local.set({ apiToolRegistry });
+      });
+      card.querySelector('.api-tool-edit').addEventListener('click', () => openApiToolForm(tool));
+      card.querySelector('.api-tool-delete').addEventListener('click', async () => {
+        if (!confirm(`確定要刪除工具「${tool.name}」嗎？`)) return;
+        apiToolRegistry = apiToolRegistry.filter(t => t.id !== tool.id);
+        await chrome.storage.local.set({ apiToolRegistry });
+        renderApiToolRegistry();
+      });
+      listEl.appendChild(card);
+    }
+  }
+
+  function openApiToolForm(tool = null) {
+    editingToolId = tool?.id || null;
+    const form = document.getElementById('apiToolForm');
+    form.querySelector('.api-tool-form-title').textContent = tool ? '編輯工具' : '新增工具';
+    document.getElementById('atf-name').value = tool?.name || '';
+    document.getElementById('atf-method').value = tool?.method || 'GET';
+    document.getElementById('atf-url').value = tool?.url || '';
+    document.getElementById('atf-description').value = tool?.description || '';
+    document.getElementById('atf-auth-type').value = tool?.authType || 'none';
+    document.getElementById('atf-auth-keyname').value = tool?.authKeyName || '';
+    document.getElementById('atf-auth-secret').value = tool?.authSecret || '';
+    document.getElementById('atf-response-limit').value = tool?.responseLimit ?? 2000;
+    renderParamRows(tool?.parameters || []);
+    updateAtfAuthFields();
+    form.style.display = 'block';
+    form.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
+  function renderParamRows(params) {
+    const listEl = document.getElementById('atf-params-list');
+    listEl.innerHTML = '';
+    for (const p of params) addParamRow(p);
+  }
+
+  function addParamRow(param = {}) {
+    const listEl = document.getElementById('atf-params-list');
+    const row = document.createElement('div');
+    row.className = 'atf-param-row';
+    row.innerHTML = `
+      <input type="text" class="atf-p-name" placeholder="名稱" value="${escapeVal(param.name || '')}" />
+      <input type="text" class="atf-p-desc" placeholder="說明" value="${escapeVal(param.description || '')}" />
+      <select class="atf-p-type">
+        <option value="string"  ${(!param.type || param.type === 'string')  ? 'selected' : ''}>字串</option>
+        <option value="number"  ${param.type === 'number'  ? 'selected' : ''}>數字</option>
+        <option value="boolean" ${param.type === 'boolean' ? 'selected' : ''}>布林</option>
+      </select>
+      <select class="atf-p-location">
+        <option value="query"  ${(!param.location || param.location === 'query')  ? 'selected' : ''}>query</option>
+        <option value="path"   ${param.location === 'path'   ? 'selected' : ''}>path</option>
+        <option value="body"   ${param.location === 'body'   ? 'selected' : ''}>body</option>
+        <option value="header" ${param.location === 'header' ? 'selected' : ''}>header</option>
+      </select>
+      <label class="atf-p-required-label">
+        <input type="checkbox" class="atf-p-required" ${param.required ? 'checked' : ''} /> 必填
+      </label>
+      <button type="button" class="btn-mode-delete atf-del-param" title="刪除">
+        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6L6 18M6 6l12 12"/></svg>
+      </button>`;
+    row.querySelector('.atf-del-param').addEventListener('click', () => row.remove());
+    listEl.appendChild(row);
+  }
+
+  function collectParamRows() {
+    return Array.from(document.querySelectorAll('#atf-params-list .atf-param-row')).map(row => ({
+      name:        row.querySelector('.atf-p-name').value.trim(),
+      description: row.querySelector('.atf-p-desc').value.trim(),
+      type:        row.querySelector('.atf-p-type').value,
+      location:    row.querySelector('.atf-p-location').value,
+      required:    row.querySelector('.atf-p-required').checked
+    })).filter(p => p.name);
+  }
+
+  function updateAtfAuthFields() {
+    const type = document.getElementById('atf-auth-type').value;
+    const fieldsEl      = document.getElementById('atf-auth-fields');
+    const keyNameRow    = document.getElementById('atf-auth-keyname-row');
+    const keyNameLabel  = document.getElementById('atf-auth-keyname-label');
+    fieldsEl.style.display   = type === 'none' ? 'none' : 'block';
+    keyNameRow.style.display = (type === 'api_key_header' || type === 'api_key_query') ? 'block' : 'none';
+    if (type === 'api_key_header') keyNameLabel.textContent = 'Header 名稱';
+    if (type === 'api_key_query')  keyNameLabel.textContent = 'Query 參數名稱';
+  }
+
+  async function loadApiToolRegistry() {
+    const { apiToolRegistry: stored } = await chrome.storage.local.get('apiToolRegistry');
+    apiToolRegistry = stored || [];
+    renderApiToolRegistry();
+  }
+
+  document.getElementById('addApiToolBtn')?.addEventListener('click', () => openApiToolForm(null));
+
+  document.getElementById('atf-cancel')?.addEventListener('click', () => {
+    document.getElementById('apiToolForm').style.display = 'none';
+    editingToolId = null;
+  });
+
+  document.getElementById('atf-add-param')?.addEventListener('click', () => addParamRow());
+
+  document.getElementById('atf-auth-type')?.addEventListener('change', updateAtfAuthFields);
+
+  document.getElementById('atf-toggle-secret')?.addEventListener('click', () => {
+    const input = document.getElementById('atf-auth-secret');
+    input.type = input.type === 'password' ? 'text' : 'password';
+  });
+
+  document.getElementById('atf-save')?.addEventListener('click', async () => {
+    const name = document.getElementById('atf-name').value.trim();
+    if (!name || !/^[a-zA-Z0-9_]+$/.test(name)) {
+      showMessage('工具名稱只能包含字母、數字與底線', 'error'); return;
+    }
+    const url = document.getElementById('atf-url').value.trim();
+    if (!url) { showMessage('請輸入 URL', 'error'); return; }
+
+    const conflict = apiToolRegistry.find(t => t.name === name && t.id !== editingToolId);
+    if (conflict) { showMessage(`工具名稱「${name}」已存在`, 'error'); return; }
+
+    const toolData = {
+      id:            editingToolId || generateToolId(),
+      name,
+      method:        document.getElementById('atf-method').value,
+      url,
+      description:   document.getElementById('atf-description').value.trim(),
+      parameters:    collectParamRows(),
+      authType:      document.getElementById('atf-auth-type').value,
+      authKeyName:   document.getElementById('atf-auth-keyname').value.trim(),
+      authSecret:    document.getElementById('atf-auth-secret').value,
+      responseLimit: parseInt(document.getElementById('atf-response-limit').value) || 2000,
+      enabled:       true
+    };
+
+    if (editingToolId) {
+      const idx = apiToolRegistry.findIndex(t => t.id === editingToolId);
+      if (idx >= 0) { toolData.enabled = apiToolRegistry[idx].enabled; apiToolRegistry[idx] = toolData; }
+    } else {
+      apiToolRegistry.push(toolData);
+    }
+
+    await chrome.storage.local.set({ apiToolRegistry });
+    renderApiToolRegistry();
+    document.getElementById('apiToolForm').style.display = 'none';
+    editingToolId = null;
+    showMessage('API 工具已儲存', 'success');
+  });
+
   console.log('[Options] All listeners bound, starting data load');
   // ── 資料載入（所有 listener 綁定完成後才執行）──────────────
   Promise.all([
@@ -1153,6 +1342,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     loadMemorySection().catch(console.error),
     loadSyncSection().catch(console.error),
     renderUsagePage().catch(console.error),
+    loadApiToolRegistry().catch(console.error),
   ]);
 
 });

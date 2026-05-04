@@ -2998,19 +2998,20 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (tool === 'deep_search') return '🔎 深度搜尋';
     if (tool === 'web_search') return '🔍 搜尋網路';
     if (tool?.startsWith('browser_')) return `${getBrowserToolIcon(tool)} ${getBrowserToolLabel(tool)}`;
-    return `🔧 ${tool}`;
+    return `🔌 ${tool}`;
   }
 
   function buildSearchHistoryEl(log) {
     const total = log.length;
     const hasBrowser = log.some(e => e.tool?.startsWith('browser_'));
-    const summaryText = hasBrowser ? `已執行 ${total} 次操作` : `已執行 ${total} 次搜尋`;
+    const hasApi = log.some(e => !['deep_search','web_search'].includes(e.tool) && !e.tool?.startsWith('browser_'));
+    const summaryText = (hasBrowser || hasApi) ? `已執行 ${total} 次操作` : `已執行 ${total} 次搜尋`;
     const items = log.map(e => {
       let icon, label;
       if (e.tool === 'deep_search') { icon = '🔎'; label = '深度搜尋'; }
       else if (e.tool === 'web_search') { icon = '🔍'; label = '搜尋'; }
       else if (e.tool?.startsWith('browser_')) { icon = getBrowserToolIcon(e.tool); label = getBrowserToolLabel(e.tool); }
-      else { icon = '🔧'; label = e.tool; }
+      else { icon = '🔌'; label = e.tool; }
       const countStr = e.error
         ? `<span class="agent-sh-count error">失敗</span>`
         : (e.count != null ? `<span class="agent-sh-count">${e.count} 筆</span>` : '');

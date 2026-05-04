@@ -2013,7 +2013,83 @@ async function handleToolCall(name, args, sessionId) {
   if (name.startsWith('browser_')) {
     return await executeBrowserTool(name, args, sessionId);
   }
+  const { apiToolRegistry } = await chrome.storage.local.get('apiToolRegistry');
+  const regTool = (apiToolRegistry || []).find(t => t.enabled && t.name === name);
+  if (regTool) return await executeApiTool(regTool, args);
   return { error: `未知工具: ${name}` };
+}
+
+// ── API Tool Registry ────────────────────────────────────────
+function buildRegistryTool(tool) {
+  const props = {};
+  const required = [];
+  for (const p of (tool.parameters || [])) {
+    props[p.name] = { type: p.type || 'string', description: p.description || '' };
+    if (p.required) required.push(p.name);
+  }
+  return {
+    type: 'function',
+    function: {
+      name: tool.name,
+      description: tool.description || '',
+      parameters: { type: 'object', properties: props, ...(required.length ? { required } : {}) }
+    }
+  };
+}
+
+async function executeApiTool(tool, args) {
+  try {
+    let url = tool.url || '';
+    const headers = {};
+    const queryParams = new URLSearchParams();
+
+    for (const p of (tool.parameters || []).filter(p => p.location === 'path')) {
+      if (args[p.name] !== undefined)
+        url = url.replace(`{${p.name}}`, encodeURIComponent(String(args[p.name])));
+    }
+
+    if (tool.authType === 'bearer') {
+      headers['Authorization'] = `Bearer ${tool.authSecret || ''}`;
+    } else if (tool.authType === 'api_key_header' && tool.authKeyName) {
+      headers[tool.authKeyName] = tool.authSecret || '';
+    } else if (tool.authType === 'api_key_query' && tool.authKeyName) {
+      queryParams.set(tool.authKeyName, tool.authSecret || '');
+    }
+
+    for (const p of (tool.parameters || []).filter(p => p.location === 'query')) {
+      if (args[p.name] !== undefined) queryParams.set(p.name, String(args[p.name]));
+    }
+
+    const bodyObj = {};
+    for (const p of (tool.parameters || []).filter(p => p.location === 'body')) {
+      if (args[p.name] !== undefined) bodyObj[p.name] = args[p.name];
+    }
+
+    for (const p of (tool.parameters || []).filter(p => p.location === 'header')) {
+      if (args[p.name] !== undefined) headers[p.name] = String(args[p.name]);
+    }
+
+    const fullUrl = queryParams.toString() ? `${url}?${queryParams}` : url;
+    const fetchOpts = { method: tool.method || 'GET', headers };
+    if (['POST', 'PUT', 'PATCH'].includes(tool.method) && Object.keys(bodyObj).length > 0) {
+      headers['Content-Type'] = 'application/json';
+      fetchOpts.body = JSON.stringify(bodyObj);
+    }
+
+    const resp = await fetch(fullUrl, fetchOpts);
+    const text = await resp.text();
+    const limit = tool.responseLimit || 2000;
+
+    if (!resp.ok) return { error: `HTTP ${resp.status}: ${text.slice(0, 500)}` };
+
+    try {
+      return { result: JSON.stringify(JSON.parse(text), null, 2).slice(0, limit) };
+    } catch {
+      return { result: text.slice(0, limit) };
+    }
+  } catch (err) {
+    return { error: err.message };
+  }
 }
 
 // ── Agent 對話（帶 Tool Use）──────────────────────────────────
@@ -2025,9 +2101,11 @@ async function streamAgentChat(message, history, translateConfig, model, systemP
   const useOpenRouter = !!(openrouterApiKey && requestedModel !== MODEL_NAME);
   if (!useOpenRouter && !apiKey) throw new Error('請先在設定頁面輸入 API Key');
 
-  // 決定可用工具（瀏覽器工具永遠可用，搜尋工具視 API Key 決定）
+  // 決定可用工具（瀏覽器工具永遠可用，搜尋工具視 API Key 決定，Registry 工具依設定載入）
   const { braveApiKey, exaApiKey } = await chrome.storage.sync.get(['braveApiKey', 'exaApiKey']);
-  const tools = [...AGENT_TOOLS_BROWSER];
+  const { apiToolRegistry } = await chrome.storage.local.get('apiToolRegistry');
+  const registryTools = (apiToolRegistry || []).filter(t => t.enabled).map(buildRegistryTool);
+  const tools = [...AGENT_TOOLS_BROWSER, ...registryTools];
   if (braveApiKey || exaApiKey) tools.push(AGENT_TOOLS_SEARCH[0]); // web_search
   if (exaApiKey) tools.push(AGENT_TOOLS_SEARCH[1]);                 // deep_search
 

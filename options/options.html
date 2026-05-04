@@ -29,6 +29,7 @@
       <aside class="toc-sidebar">
         <nav class="toc">
           <a href="#" data-page="sec-api" class="active">API 設定</a>
+          <a href="#" data-page="sec-api-tools">API 工具</a>
           <a href="#" data-page="sec-usage">使用量與費用</a>
           <a href="#" data-page="sec-chat">對話設定</a>
           <a href="#" data-page="sec-prompts">提示詞</a>
@@ -442,10 +443,99 @@
         <p class="section-desc" style="margin-top:10px">macOS 請將 <kbd style="font-size:11px;padding:1px 5px">Ctrl</kbd> 替換為 <kbd style="font-size:11px;padding:1px 5px">Cmd</kbd>。</p>
       </section>
 
+      <section class="section" id="sec-api-tools">
+        <h2>API 工具</h2>
+        <p class="section-desc">讓 AI Agent 在對話中呼叫自訂 HTTP API。Auth Secret 僅存於本機，不會傳送給模型。非 GET 操作建議搭配計畫模式使用。</p>
+
+        <div id="apiToolsList" class="api-tools-list"></div>
+        <button id="addApiToolBtn" class="btn-secondary btn-add-mode" style="margin-top:8px">+ 新增 API 工具</button>
+
+        <div id="apiToolForm" class="api-tool-form" style="display:none">
+          <h3 class="api-tool-form-title">新增工具</h3>
+
+          <div class="api-tool-form-row">
+            <div class="form-group" style="flex:1">
+              <label>工具名稱（僅字母、數字、底線）</label>
+              <input type="text" id="atf-name" placeholder="例：get_weather" />
+            </div>
+            <div class="form-group" style="width:130px">
+              <label>HTTP 方法</label>
+              <select id="atf-method">
+                <option value="GET">GET</option>
+                <option value="POST">POST</option>
+                <option value="PUT">PUT</option>
+                <option value="PATCH">PATCH</option>
+                <option value="DELETE">DELETE</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label>URL（路徑參數用 {paramName} 標記）</label>
+            <input type="text" id="atf-url" placeholder="https://api.example.com/v1/endpoint" />
+          </div>
+
+          <div class="form-group">
+            <label>說明（AI 看到此說明來決定何時呼叫）</label>
+            <textarea id="atf-description" rows="2" placeholder="描述此工具的用途與使用時機"></textarea>
+          </div>
+
+          <div class="divider"></div>
+
+          <div class="form-group">
+            <label>參數</label>
+            <div id="atf-params-list" class="atf-params-list"></div>
+            <button type="button" id="atf-add-param" class="btn-secondary" style="margin-top:6px;font-size:12px">+ 新增參數</button>
+          </div>
+
+          <div class="divider"></div>
+
+          <div class="form-group">
+            <label>認證方式</label>
+            <select id="atf-auth-type">
+              <option value="none">無</option>
+              <option value="bearer">Bearer Token</option>
+              <option value="api_key_header">API Key（Header）</option>
+              <option value="api_key_query">API Key（Query 參數）</option>
+            </select>
+          </div>
+
+          <div id="atf-auth-fields" style="display:none">
+            <div id="atf-auth-keyname-row" class="form-group" style="display:none">
+              <label id="atf-auth-keyname-label">Header 名稱</label>
+              <input type="text" id="atf-auth-keyname" placeholder="例：X-Api-Key" />
+            </div>
+            <div class="form-group">
+              <label>Secret / Token（不會傳送給 AI 模型）</label>
+              <div class="input-wrapper">
+                <input type="password" id="atf-auth-secret" placeholder="貼上 token 或 API key" />
+                <button type="button" id="atf-toggle-secret" class="btn-icon">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" />
+                    <circle cx="12" cy="12" r="3" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label>回傳上限（字元數）</label>
+            <input type="number" id="atf-response-limit" value="2000" min="100" max="10000" style="width:120px" />
+            <p class="hint">超過此長度的回傳結果會被截斷，避免佔用過多 context。</p>
+          </div>
+
+          <div class="api-tool-form-actions">
+            <button type="button" id="atf-cancel" class="btn-secondary">取消</button>
+            <button type="button" id="atf-save" class="btn-primary">儲存工具</button>
+          </div>
+        </div>
+      </section>
+
       <section class="section" id="sec-about">
         <h2>關於</h2>
         <div class="about-info">
-          <p><strong>版本:</strong> 1.25.1</p>
+          <p><strong>版本:</strong> 1.26.0</p>
           <p><strong>預設對話模型:</strong> MiniMax-M2.7（可切換 OpenRouter 自訂模型）</p>
           <p><strong>預設圖片模型:</strong> Gemini 2.5 Flash-lite</p>
           <p>Open Chat Hub 是多模型 AI 側邊欄工作台，支援聊天、截圖、OCR、翻譯、檔案分析、知識庫與同步備份。</p>

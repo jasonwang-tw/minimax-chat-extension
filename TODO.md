@@ -161,13 +161,13 @@
 | 優先度 | 功能 | 說明 |
 |--------|------|------|
 | ✅ Done | AI Agent Loop 基礎建設 | 完成於 v1.19.x |
-| 🔴 P0 | MiniMax 圖像生成 | 需 Plus 方案（$20/月）；高價值差異化功能 |
+| 🔵 P4 | MiniMax 圖像生成 | 需 Plus 方案（$20/月）；升級方案後再實作 |
 | 🟠 P1 | AI 設定 & 記憶工具 | 搭配 Agent Loop |
 | ✅ Done | Plan Approval / 計畫模式 | 完成於 v1.25.0（含 off/auto/always 設定、風險分級、持久化、Make changes 回填） |
 | ✅ Done | 瀏覽器自動化 Phase 1 | 完成於 v1.24.x |
-| 🟠 P1 | API Tool Registry | HTTP API 工具 schema、金鑰、allowlist、read/write 權限 |
+| ✅ Done | API Tool Registry | 完成於 v1.26.0 |
 | 🟠 P1 | SSH / Server Tool | Native Messaging 或後端 proxy，強制 Plan Approval |
-| 🟠 P1 | MiniMax TTS 升級 | 需 Plus 方案（$20/月）；現有 Google TTS 直接替換 |
+| 🔵 P4 | MiniMax TTS 升級 | 需 Plus 方案（$20/月）；升級方案後再實作 |
 | 🟠 P1 | System Prompt 壓縮 | M2.7 200k token 充分利用 |
 | 🟡 P2 | 瀏覽器自動化 Phase 2 | chrome.debugger CDP（截圖、JS 執行、網路攔截） |
 | 🟡 P2 | 任務腳本（Task Script） | 長任務腳本化，搭配 Agent |
@@ -204,7 +204,7 @@
 - 搜尋歷程可在 UI 中追蹤。
 - 工具失敗不會中斷整個對話。
 
-### 🔴 P0 — MiniMax 圖像生成
+### 🔵 P4 — MiniMax 圖像生成
 
 把 MiniMax Image API 接進聊天側邊欄，讓使用者可以用文字直接生成圖片，或讓 AI 在合適場景自行調用圖片生成 tool。
 
@@ -251,7 +251,7 @@
 - 未批准前不會執行高風險工具。
 - 批准後能沿用同一份原始 request 繼續執行。
 
-### 🟠 P1 — API Tool Registry
+### ✅ Done — API Tool Registry（v1.26.0）
 
 建立一套可管理的 HTTP API 工具系統，讓 AI 能在受控條件下呼叫外部 API。這會作為 WordPress、第三方 SaaS、內部服務整合的基礎。
 
@@ -283,7 +283,7 @@
 - 使用者能在執行前看到目標主機與操作內容。
 - 任務執行結果會回傳到聊天並留存摘要。
 
-### 🟠 P1 — MiniMax TTS 升級
+### 🔵 P4 — MiniMax TTS 升級
 
 用 MiniMax TTS 取代目前 Google TTS fallback，提供更自然的語音與更多聲音設定。
 
@@ -603,13 +603,13 @@
 > - Starter（$10/月）只提供文字 API + 圖片理解（understand_image）
 > - Starter 的「image understanding and web search MCP」是給 Claude Code / Cursor 等 IDE 使用的 MCP server，**不是給 Extension 直接呼叫的 API**
 
-### 圖像生成（P0）
+### 圖像生成（P4）
 
 - [ ] **文字生成圖片**：呼叫 MiniMax Image API，使用者輸入描述 → 圖片顯示在聊天視窗
 - [ ] **寬高比選擇**：支援 1:1、16:9、9:16 等常用比例
 - [ ] **觸發方式**：`/image <描述>` 指令 或 AI 自行調用 `generate_image` tool
 
-### TTS 升級（P1）
+### TTS 升級（P4）
 
 - [ ] **替換 Google TTS**：改用 MiniMax TTS API，支援更多聲音選項與更自然語音
 - [ ] **聲音選擇**：在設定頁面提供可選聲音清單
