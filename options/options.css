@@ -1189,7 +1189,7 @@ input.cmd-trigger {
 
 .atf-param-row {
   display: flex;
-  gap: 5px;
+  gap: 6px;
   align-items: center;
 }
 .atf-param-row input[type=text] {
@@ -1219,6 +1219,10 @@ input.cmd-trigger {
   flex-shrink: 0;
 }
 
+.atf-param-row .atf-p-required-label {
+  margin-bottom: 0;
+}
+
 .atf-p-required-label {
   display: flex;
   align-items: center;
@@ -1228,7 +1232,6 @@ input.cmd-trigger {
   cursor: pointer;
   color: var(--text-secondary);
   flex-shrink: 0;
-  margin-bottom: 0;
 }
 .atf-p-required-label input[type=checkbox] {
   appearance: none;
