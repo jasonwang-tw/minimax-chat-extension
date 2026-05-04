@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash([ -f \"$CLAUDE_DIR/plugins/$f\" ])",
+      "Bash(cp /c/Users/jason.wang/.claude/plugins/__TRACKED_VAR__ /c/Users/jason.wang/Desktop/ClaudeCodeProject/claude-private/env/plugins/__TRACKED_VAR__)",
+      "Bash(echo \"Windows\")",
+      "Bash(date '+%Y-%m-%d %H:%M:%S')"
+    ]
+  }
+}
