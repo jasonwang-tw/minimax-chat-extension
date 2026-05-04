@@ -593,7 +593,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     };
     const cases = getModelUseCases(model);
     if (cases.length === 0) return '';
-    return `<div class="recommendation-badges">${cases.map(id => `<span class="rec-${escapeVal(id)}">${escapeVal(labels[id] || id)}</span>`).join('')}</div>`;
+    return `<div class="recommendation-badges"><span class="rec-label">適合</span>${cases.map(id => `<span class="rec-${escapeVal(id)}">${escapeVal(labels[id] || id)}</span>`).join('')}</div>`;
   }
 
   function renderCapabilityBadges(model) {

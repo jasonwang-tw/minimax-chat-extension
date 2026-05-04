@@ -106,6 +106,10 @@ npm run build:css
 
 ## Changelog
 
+## [1.25.1] - 2026-05-04
+### Changed
+- 模型費用表推薦用途 badges 前新增「適合」label，提升視覺可讀性
+
 ## [1.25.0] - 2026-05-03
 ### Added
 - 計畫模式設定（off / auto / always）：可在對話設定頁選擇關閉、自動（僅 /plan 觸發）或強制（每次發送前均需批准計畫）
