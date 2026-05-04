@@ -447,8 +447,17 @@
         <h2>API 工具</h2>
         <p class="section-desc">讓 AI Agent 在對話中呼叫自訂 HTTP API。Auth Secret 僅存於本機，不會傳送給模型。非 GET 操作建議搭配計畫模式使用。</p>
 
+        <!-- 預設工具庫 -->
+        <div class="api-presets-section">
+          <span class="api-presets-title">預設工具庫</span>
+          <div id="apiPresetsList"></div>
+        </div>
+
+        <div class="divider"></div>
+
+        <div class="api-custom-title">自訂工具</div>
         <div id="apiToolsList" class="api-tools-list"></div>
-        <button id="addApiToolBtn" class="btn-secondary btn-add-mode" style="margin-top:8px">+ 新增 API 工具</button>
+        <button id="addApiToolBtn" class="btn-secondary btn-add-mode" style="margin-top:8px">+ 新增工具</button>
 
         <div id="apiToolForm" class="api-tool-form" style="display:none">
           <h3 class="api-tool-form-title">新增工具</h3>

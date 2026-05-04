@@ -1145,6 +1145,178 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
+  // ── API 預設工具庫 ─────────────────────────────────────────
+  const API_PRESETS = [
+    {
+      id: 'wordpress',
+      name: 'WordPress REST API',
+      description: '讓 AI 讀取、建立與更新文章、分類與標籤',
+      icon: '🌐',
+      toolPrefix: 'wp_',
+      fields: [
+        { id: 'baseUrl',   label: '站台網址',                         placeholder: 'https://yoursite.com',    type: 'text',     toggle: false },
+        { id: 'username',  label: '帳號',                             placeholder: 'admin',                   type: 'text',     toggle: false },
+        { id: 'password',  label: '密碼（Application Password）',     placeholder: 'xxxx xxxx xxxx xxxx',     type: 'password', toggle: true  }
+      ],
+      generate: (c) => {
+        const auth = { authType: 'basic_auth', authUsername: c.username, authPassword: c.password };
+        const base = c.baseUrl.replace(/\/+$/, '') + '/wp-json/wp/v2';
+        return [
+          {
+            name: 'wp_get_posts', method: 'GET', url: `${base}/posts`,
+            description: '取得 WordPress 文章列表，可依狀態或關鍵字篩選',
+            parameters: [
+              { name: 'per_page', description: '每頁筆數（最多 100）', type: 'number', location: 'query', required: false },
+              { name: 'search',   description: '搜尋關鍵字',           type: 'string', location: 'query', required: false },
+              { name: 'status',   description: '狀態：publish / draft / any', type: 'string', location: 'query', required: false }
+            ],
+            ...auth, responseLimit: 3000, enabled: true
+          },
+          {
+            name: 'wp_get_post', method: 'GET', url: `${base}/posts/{id}`,
+            description: '取得指定 ID 的 WordPress 文章完整內容',
+            parameters: [
+              { name: 'id', description: '文章 ID', type: 'number', location: 'path', required: true }
+            ],
+            ...auth, responseLimit: 3000, enabled: true
+          },
+          {
+            name: 'wp_create_post', method: 'POST', url: `${base}/posts`,
+            description: '在 WordPress 建立新文章',
+            parameters: [
+              { name: 'title',   description: '文章標題',       type: 'string', location: 'body', required: true  },
+              { name: 'content', description: '文章內容（HTML）', type: 'string', location: 'body', required: true  },
+              { name: 'status',  description: 'draft 或 publish', type: 'string', location: 'body', required: true  },
+              { name: 'excerpt', description: '文章摘要',        type: 'string', location: 'body', required: false }
+            ],
+            ...auth, responseLimit: 1000, enabled: true
+          },
+          {
+            name: 'wp_update_post', method: 'POST', url: `${base}/posts/{id}`,
+            description: '更新指定 WordPress 文章的標題、內容或狀態',
+            parameters: [
+              { name: 'id',      description: '文章 ID',         type: 'number', location: 'path', required: true  },
+              { name: 'title',   description: '新標題',           type: 'string', location: 'body', required: false },
+              { name: 'content', description: '新內容（HTML）',   type: 'string', location: 'body', required: false },
+              { name: 'status',  description: 'draft / publish',  type: 'string', location: 'body', required: false }
+            ],
+            ...auth, responseLimit: 1000, enabled: true
+          },
+          {
+            name: 'wp_get_categories', method: 'GET', url: `${base}/categories`,
+            description: '取得 WordPress 分類列表',
+            parameters: [
+              { name: 'per_page', description: '每頁筆數', type: 'number', location: 'query', required: false }
+            ],
+            ...auth, responseLimit: 2000, enabled: true
+          },
+          {
+            name: 'wp_get_tags', method: 'GET', url: `${base}/tags`,
+            description: '取得 WordPress 標籤列表',
+            parameters: [
+              { name: 'per_page', description: '每頁筆數', type: 'number', location: 'query', required: false }
+            ],
+            ...auth, responseLimit: 2000, enabled: true
+          }
+        ];
+      }
+    }
+  ];
+
+  function renderApiPresets() {
+    const container = document.getElementById('apiPresetsList');
+    if (!container) return;
+    container.innerHTML = '';
+
+    for (const preset of API_PRESETS) {
+      const imported = apiToolRegistry.filter(t => t.name.startsWith(preset.toolPrefix));
+      const isImported = imported.length > 0;
+
+      const card = document.createElement('div');
+      card.className = 'api-preset-card';
+
+      const eyeSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>`;
+
+      card.innerHTML = `
+        <div class="api-preset-card-header">
+          <span class="api-preset-icon">${preset.icon}</span>
+          <div class="api-preset-info">
+            <div class="api-preset-name">${escapeVal(preset.name)}</div>
+            <div class="api-preset-desc">${escapeVal(preset.description)}</div>
+          </div>
+          ${isImported ? `<span class="api-preset-badge">✓ 已匯入 ${imported.length} 個工具</span>` : ''}
+          <button type="button" class="api-preset-toggle-btn">設定 ▾</button>
+        </div>
+        <div class="api-preset-body" style="display:none">
+          ${preset.fields.map(f => `
+            <div class="form-group">
+              <label>${escapeVal(f.label)}</label>
+              ${f.toggle
+                ? `<div class="input-wrapper">
+                     <input type="password" class="preset-field" data-field="${f.id}" placeholder="${escapeVal(f.placeholder)}" />
+                     <button type="button" class="btn-icon preset-pw-toggle">${eyeSvg}</button>
+                   </div>`
+                : `<input type="${f.type}" class="preset-field" data-field="${f.id}" placeholder="${escapeVal(f.placeholder)}" />`
+              }
+            </div>
+          `).join('')}
+          <div class="api-preset-actions">
+            <button type="button" class="btn-primary api-preset-import-btn">
+              ${isImported ? '更新連線設定' : `匯入 ${preset.generate({baseUrl:'x',username:'',password:''}).length} 個工具`}
+            </button>
+            ${isImported ? `<button type="button" class="btn-secondary danger api-preset-remove-btn">移除所有工具</button>` : ''}
+          </div>
+        </div>`;
+
+      // 展開/收合
+      card.querySelector('.api-preset-toggle-btn').addEventListener('click', () => {
+        const body = card.querySelector('.api-preset-body');
+        const btn  = card.querySelector('.api-preset-toggle-btn');
+        const open = body.style.display !== 'none';
+        body.style.display = open ? 'none' : 'block';
+        btn.textContent = open ? '設定 ▾' : '收起 ▴';
+      });
+
+      // 密碼顯示切換
+      card.querySelector('.preset-pw-toggle')?.addEventListener('click', (e) => {
+        const inp = e.currentTarget.previousElementSibling;
+        inp.type = inp.type === 'password' ? 'text' : 'password';
+      });
+
+      // 匯入
+      card.querySelector('.api-preset-import-btn').addEventListener('click', async () => {
+        const config = {};
+        card.querySelectorAll('.preset-field').forEach(inp => { config[inp.dataset.field] = inp.value.trim(); });
+        if (!config.baseUrl) { showMessage('請輸入站台網址', 'error'); return; }
+
+        const newTools = preset.generate(config).map(t => ({
+          ...t,
+          id: apiToolRegistry.find(r => r.name === t.name)?.id || generateToolId()
+        }));
+        apiToolRegistry = [
+          ...apiToolRegistry.filter(t => !t.name.startsWith(preset.toolPrefix)),
+          ...newTools
+        ];
+        await chrome.storage.local.set({ apiToolRegistry });
+        renderApiToolRegistry();
+        renderApiPresets();
+        showMessage(`已匯入 ${newTools.length} 個 ${preset.name} 工具`, 'success');
+      });
+
+      // 移除
+      card.querySelector('.api-preset-remove-btn')?.addEventListener('click', async () => {
+        if (!confirm(`確定要移除所有 ${preset.name} 工具嗎？`)) return;
+        apiToolRegistry = apiToolRegistry.filter(t => !t.name.startsWith(preset.toolPrefix));
+        await chrome.storage.local.set({ apiToolRegistry });
+        renderApiToolRegistry();
+        renderApiPresets();
+        showMessage(`已移除 ${preset.name} 工具`, 'success');
+      });
+
+      container.appendChild(card);
+    }
+  }
+
   // ── API Tool Registry ──────────────────────────────────────
   function generateToolId() {
     return 'tool_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
@@ -1281,6 +1453,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   async function loadApiToolRegistry() {
     const { apiToolRegistry: stored } = await chrome.storage.local.get('apiToolRegistry');
     apiToolRegistry = stored || [];
+    renderApiPresets();
     renderApiToolRegistry();
   }
 
