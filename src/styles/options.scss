@@ -1011,6 +1011,238 @@ input.cmd-trigger {
   display: none !important;
 }
 
+/* ── API Tool Registry ─────────────────────────────────── */
+.api-tools-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.api-tool-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+
+.api-tool-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.api-tool-name {
+  font-size: 13px;
+  font-weight: 600;
+  flex: 1;
+  min-width: 0;
+}
+
+.api-method-badge {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 4px;
+  letter-spacing: 0.04em;
+  flex-shrink: 0;
+
+  &.api-method-GET    { background: rgba(16,185,129,0.15); color: #10B981; }
+  &.api-method-POST   { background: rgba(96,165,250,0.15); color: #60a5fa; }
+  &.api-method-PUT,
+  &.api-method-PATCH  { background: rgba(245,158,11,0.15);  color: #f59e0b; }
+  &.api-method-DELETE { background: rgba(239,68,68,0.15);   color: #ef4444; }
+}
+
+.api-tool-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  flex-shrink: 0;
+
+  input[type="checkbox"] {
+    width: 14px;
+    height: 14px;
+    cursor: pointer;
+  }
+}
+
+.api-tool-desc {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.api-tool-url {
+  font-size: 11px;
+  color: var(--text-secondary);
+  opacity: 0.55;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: monospace;
+}
+
+.api-tool-card-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-color);
+
+  .btn-secondary {
+    padding: 4px 12px;
+    font-size: 12px;
+  }
+}
+
+.api-tool-form {
+  margin-top: 16px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  padding: 18px;
+
+  // 獨立 input（未包在 .input-wrapper 內）套用深色主題
+  input[type=text],
+  input[type=number] {
+    width: 100%;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 10px;
+    padding: 9px 13px;
+    color: var(--text-primary);
+    font-size: 13px;
+    font-family: inherit;
+    outline: none;
+    transition: border-color 0.2s;
+
+    &:focus {
+      border-color: rgba(236, 41, 112, 0.5);
+    }
+
+    &::placeholder {
+      color: var(--text-secondary);
+      opacity: 0.7;
+    }
+  }
+
+  input[type=number] {
+    width: 120px;
+    flex: none;
+  }
+
+  textarea {
+    width: 100%;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 10px;
+    padding: 9px 13px;
+    color: var(--text-primary);
+    font-size: 13px;
+    font-family: inherit;
+    outline: none;
+    resize: vertical;
+    min-height: 64px;
+    line-height: 1.5;
+    transition: border-color 0.2s;
+
+    &:focus {
+      border-color: rgba(236, 41, 112, 0.5);
+    }
+
+    &::placeholder {
+      color: var(--text-secondary);
+      opacity: 0.7;
+    }
+  }
+}
+
+.api-tool-form-title {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 14px;
+  color: var(--text-primary);
+}
+
+.api-tool-form-row {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.atf-params-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.atf-param-row {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+
+  input[type=text] {
+    padding: 7px 10px;
+    font-size: 12px;
+    border-radius: 8px;
+  }
+
+  select {
+    padding: 7px 10px;
+    font-size: 12px;
+    border-radius: 8px;
+  }
+}
+
+.atf-p-name {
+  width: 110px;
+  flex-shrink: 0;
+}
+
+.atf-p-desc {
+  flex: 1;
+  min-width: 0;
+}
+
+.atf-p-type,
+.atf-p-location {
+  width: 76px;
+  flex-shrink: 0;
+}
+
+.atf-p-required-label {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+
+  input[type="checkbox"] {
+    width: 13px;
+    height: 13px;
+    cursor: pointer;
+  }
+}
+
+.api-tool-form-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 18px;
+  justify-content: flex-end;
+}
+
 @media (max-width: 900px) {
   .settings-layout {
     grid-template-columns: 1fr;
