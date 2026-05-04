@@ -1102,6 +1102,7 @@ input.cmd-trigger {
   padding: 14px;
   border-top: 1px solid var(--border-color);
 
+  // 獨立 input（非 .input-wrapper 內）套用深色主題
   input[type=text],
   input[type=password] {
     width: 100%;
@@ -1123,6 +1124,19 @@ input.cmd-trigger {
       color: var(--text-secondary);
       opacity: 0.7;
     }
+  }
+
+  // .input-wrapper 內還原透明（type 切換後不套用深色框）
+  .input-wrapper input[type=text],
+  .input-wrapper input[type=password] {
+    background: transparent;
+    border: none;
+    border-radius: 0;
+    padding: 10px 0;
+    width: 100%;
+    font-size: 14px;
+
+    &:focus { border-color: transparent; }
   }
 }
 
@@ -1255,6 +1269,19 @@ input.cmd-trigger {
       color: var(--text-secondary);
       opacity: 0.7;
     }
+  }
+
+  // .input-wrapper 內的 input 還原為透明（type 切換後不套用深色框）
+  .input-wrapper input[type=text],
+  .input-wrapper input[type=password] {
+    background: transparent;
+    border: none;
+    border-radius: 0;
+    padding: 10px 0;
+    width: 100%;
+    font-size: 14px;
+
+    &:focus { border-color: transparent; }
   }
 
   input[type=number] {
