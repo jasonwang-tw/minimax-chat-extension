@@ -1209,6 +1209,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('atf-auth-type').value = tool?.authType || 'none';
     document.getElementById('atf-auth-keyname').value = tool?.authKeyName || '';
     document.getElementById('atf-auth-secret').value = tool?.authSecret || '';
+    document.getElementById('atf-auth-username').value = tool?.authUsername || '';
+    document.getElementById('atf-auth-password').value = tool?.authPassword || '';
     document.getElementById('atf-response-limit').value = tool?.responseLimit ?? 2000;
     renderParamRows(tool?.parameters || []);
     updateAtfAuthFields();
@@ -1262,10 +1264,15 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   function updateAtfAuthFields() {
     const type = document.getElementById('atf-auth-type').value;
-    const fieldsEl      = document.getElementById('atf-auth-fields');
-    const keyNameRow    = document.getElementById('atf-auth-keyname-row');
-    const keyNameLabel  = document.getElementById('atf-auth-keyname-label');
+    const fieldsEl     = document.getElementById('atf-auth-fields');
+    const tokenRow     = document.getElementById('atf-auth-token-row');
+    const keyNameRow   = document.getElementById('atf-auth-keyname-row');
+    const keyNameLabel = document.getElementById('atf-auth-keyname-label');
+    const basicRow     = document.getElementById('atf-auth-basic-row');
+    const isBasic = type === 'basic_auth';
     fieldsEl.style.display   = type === 'none' ? 'none' : 'block';
+    tokenRow.style.display   = isBasic ? 'none' : 'block';
+    basicRow.style.display   = isBasic ? 'block' : 'none';
     keyNameRow.style.display = (type === 'api_key_header' || type === 'api_key_query') ? 'block' : 'none';
     if (type === 'api_key_header') keyNameLabel.textContent = 'Header 名稱';
     if (type === 'api_key_query')  keyNameLabel.textContent = 'Query 參數名稱';
@@ -1293,6 +1300,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     input.type = input.type === 'password' ? 'text' : 'password';
   });
 
+  document.getElementById('atf-toggle-password')?.addEventListener('click', () => {
+    const input = document.getElementById('atf-auth-password');
+    input.type = input.type === 'password' ? 'text' : 'password';
+  });
+
   document.getElementById('atf-save')?.addEventListener('click', async () => {
     const name = document.getElementById('atf-name').value.trim();
     if (!name || !/^[a-zA-Z0-9_]+$/.test(name)) {
@@ -1314,6 +1326,8 @@ document.addEventListener('DOMContentLoaded', async () => {
       authType:      document.getElementById('atf-auth-type').value,
       authKeyName:   document.getElementById('atf-auth-keyname').value.trim(),
       authSecret:    document.getElementById('atf-auth-secret').value,
+      authUsername:  document.getElementById('atf-auth-username').value,
+      authPassword:  document.getElementById('atf-auth-password').value,
       responseLimit: parseInt(document.getElementById('atf-response-limit').value) || 2000,
       enabled:       true
     };

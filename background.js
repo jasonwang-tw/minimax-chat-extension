@@ -2054,6 +2054,8 @@ async function executeApiTool(tool, args) {
       headers[tool.authKeyName] = tool.authSecret || '';
     } else if (tool.authType === 'api_key_query' && tool.authKeyName) {
       queryParams.set(tool.authKeyName, tool.authSecret || '');
+    } else if (tool.authType === 'basic_auth') {
+      headers['Authorization'] = `Basic ${btoa(`${tool.authUsername || ''}:${tool.authPassword || ''}`)}`;
     }
 
     for (const p of (tool.parameters || []).filter(p => p.location === 'query')) {
