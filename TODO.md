@@ -172,6 +172,7 @@
 | 🟡 P2 | 瀏覽器自動化 Phase 2 | chrome.debugger CDP（截圖、JS 執行、網路攔截） |
 | 🟡 P2 | 任務腳本（Task Script） | 長任務腳本化，搭配 Agent |
 | 🟡 P2 | 筆記工具（MD Notes） | write/read/list note |
+| 🟡 P2 | 多模型並排比較 | 同一 prompt 同時送到 2-3 個模型，並排比較回覆品質、速度與成本 |
 | 🟡 P2 | Spaces 多空間 | tab-based 切換，搭配多窗口策略 |
 | 🟡 P2 | 部落格助手 | jasonsbase-blog 實裝 |
 | 🟢 P3 | 瀏覽器自動化 Phase 3 | Native Messaging + Playwright（完整多 tab 自動化） |
@@ -667,6 +668,23 @@
 - [ ] **`run_script(name)`** tool：AI 可調用，按步驟執行並回報進度
 - [ ] **腳本管理 UI**：側邊欄列表、新增、編輯、刪除腳本
 - [ ] **內建腳本範本**：`blog-article`、`page-analysis`、`code-review` 等
+
+---
+
+## 🟡 P2 — 多模型並排比較
+
+同一個 prompt 可同時送到 2-3 個模型，讓使用者在同一個 session 中並排比較回覆品質、速度與成本。此功能聚焦「同一任務內比較答案」，不同於 Spaces 多空間的「不同任務脈絡隔離」。
+
+MVP：
+- [ ] **比較模式入口**：輸入區新增 Compare / 比較模式，可選 2-3 個模型。
+- [ ] **多回覆卡片**：同一則 user message 下顯示多個 assistant response card。
+- [ ] **並行串流狀態**：每張卡顯示模型名、串流狀態、耗時、錯誤與 usage/cost。
+- [ ] **純文字優先**：第一版先限制一般文字聊天，不納入 Agent tools、圖片、PDF、檔案分析。
+
+後續擴充：
+- [ ] **裁判模型**：加入一個總結模型，比較各模型優缺點並整理建議答案。
+- [ ] **最佳回覆採用**：可將指定模型回覆標記為最佳，或加入原 session 作為後續上下文。
+- [ ] **比較紀錄回溯**：支援從 session 搜尋與回顧多模型比較結果。
 
 ---
 
