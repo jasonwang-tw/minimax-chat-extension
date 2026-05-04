@@ -1890,14 +1890,22 @@ async function executeBrowserTool(toolName, args, sessionId) {
   if (toolName === 'browser_get_text') {
     return await exec((sel) => {
       let el;
+      let warning = '';
       if (sel) {
         el = document.querySelector(sel);
-        if (!el) return { error: `找不到元素: ${sel}` };
+        if (!el) {
+          warning = `找不到元素: ${sel}，已改讀取頁面主內容。`;
+          el = document.querySelector('main, [role="main"], article, #main-content, #content, .main-content') || document.body;
+        }
       } else {
         el = document.querySelector('main, [role="main"], article, #main-content, #content, .main-content') || document.body;
       }
       const text = el.innerText || '';
-      return { text: text.length > 8000 ? text.slice(0, 8000) + '\n...（已截斷）' : text, length: text.length };
+      return {
+        text: text.length > 8000 ? text.slice(0, 8000) + '\n...（已截斷）' : text,
+        length: text.length,
+        ...(warning ? { warning, selectorFallback: true } : {})
+      };
     }, [args.selector || '']);
   }
 

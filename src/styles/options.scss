@@ -1127,6 +1127,19 @@ input.cmd-trigger {
   }
 
   // .input-wrapper 內還原透明（type 切換後不套用深色框）
+  .input-wrapper {
+    align-items: center;
+    height: 37px;
+    border-radius: 10px;
+    padding: 0 13px;
+  }
+
+  .input-wrapper .btn-icon {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+  }
+
   .input-wrapper input[type=text],
   .input-wrapper input[type=password] {
     background: transparent;
@@ -1137,6 +1150,10 @@ input.cmd-trigger {
     font-size: 14px;
 
     &:focus { border-color: transparent; }
+  }
+
+  .input-wrapper input[type=password] {
+    padding: 0px;
   }
 }
 
@@ -1272,6 +1289,19 @@ input.cmd-trigger {
   }
 
   // .input-wrapper 內的 input 還原為透明（type 切換後不套用深色框）
+  .input-wrapper {
+    align-items: center;
+    height: 37px;
+    border-radius: 10px;
+    padding: 0 13px;
+  }
+
+  .input-wrapper .btn-icon {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+  }
+
   .input-wrapper input[type=text],
   .input-wrapper input[type=password] {
     background: transparent;
@@ -1282,6 +1312,10 @@ input.cmd-trigger {
     font-size: 14px;
 
     &:focus { border-color: transparent; }
+  }
+
+  .input-wrapper input[type=password] {
+    padding: 0px;
   }
 
   input[type=number] {

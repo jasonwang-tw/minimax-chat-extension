@@ -1123,6 +1123,17 @@ input.cmd-trigger {
   color: var(--text-secondary);
   opacity: 0.7;
 }
+.api-preset-body .input-wrapper {
+  align-items: center;
+  height: 37px;
+  border-radius: 10px;
+  padding: 0 13px;
+}
+.api-preset-body .input-wrapper .btn-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+}
 .api-preset-body .input-wrapper input[type=text],
 .api-preset-body .input-wrapper input[type=password] {
   background: transparent;
@@ -1135,6 +1146,9 @@ input.cmd-trigger {
 .api-preset-body .input-wrapper input[type=text]:focus,
 .api-preset-body .input-wrapper input[type=password]:focus {
   border-color: transparent;
+}
+.api-preset-body .input-wrapper input[type=password] {
+  padding: 0px;
 }
 
 .api-preset-actions {
@@ -1274,6 +1288,17 @@ input.cmd-trigger {
   color: var(--text-secondary);
   opacity: 0.7;
 }
+.api-tool-form .input-wrapper {
+  align-items: center;
+  height: 37px;
+  border-radius: 10px;
+  padding: 0 13px;
+}
+.api-tool-form .input-wrapper .btn-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+}
 .api-tool-form .input-wrapper input[type=text],
 .api-tool-form .input-wrapper input[type=password] {
   background: transparent;
@@ -1286,6 +1311,9 @@ input.cmd-trigger {
 .api-tool-form .input-wrapper input[type=text]:focus,
 .api-tool-form .input-wrapper input[type=password]:focus {
   border-color: transparent;
+}
+.api-tool-form .input-wrapper input[type=password] {
+  padding: 0px;
 }
 .api-tool-form input[type=number] {
   width: 120px;
