@@ -1146,12 +1146,15 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   // ── API 預設工具庫 ─────────────────────────────────────────
+  const API_ICON_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v4"/><path d="M12 17v4"/><path d="M4.2 7.5l3.5 2"/><path d="M16.3 14.5l3.5 2"/><path d="M19.8 7.5l-3.5 2"/><path d="M7.7 14.5l-3.5 2"/><circle cx="12" cy="12" r="5"/></svg>';
+  const GLOBE_ICON_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a14 14 0 0 1 0 18"/><path d="M12 3a14 14 0 0 0 0 18"/></svg>';
+
   const API_PRESETS = [
     {
       id: 'wordpress',
       name: 'WordPress REST API',
       description: '讓 AI 讀取、建立與更新文章、分類與標籤',
-      icon: '🌐',
+      icon: GLOBE_ICON_SVG,
       toolPrefix: 'wp_',
       fields: [
         { id: 'baseUrl',   label: '站台網址',                         placeholder: 'https://yoursite.com',    type: 'text',     toggle: false },
@@ -1163,14 +1166,14 @@ document.addEventListener('DOMContentLoaded', async () => {
         const base = c.baseUrl.replace(/\/+$/, '') + '/wp-json/wp/v2';
         return [
           {
-            name: 'wp_get_posts', method: 'GET', url: `${base}/posts`,
+            name: 'wp_get_posts', method: 'GET', url: `${base}/posts?per_page=20&_fields=id,date,slug,status,link,title`,
             description: '取得 WordPress 文章列表，可依狀態或關鍵字篩選',
             parameters: [
               { name: 'per_page', description: '每頁筆數（最多 100）', type: 'number', location: 'query', required: false },
               { name: 'search',   description: '搜尋關鍵字',           type: 'string', location: 'query', required: false },
-              { name: 'status',   description: '狀態：publish / draft / any', type: 'string', location: 'query', required: false }
+              { name: 'status',   description: '狀態：publish。查詢草稿等非公開狀態需要 WordPress 權限，沒有特別指定時請不要帶此參數', type: 'string', location: 'query', required: false }
             ],
-            ...auth, responseLimit: 3000, enabled: true
+            ...auth, responseLimit: 8000, enabled: true
           },
           {
             name: 'wp_get_post', method: 'GET', url: `${base}/posts/{id}`,
@@ -1231,6 +1234,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     for (const preset of API_PRESETS) {
       const imported = apiToolRegistry.filter(t => t.name.startsWith(preset.toolPrefix));
       const isImported = imported.length > 0;
+      const enabledCount = imported.filter(t => t.enabled).length;
+      const totalCount = preset.generate({ baseUrl: 'https://example.com', username: '', password: '' }).length;
+      const sampleTool = imported[0] || {};
+      const inferredBaseUrl = sampleTool.url ? sampleTool.url.split('/wp-json/wp/v2')[0] : '';
 
       const card = document.createElement('div');
       card.className = 'api-preset-card';
@@ -1244,29 +1251,166 @@ document.addEventListener('DOMContentLoaded', async () => {
             <div class="api-preset-name">${escapeVal(preset.name)}</div>
             <div class="api-preset-desc">${escapeVal(preset.description)}</div>
           </div>
-          ${isImported ? `<span class="api-preset-badge">✓ 已匯入 ${imported.length} 個工具</span>` : ''}
-          <button type="button" class="api-preset-toggle-btn">設定 ▾</button>
+          ${isImported ? `<span class="api-preset-badge">已啟用 ${enabledCount} / ${totalCount} 個工具</span>` : ''}
+          <button type="button" class="api-preset-toggle-btn">${isImported ? '編輯 ▾' : '啟用 ▾'}</button>
         </div>
         <div class="api-preset-body" style="display:none">
+          <div class="api-preset-step">
+            <span class="api-preset-step-index">1</span>
+            <span>啟用與輸入連線資料</span>
+          </div>
           ${preset.fields.map(f => `
             <div class="form-group">
               <label>${escapeVal(f.label)}</label>
               ${f.toggle
                 ? `<div class="input-wrapper">
-                     <input type="password" class="preset-field" data-field="${f.id}" placeholder="${escapeVal(f.placeholder)}" />
+                     <input type="password" class="preset-field" data-field="${f.id}" placeholder="${escapeVal(f.placeholder)}" value="${escapeVal(sampleTool.authPassword || '')}" />
                      <button type="button" class="btn-icon preset-pw-toggle">${eyeSvg}</button>
                    </div>`
-                : `<input type="${f.type}" class="preset-field" data-field="${f.id}" placeholder="${escapeVal(f.placeholder)}" />`
+                : `<input type="${f.type}" class="preset-field" data-field="${f.id}" placeholder="${escapeVal(f.placeholder)}" value="${escapeVal(f.id === 'baseUrl' ? inferredBaseUrl : sampleTool.authUsername || '')}" />`
               }
             </div>
           `).join('')}
+          <div class="api-preset-step api-preset-endpoints-title" style="${isImported ? '' : 'display:none'}">
+            <span class="api-preset-step-index">2</span>
+            <span>設定要啟用的預設端點</span>
+          </div>
+          <div class="api-preset-endpoints" style="${isImported ? '' : 'display:none'}"></div>
           <div class="api-preset-actions">
-            <button type="button" class="btn-primary api-preset-import-btn">
-              ${isImported ? '更新連線設定' : `匯入 ${preset.generate({baseUrl:'x',username:'',password:''}).length} 個工具`}
+            <button type="button" class="btn-primary api-preset-save-btn">
+              ${isImported ? '儲存設定' : '儲存連線並顯示端點'}
             </button>
             ${isImported ? `<button type="button" class="btn-secondary danger api-preset-remove-btn">移除所有工具</button>` : ''}
           </div>
         </div>`;
+
+      const readConfig = () => {
+        const config = {};
+        card.querySelectorAll('.preset-field').forEach(inp => { config[inp.dataset.field] = inp.value.trim(); });
+        return config;
+      };
+
+      const getWpApiBase = (baseUrl) => `${String(baseUrl || '').replace(/\/+$/, '')}/wp-json/wp/v2`;
+
+      const toRelativeEndpoint = (url, config) => {
+        const apiBase = getWpApiBase(config.baseUrl);
+        if (!url) return '';
+        if (url.startsWith(apiBase)) return url.slice(apiBase.length) || '/';
+        try {
+          const urlObj = new URL(url);
+          return `${urlObj.pathname}${urlObj.search}`;
+        } catch {
+          return url;
+        }
+      };
+
+      const toFullEndpointUrl = (endpoint, config) => {
+        const value = String(endpoint || '').trim();
+        if (/^https?:\/\//i.test(value)) return value;
+        return `${getWpApiBase(config.baseUrl)}${value.startsWith('/') ? value : `/${value}`}`;
+      };
+
+      const renderPresetParamRow = (param = {}) => `
+        <div class="api-preset-param-row">
+          <input type="text" class="api-preset-param-name" placeholder="名稱" value="${escapeVal(param.name || '')}" />
+          <input type="text" class="api-preset-param-desc" placeholder="說明" value="${escapeVal(param.description || '')}" />
+          <select class="api-preset-param-type">
+            ${['string', 'number', 'boolean'].map(type => `<option value="${type}" ${param.type === type || (!param.type && type === 'string') ? 'selected' : ''}>${type}</option>`).join('')}
+          </select>
+          <select class="api-preset-param-location">
+            ${['query', 'path', 'body', 'header'].map(location => `<option value="${location}" ${param.location === location || (!param.location && location === 'query') ? 'selected' : ''}>${location}</option>`).join('')}
+          </select>
+          <label class="api-preset-param-required">
+            <input type="checkbox" ${param.required ? 'checked' : ''} /> 必填
+          </label>
+          <button type="button" class="btn-mode-delete api-preset-param-delete" title="刪除">
+            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6L6 18M6 6l12 12"/></svg>
+          </button>
+        </div>`;
+
+      const buildEndpointRows = (config) => {
+        const endpointsEl = card.querySelector('.api-preset-endpoints');
+        const generated = preset.generate(config);
+        endpointsEl.innerHTML = generated.map(tool => {
+          const existing = apiToolRegistry.find(t => t.name === tool.name);
+          const viewTool = { ...tool, ...(existing || {}) };
+          const endpoint = toRelativeEndpoint(viewTool.url, config);
+          const checked = existing ? existing.enabled !== false : true;
+          return `
+            <div class="api-preset-endpoint-row" data-tool-name="${escapeVal(tool.name)}">
+              <label class="api-preset-endpoint-check">
+                <input type="checkbox" class="api-preset-endpoint-enabled" ${checked ? 'checked' : ''} />
+              </label>
+              <span class="api-method-badge api-method-${viewTool.method}">${escapeVal(viewTool.method)}</span>
+              <div class="api-preset-endpoint-main">
+                <span class="api-preset-endpoint-name">${escapeVal(viewTool.name)}</span>
+                <span class="api-preset-endpoint-desc">${escapeVal(viewTool.description)}</span>
+                <span class="api-preset-endpoint-auth">連線方式：Basic Auth（帳號 + Application Password）</span>
+                <span class="api-preset-endpoint-url">${escapeVal(endpoint)}</span>
+              </div>
+              <button type="button" class="btn-secondary api-preset-endpoint-edit">編輯</button>
+              <div class="api-preset-endpoint-settings" style="display:none">
+                <div class="form-group">
+                  <label>說明</label>
+                  <textarea class="api-preset-tool-description" rows="2">${escapeVal(viewTool.description)}</textarea>
+                </div>
+                <div class="form-group">
+                  <label>端點</label>
+                  <input type="text" class="api-preset-tool-endpoint" value="${escapeVal(endpoint)}" />
+                  <p class="hint">會自動接在站台網址後方，不需要填完整網址。</p>
+                </div>
+                <div class="api-preset-settings-row">
+                  <div class="form-group">
+                    <label>HTTP 方法</label>
+                    <select class="api-preset-tool-method">
+                      ${['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].map(m => `<option value="${m}" ${viewTool.method === m ? 'selected' : ''}>${m}</option>`).join('')}
+                    </select>
+                  </div>
+                  <div class="form-group">
+                    <label>回傳上限</label>
+                    <input type="number" class="api-preset-tool-response-limit" value="${viewTool.responseLimit || 2000}" min="100" max="10000" />
+                  </div>
+                </div>
+                <div class="form-group">
+                  <label>參數</label>
+                  <div class="api-preset-params-list">
+                    ${(viewTool.parameters || []).map(renderPresetParamRow).join('')}
+                  </div>
+                  <button type="button" class="btn-secondary api-preset-add-param">+ 新增參數</button>
+                </div>
+              </div>
+            </div>`;
+        }).join('');
+        endpointsEl.querySelectorAll('.api-preset-endpoint-edit').forEach(btn => {
+          btn.addEventListener('click', () => {
+            const row = btn.closest('.api-preset-endpoint-row');
+            const settings = row.querySelector('.api-preset-endpoint-settings');
+            const open = settings.style.display !== 'none';
+            settings.style.display = open ? 'none' : 'block';
+            btn.textContent = open ? '編輯' : '收起';
+          });
+        });
+        endpointsEl.querySelectorAll('.api-preset-param-delete').forEach(btn => {
+          btn.addEventListener('click', () => btn.closest('.api-preset-param-row')?.remove());
+        });
+        endpointsEl.querySelectorAll('.api-preset-add-param').forEach(btn => {
+          btn.addEventListener('click', () => {
+            const list = btn.previousElementSibling;
+            list.insertAdjacentHTML('beforeend', renderPresetParamRow());
+            list.lastElementChild.querySelector('.api-preset-param-delete').addEventListener('click', (e) => {
+              e.currentTarget.closest('.api-preset-param-row')?.remove();
+            });
+          });
+        });
+      };
+
+      if (isImported) {
+        buildEndpointRows({
+          baseUrl: inferredBaseUrl,
+          username: sampleTool.authUsername || '',
+          password: sampleTool.authPassword || ''
+        });
+      }
 
       // 展開/收合
       card.querySelector('.api-preset-toggle-btn').addEventListener('click', () => {
@@ -1274,7 +1418,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         const btn  = card.querySelector('.api-preset-toggle-btn');
         const open = body.style.display !== 'none';
         body.style.display = open ? 'none' : 'block';
-        btn.textContent = open ? '設定 ▾' : '收起 ▴';
+        btn.textContent = open ? (isImported ? '編輯 ▾' : '啟用 ▾') : '收起 ▴';
       });
 
       // 密碼顯示切換
@@ -1283,15 +1427,64 @@ document.addEventListener('DOMContentLoaded', async () => {
         inp.type = inp.type === 'password' ? 'text' : 'password';
       });
 
-      // 匯入
-      card.querySelector('.api-preset-import-btn').addEventListener('click', async () => {
-        const config = {};
-        card.querySelectorAll('.preset-field').forEach(inp => { config[inp.dataset.field] = inp.value.trim(); });
+      // 儲存連線與端點選擇
+      card.querySelector('.api-preset-save-btn').addEventListener('click', async () => {
+        const config = readConfig();
         if (!config.baseUrl) { showMessage('請輸入站台網址', 'error'); return; }
+        if (!config.username) { showMessage('請輸入帳號', 'error'); return; }
+        if (!config.password) { showMessage('請輸入 Application Password', 'error'); return; }
+
+        const endpointBlock = card.querySelector('.api-preset-endpoints');
+        if (endpointBlock.style.display === 'none') {
+          buildEndpointRows(config);
+          const defaultTools = preset.generate(config).map(t => ({
+            ...t,
+            id: apiToolRegistry.find(r => r.name === t.name)?.id || generateToolId(),
+            presetId: preset.id,
+            enabled: true
+          }));
+          apiToolRegistry = [
+            ...apiToolRegistry.filter(t => !t.name.startsWith(preset.toolPrefix)),
+            ...defaultTools
+          ];
+          await chrome.storage.local.set({ apiToolRegistry });
+          renderApiToolRegistry();
+          card.querySelector('.api-preset-endpoints-title').style.display = '';
+          endpointBlock.style.display = '';
+          card.querySelector('.api-preset-save-btn').textContent = '儲存設定';
+          showMessage('連線資料已儲存，請勾選要啟用的預設端點', 'success');
+          return;
+        }
+
+        const enabledByName = new Map();
+        card.querySelectorAll('.api-preset-endpoint-enabled').forEach(inp => {
+          enabledByName.set(inp.closest('.api-preset-endpoint-row').dataset.toolName, inp.checked);
+        });
+        const overridesByName = new Map();
+        card.querySelectorAll('.api-preset-endpoint-row').forEach(row => {
+          const name = row.dataset.toolName;
+          const parameters = Array.from(row.querySelectorAll('.api-preset-param-row')).map(paramRow => ({
+            name: paramRow.querySelector('.api-preset-param-name').value.trim(),
+            description: paramRow.querySelector('.api-preset-param-desc').value.trim(),
+            type: paramRow.querySelector('.api-preset-param-type').value,
+            location: paramRow.querySelector('.api-preset-param-location').value,
+            required: paramRow.querySelector('.api-preset-param-required input').checked
+          })).filter(param => param.name);
+          overridesByName.set(name, {
+            method: row.querySelector('.api-preset-tool-method').value,
+            url: toFullEndpointUrl(row.querySelector('.api-preset-tool-endpoint').value, config),
+            description: row.querySelector('.api-preset-tool-description').value.trim(),
+            responseLimit: parseInt(row.querySelector('.api-preset-tool-response-limit').value) || 2000,
+            parameters
+          });
+        });
 
         const newTools = preset.generate(config).map(t => ({
           ...t,
-          id: apiToolRegistry.find(r => r.name === t.name)?.id || generateToolId()
+          ...(overridesByName.get(t.name) || {}),
+          id: apiToolRegistry.find(r => r.name === t.name)?.id || generateToolId(),
+          presetId: preset.id,
+          enabled: enabledByName.get(t.name) !== false
         }));
         apiToolRegistry = [
           ...apiToolRegistry.filter(t => !t.name.startsWith(preset.toolPrefix)),
@@ -1300,7 +1493,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         await chrome.storage.local.set({ apiToolRegistry });
         renderApiToolRegistry();
         renderApiPresets();
-        showMessage(`已匯入 ${newTools.length} 個 ${preset.name} 工具`, 'success');
+        showMessage(`${preset.name} 設定已儲存`, 'success');
       });
 
       // 移除
@@ -1325,19 +1518,20 @@ document.addEventListener('DOMContentLoaded', async () => {
   function renderApiToolRegistry() {
     const listEl = document.getElementById('apiToolsList');
     if (!listEl) return;
-    if (!apiToolRegistry.length) {
+    const customTools = apiToolRegistry.filter(tool => !tool.presetId && !API_PRESETS.some(preset => tool.name?.startsWith(preset.toolPrefix)));
+    if (!customTools.length) {
       listEl.innerHTML = '<p class="hint" style="text-align:center;padding:14px 0">尚未建立任何 API 工具</p>';
       return;
     }
     listEl.innerHTML = '';
-    for (const tool of apiToolRegistry) {
+    for (const tool of customTools) {
       const card = document.createElement('div');
       card.className = 'api-tool-card';
       card.dataset.id = tool.id;
       const method = tool.method || 'GET';
       card.innerHTML = `
         <div class="api-tool-card-header">
-          <span class="api-tool-name">🔌 ${escapeVal(tool.name || '未命名')}</span>
+          <span class="api-tool-name"><span class="api-tool-name-icon">${API_ICON_SVG}</span>${escapeVal(tool.name || '未命名')}</span>
           <span class="api-method-badge api-method-${method}">${escapeVal(method)}</span>
           <label class="api-tool-toggle" title="啟用/停用">
             <input type="checkbox" class="api-tool-enabled" ${tool.enabled ? 'checked' : ''} />
@@ -1453,6 +1647,24 @@ document.addEventListener('DOMContentLoaded', async () => {
   async function loadApiToolRegistry() {
     const { apiToolRegistry: stored } = await chrome.storage.local.get('apiToolRegistry');
     apiToolRegistry = stored || [];
+    let migrated = false;
+    apiToolRegistry = apiToolRegistry.map(tool => {
+      if (tool.name === 'wp_get_posts' && tool.url && !tool.url.includes('_fields=')) {
+        migrated = true;
+        return {
+          ...tool,
+          url: `${tool.url.replace(/\?.*$/, '')}?per_page=20&_fields=id,date,slug,status,link,title`,
+          responseLimit: Math.max(tool.responseLimit || 0, 8000),
+          parameters: (tool.parameters || []).map(param => (
+            param.name === 'status'
+              ? { ...param, description: '狀態：publish。查詢草稿等非公開狀態需要 WordPress 權限，沒有特別指定時請不要帶此參數' }
+              : param
+          ))
+        };
+      }
+      return tool;
+    });
+    if (migrated) await chrome.storage.local.set({ apiToolRegistry });
     renderApiPresets();
     renderApiToolRegistry();
   }

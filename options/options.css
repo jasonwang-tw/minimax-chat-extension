@@ -1049,10 +1049,22 @@ input.cmd-trigger {
 }
 
 .api-preset-icon {
-  font-size: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   width: 28px;
-  text-align: center;
+  height: 28px;
+  color: var(--primary);
   flex-shrink: 0;
+}
+.api-preset-icon svg {
+  width: 20px;
+  height: 20px;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  fill: none;
 }
 
 .api-preset-info {
@@ -1145,6 +1157,159 @@ input.cmd-trigger {
   border-color: transparent;
 }
 
+.api-preset-step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 12px;
+}
+
+.api-preset-endpoints-title {
+  margin-top: 16px;
+}
+
+.api-preset-step-index {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  background: rgba(236, 41, 112, 0.16);
+  color: var(--primary);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.api-preset-endpoints {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.api-preset-endpoint-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 8px;
+  cursor: pointer;
+  flex-wrap: wrap;
+}
+.api-preset-endpoint-row input[type=checkbox] {
+  width: 14px;
+  height: 14px;
+  margin-top: 2px;
+  accent-color: var(--primary);
+  flex-shrink: 0;
+}
+.api-preset-endpoint-row .api-method-badge {
+  margin-top: 0;
+}
+
+.api-preset-endpoint-check {
+  display: flex;
+  flex-shrink: 0;
+}
+
+.api-preset-endpoint-main {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  flex: 1;
+}
+
+.api-preset-endpoint-name {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.api-preset-endpoint-desc {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.api-preset-endpoint-auth {
+  font-size: 11px;
+  color: var(--success);
+}
+
+.api-preset-endpoint-url {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  overflow-wrap: anywhere;
+}
+
+.api-preset-endpoint-edit {
+  flex-shrink: 0;
+  font-size: 12px;
+  padding: 4px 10px;
+}
+
+.api-preset-endpoint-settings {
+  width: 100%;
+  margin-top: 8px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+  cursor: default;
+}
+.api-preset-endpoint-settings textarea,
+.api-preset-endpoint-settings input[type=text],
+.api-preset-endpoint-settings .api-preset-tool-endpoint,
+.api-preset-endpoint-settings input[type=number],
+.api-preset-endpoint-settings select {
+  width: 100%;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 8px 10px;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-family: inherit;
+  outline: none;
+}
+.api-preset-endpoint-settings textarea {
+  resize: vertical;
+}
+
+.api-preset-settings-row {
+  display: grid;
+  grid-template-columns: minmax(130px, 160px) minmax(130px, 160px);
+  gap: 10px;
+}
+
+.api-preset-param-row {
+  display: grid;
+  grid-template-columns: minmax(100px, 1fr) minmax(140px, 1.4fr) 92px 92px 64px 28px;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.api-preset-param-required {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.api-preset-add-param {
+  margin-top: 2px;
+  font-size: 12px;
+  padding: 5px 10px;
+}
+
 .api-preset-actions {
   display: flex;
   gap: 8px;
@@ -1175,10 +1340,32 @@ input.cmd-trigger {
 }
 
 .api-tool-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   font-size: 13px;
   font-weight: 600;
   flex: 1;
   min-width: 0;
+}
+
+.api-tool-name-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+.api-tool-name-icon svg {
+  width: 15px;
+  height: 15px;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  fill: none;
 }
 
 .api-method-badge {

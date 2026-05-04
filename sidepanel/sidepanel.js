@@ -2292,11 +2292,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     currentSession.messages.forEach(msg => {
       // 計畫歷程卡
       if (msg.role === 'plan') {
-        const statusLabel = msg.status === 'approved' ? '✓ 已批准' : msg.status === 'cancelled' ? '✗ 已取消' : '⏳ 待處理';
+        const statusLabel = msg.status === 'approved' ? '已批准' : msg.status === 'cancelled' ? '已取消' : '待處理';
         const statusClass = msg.status === 'approved' ? 'approved' : msg.status === 'cancelled' ? 'cancelled' : 'pending';
         const div = document.createElement('div');
         div.className = `plan-history-record plan-history-${statusClass}`;
-        div.innerHTML = `<span class="plan-history-icon">☷</span><span class="plan-history-summary">${escapeHtml(msg.summary || msg.originalMessage || '計畫')}</span><span class="plan-history-status">${statusLabel}</span>`;
+        div.innerHTML = `<span class="plan-history-icon">${getToolIconSvg('plan')}</span><span class="plan-history-summary">${escapeHtml(msg.summary || msg.originalMessage || '計畫')}</span><span class="plan-history-status">${statusLabel}</span>`;
         chatMessages.appendChild(div);
         return;
       }
@@ -2347,9 +2347,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         preview = item.message.length > 55 ? item.message.slice(0, 55) + '…' : item.message;
       } else if (item.images.length > 0) {
         const first = item.images[0];
-        preview = first.fileName ? `📎 ${first.fileName}` : `📎 附件 ${item.images.length} 個`;
+        preview = first.fileName ? `附件 ${first.fileName}` : `附件 ${item.images.length} 個`;
       } else if (item.pageCtx) {
-        preview = `📄 ${(item.pageCtx.title || '頁面').slice(0, 35)}`;
+        preview = `頁面 ${(item.pageCtx.title || '頁面').slice(0, 35)}`;
       } else {
         preview = '（空）';
       }
@@ -2562,9 +2562,9 @@ document.addEventListener('DOMContentLoaded', async () => {
       : commandDisplayLabel
       ? commandDisplayLabel
       : isPageOnly
-        ? `📄 ${pageTitle?.slice(0, 40) || '讀取頁面'}`
+        ? `讀取頁面：${pageTitle?.slice(0, 40) || '目前頁面'}`
         : longInputFile
-          ? `📋 長輸入（${(message.length / 1000).toFixed(1)}k 字）`
+          ? `長輸入（${(message.length / 1000).toFixed(1)}k 字）`
           : message;
 
     const userMessage = { role: 'user', content: displayMessage };
@@ -2693,7 +2693,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (msg.type === 'agent_thinking') {
         _agentIter = msg.iter;
         if (!agentStatusEl) startAgentStatus();
-        updateAgentStatus(msg.maxIter ? `第 ${msg.iter}/${msg.maxIter} 輪，AI 思考中...` : `第 ${msg.iter} 輪，AI 思考中...`);
+        updateAgentStatus(msg.maxIter ? `第 ${msg.iter}/${msg.maxIter} 輪，思考中...` : `第 ${msg.iter} 輪，思考中...`);
         return;
       }
       if (msg.type === 'tool_start') {
@@ -2703,7 +2703,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         return;
       }
       if (msg.type === 'tool_done') {
-        updateAgentStatus(msg.error ? `第 ${_agentIter} 輪，工具失敗，改用補救流程...` : `第 ${_agentIter} 輪，AI 分析結果中...`);
+        updateAgentStatus(msg.error ? `第 ${_agentIter} 輪，工具失敗，改用補救流程...` : `第 ${_agentIter} 輪，分析結果中...`);
         if (_agentSearchLog.length > 0) {
           _agentSearchLog[_agentSearchLog.length - 1].count = msg.count;
           _agentSearchLog[_agentSearchLog.length - 1].error = msg.error || null;
@@ -2974,7 +2974,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     agentStatusEl.className = 'agent-status-bar';
     agentStatusEl.innerHTML =
       '<span class="agent-status-dot"></span>' +
-      '<span class="agent-status-text">AI 思考中...</span>' +
+      '<span class="agent-status-text">思考中...</span>' +
       '<span class="agent-status-timer">0s</span>';
     chatMessages.appendChild(agentStatusEl);
     scrollToBottom();
@@ -3004,13 +3004,22 @@ document.addEventListener('DOMContentLoaded', async () => {
     _agentIter = 0;
   }
 
-  function getBrowserToolIcon(tool) {
+  function getToolIconSvg(kind) {
     const map = {
-      browser_click: '🖱', browser_fill: '✏️', browser_select: '🔽',
-      browser_get_text: '📄', browser_get_html: '🧩',
-      browser_scroll: '↕️', browser_wait_for: '⏳', browser_navigate: '🌐'
+      search: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>',
+      deep_search: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/><path d="M11 8v6"/><path d="M8 11h6"/></svg>',
+      api: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v4"/><path d="M12 17v4"/><path d="M4.2 7.5l3.5 2"/><path d="M16.3 14.5l3.5 2"/><path d="M19.8 7.5l-3.5 2"/><path d="M7.7 14.5l-3.5 2"/><circle cx="12" cy="12" r="5"/></svg>',
+      plan: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6h13"/><path d="M8 12h13"/><path d="M8 18h13"/><path d="M3 6h.01"/><path d="M3 12h.01"/><path d="M3 18h.01"/></svg>',
+      browser_click: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3l10 10-5 1.2L9.8 20 7 3Z"/></svg>',
+      browser_fill: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>',
+      browser_select: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg>',
+      browser_get_text: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h9l3 3v15H6z"/><path d="M9 10h6"/><path d="M9 14h6"/><path d="M9 18h4"/></svg>',
+      browser_get_html: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 9-4 3 4 3"/><path d="m16 9 4 3-4 3"/><path d="m14 5-4 14"/></svg>',
+      browser_scroll: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14"/><path d="m8 9 4-4 4 4"/><path d="m8 15 4 4 4-4"/></svg>',
+      browser_wait_for: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>',
+      browser_navigate: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a14 14 0 0 1 0 18"/><path d="M12 3a14 14 0 0 0 0 18"/></svg>'
     };
-    return map[tool] || '🔧';
+    return map[kind] || map.api;
   }
 
   function getBrowserToolLabel(tool) {
@@ -3023,10 +3032,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   function getAgentToolLabel(tool) {
-    if (tool === 'deep_search') return '🔎 深度搜尋';
-    if (tool === 'web_search') return '🔍 搜尋網路';
-    if (tool?.startsWith('browser_')) return `${getBrowserToolIcon(tool)} ${getBrowserToolLabel(tool)}`;
-    return `🔌 ${tool}`;
+    if (tool === 'deep_search') return '深度搜尋';
+    if (tool === 'web_search') return '搜尋網路';
+    if (tool?.startsWith('browser_')) return getBrowserToolLabel(tool);
+    return tool;
   }
 
   function buildSearchHistoryEl(log) {
@@ -3036,15 +3045,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     const summaryText = (hasBrowser || hasApi) ? `已執行 ${total} 次操作` : `已執行 ${total} 次搜尋`;
     const items = log.map(e => {
       let icon, label;
-      if (e.tool === 'deep_search') { icon = '🔎'; label = '深度搜尋'; }
-      else if (e.tool === 'web_search') { icon = '🔍'; label = '搜尋'; }
-      else if (e.tool?.startsWith('browser_')) { icon = getBrowserToolIcon(e.tool); label = getBrowserToolLabel(e.tool); }
-      else { icon = '🔌'; label = e.tool; }
+      if (e.tool === 'deep_search') { icon = getToolIconSvg('deep_search'); label = '深度搜尋'; }
+      else if (e.tool === 'web_search') { icon = getToolIconSvg('search'); label = '搜尋'; }
+      else if (e.tool?.startsWith('browser_')) { icon = getToolIconSvg(e.tool); label = getBrowserToolLabel(e.tool); }
+      else { icon = getToolIconSvg('api'); label = e.tool; }
       const countStr = e.error
         ? `<span class="agent-sh-count error">失敗</span>`
         : (e.count != null ? `<span class="agent-sh-count">${e.count} 筆</span>` : '');
       const errorText = e.error ? `<div class="agent-sh-error">${escapeHtml(e.error)}</div>` : '';
-      return `<li><span class="agent-sh-icon">${icon}</span><span class="agent-sh-label">${label}</span><span class="agent-sh-query">「${escapeHtml(e.query)}」</span>${countStr}${errorText}</li>`;
+      const queryText = e.query ? `<span class="agent-sh-query">「${escapeHtml(e.query)}」</span>` : '';
+      return `<li><span class="agent-sh-icon">${icon}</span><span class="agent-sh-label">${escapeHtml(label)}</span>${queryText}${countStr}${errorText}</li>`;
     }).join('');
     const div = document.createElement('div');
     div.className = 'agent-search-history';
@@ -3098,7 +3108,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     card.className = 'agent-plan-card';
     card.innerHTML = `
       <div class="agent-plan-header">
-        <span class="agent-plan-icon">☷</span>
+        <span class="agent-plan-icon">${getToolIconSvg('plan')}</span>
         <span>計畫模式</span>
       </div>
       <div class="agent-plan-body">
@@ -3189,7 +3199,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (msg.type === 'agent_thinking') {
         _agentIter = msg.iter;
         if (!agentStatusEl) startAgentStatus();
-        updateAgentStatus(msg.maxIter ? `第 ${msg.iter}/${msg.maxIter} 輪，AI 思考中...` : `第 ${msg.iter} 輪，AI 思考中...`);
+        updateAgentStatus(msg.maxIter ? `第 ${msg.iter}/${msg.maxIter} 輪，思考中...` : `第 ${msg.iter} 輪，思考中...`);
         return;
       }
       if (msg.type === 'tool_start') {
@@ -3199,7 +3209,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         return;
       }
       if (msg.type === 'tool_done') {
-        updateAgentStatus(msg.error ? `第 ${_agentIter} 輪，工具失敗，改用補救流程...` : `第 ${_agentIter} 輪，AI 分析結果中...`);
+        updateAgentStatus(msg.error ? `第 ${_agentIter} 輪，工具失敗，改用補救流程...` : `第 ${_agentIter} 輪，分析結果中...`);
         if (_agentSearchLog.length > 0) {
           _agentSearchLog[_agentSearchLog.length - 1].count = msg.count;
           _agentSearchLog[_agentSearchLog.length - 1].error = msg.error || null;
@@ -3595,14 +3605,14 @@ document.addEventListener('DOMContentLoaded', async () => {
   // ── Commands ─────────────────────────────────────────────
 
   const BUILTIN_COMMANDS = [
-    { trigger: '/page',      name: '讀取當前頁面',       type: 'action', icon: '📄' },
-    { trigger: '/page-code', name: '分析頁面原始碼/樣式', type: 'action', icon: '🔬', argHint: '/page-code <問題（可選）>' },
-    { trigger: '/plan',      name: '計畫模式',    type: 'action', icon: '☷', argHint: '/plan <任務>' },
-    { trigger: '/clear',    name: '清空對話',    type: 'action', icon: '🗑️' },
-    { trigger: '/new',      name: '新對話',      type: 'action', icon: '➕' },
-    { trigger: '/remember', name: '記住某件事',  type: 'action', icon: '🧠', argHint: '/remember <內容>' },
-    { trigger: '/search',      name: '一般搜尋（Brave）', type: 'action', icon: '🔍', argHint: '/search <關鍵字>' },
-    { trigger: '/deep-search', name: '深度搜尋（Exa）',   type: 'action', icon: '🔎', argHint: '/deep-search <關鍵字>' },
+    { trigger: '/page',      name: '讀取當前頁面',       type: 'action' },
+    { trigger: '/page-code', name: '分析頁面原始碼/樣式', type: 'action', argHint: '/page-code <問題（可選）>' },
+    { trigger: '/plan',      name: '計畫模式',    type: 'action', argHint: '/plan <任務>' },
+    { trigger: '/clear',    name: '清空對話',    type: 'action' },
+    { trigger: '/new',      name: '新對話',      type: 'action' },
+    { trigger: '/remember', name: '記住某件事',  type: 'action', argHint: '/remember <內容>' },
+    { trigger: '/search',      name: '一般搜尋（Brave）', type: 'action', argHint: '/search <關鍵字>' },
+    { trigger: '/deep-search', name: '深度搜尋（Exa）',   type: 'action', argHint: '/deep-search <關鍵字>' },
   ];
 
   async function loadCustomCommands() {
@@ -3838,7 +3848,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   async function handleWebSearch(query, searchType = 'WEB_SEARCH') {
     const isDeep = searchType === 'DEEP_SEARCH';
     const label = isDeep ? '深度搜尋' : '搜尋';
-    const icon = isDeep ? '🔎' : '🔍';
     if (!currentSession) startNewSession();
     isLoading = true;
     setStreamingMode(true);
@@ -3847,9 +3856,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     emptyState.classList.add('hidden');
     setStatus(`${label}中：${query}`);
 
-    const userMsg = { role: 'user', content: `${icon} /${isDeep ? 'deep-search' : 'search'} ${query}` };
+    const userMsg = { role: 'user', content: `/${isDeep ? 'deep-search' : 'search'} ${query}` };
     currentSession.messages.push(userMsg);
-    addMessage(`${icon} ${label}：${query}`, 'user');
+    addMessage(`${label}：${query}`, 'user');
 
     const result = await chrome.runtime.sendMessage({ type: searchType, data: { query } });
 
@@ -3863,14 +3872,14 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (result.error === 'NO_KEY') {
         setStatus(`請先至設定頁填入 ${isDeep ? 'Exa' : 'Brave'} Search API Key`, true, 4000);
       } else {
-        setStatus(`🔍 ${result.error}`, true, 5000);
+        setStatus(result.error, true, 5000);
       }
       messageInput.focus();
       return;
     }
 
     // 組成 context 交給 AI 分析
-    setStatus(`🔍 ${result.provider} 找到 ${result.results.length} 筆結果，分析中...`);
+    setStatus(`${result.provider} 找到 ${result.results.length} 筆結果，分析中...`);
     const snippets = result.results.map((r, i) =>
       `[${i + 1}] ${r.title}\n${r.snippet}\n來源：${r.url}`
     ).join('\n\n');
@@ -4003,7 +4012,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     // 上限 30 筆（sync 容量限制）
     if (memories.length > 30) memories.shift();
     await saveMemories();
-    setStatus(`✓ 已記住：${trimmed.slice(0, 30)}${trimmed.length > 30 ? '...' : ''}`, false, 3000);
+    setStatus(`已記住：${trimmed.slice(0, 30)}${trimmed.length > 30 ? '...' : ''}`, false, 3000);
   }
 
   async function openMemoryModal() {
@@ -4707,10 +4716,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     const actionBtns = (item) => `
       <div class="summary-item-footer">
         <button class="btn-summary-action btn-add-to-memory${item.addedToMemory ? ' disabled' : ''}" data-id="${item.id}"${item.addedToMemory ? ' disabled' : ''}>
-          ${item.addedToMemory ? '✓ 已加入長期記憶' : '+ 加入長期記憶'}
+          ${item.addedToMemory ? '已加入長期記憶' : '+ 加入長期記憶'}
         </button>
         <button class="btn-summary-action btn-add-to-kb${item.addedToKb ? ' disabled' : ''}" data-id="${item.id}"${item.addedToKb ? ' disabled' : ''}>
-          ${item.addedToKb ? '✓ 已加入知識庫' : '+ 加入知識庫'}
+          ${item.addedToKb ? '已加入知識庫' : '+ 加入知識庫'}
         </button>
       </div>`;
 

@@ -2180,10 +2180,28 @@ async function executeApiTool(tool, args) {
     let url = tool.url || '';
     const headers = {};
     const queryParams = new URLSearchParams();
+    const safeArgs = { ...(args || {}) };
+
+    if (tool.name === 'wp_get_posts') {
+      try {
+        const urlObj = new URL(url);
+        urlObj.searchParams.set('per_page', urlObj.searchParams.get('per_page') || '20');
+        urlObj.searchParams.set('_fields', urlObj.searchParams.get('_fields') || 'id,date,slug,status,link,title');
+        url = urlObj.toString();
+      } catch {
+        const baseUrl = url.replace(/\?.*$/, '');
+        url = `${baseUrl}?per_page=20&_fields=id,date,slug,status,link,title`;
+      }
+
+      const status = String(safeArgs.status || '').trim().toLowerCase();
+      if (['any', 'all', '全部', '所有', '不限'].includes(status)) {
+        delete safeArgs.status;
+      }
+    }
 
     for (const p of (tool.parameters || []).filter(p => p.location === 'path')) {
-      if (args[p.name] !== undefined)
-        url = url.replace(`{${p.name}}`, encodeURIComponent(String(args[p.name])));
+      if (safeArgs[p.name] !== undefined)
+        url = url.replace(`{${p.name}}`, encodeURIComponent(String(safeArgs[p.name])));
     }
 
     if (tool.authType === 'bearer') {
@@ -2197,19 +2215,28 @@ async function executeApiTool(tool, args) {
     }
 
     for (const p of (tool.parameters || []).filter(p => p.location === 'query')) {
-      if (args[p.name] !== undefined) queryParams.set(p.name, String(args[p.name]));
+      if (safeArgs[p.name] !== undefined) queryParams.set(p.name, String(safeArgs[p.name]));
     }
 
     const bodyObj = {};
     for (const p of (tool.parameters || []).filter(p => p.location === 'body')) {
-      if (args[p.name] !== undefined) bodyObj[p.name] = args[p.name];
+      if (safeArgs[p.name] !== undefined) bodyObj[p.name] = safeArgs[p.name];
     }
 
     for (const p of (tool.parameters || []).filter(p => p.location === 'header')) {
-      if (args[p.name] !== undefined) headers[p.name] = String(args[p.name]);
+      if (safeArgs[p.name] !== undefined) headers[p.name] = String(safeArgs[p.name]);
     }
 
-    const fullUrl = queryParams.toString() ? `${url}?${queryParams}` : url;
+    let fullUrl = url;
+    if (queryParams.toString()) {
+      try {
+        const urlObj = new URL(url);
+        queryParams.forEach((value, key) => urlObj.searchParams.set(key, value));
+        fullUrl = urlObj.toString();
+      } catch {
+        fullUrl = `${url}${url.includes('?') ? '&' : '?'}${queryParams}`;
+      }
+    }
     const fetchOpts = { method: tool.method || 'GET', headers };
     if (['POST', 'PUT', 'PATCH'].includes(tool.method) && Object.keys(bodyObj).length > 0) {
       headers['Content-Type'] = 'application/json';
@@ -2218,12 +2245,21 @@ async function executeApiTool(tool, args) {
 
     const resp = await fetch(fullUrl, fetchOpts);
     const text = await resp.text();
-    const limit = tool.responseLimit || 2000;
+    const limit = tool.name === 'wp_get_posts'
+      ? Math.max(tool.responseLimit || 0, 8000)
+      : (tool.responseLimit || 2000);
 
     if (!resp.ok) return { error: `HTTP ${resp.status}: ${text.slice(0, 500)}` };
 
     try {
-      return { result: JSON.stringify(JSON.parse(text), null, 2).slice(0, limit) };
+      const parsed = JSON.parse(text);
+      const meta = {};
+      const total = resp.headers.get('X-WP-Total');
+      const totalPages = resp.headers.get('X-WP-TotalPages');
+      if (total) meta.total = Number(total);
+      if (totalPages) meta.totalPages = Number(totalPages);
+      const payload = Object.keys(meta).length ? { ...meta, data: parsed } : parsed;
+      return { result: JSON.stringify(payload, null, 2).slice(0, limit) };
     } catch {
       return { result: text.slice(0, limit) };
     }

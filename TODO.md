@@ -166,6 +166,7 @@
 | ✅ Done | Plan Approval / 計畫模式 | 完成於 v1.25.0（含 off/auto/always 設定、風險分級、持久化、Make changes 回填） |
 | ✅ Done | 瀏覽器自動化 Phase 1 | 完成於 v1.24.x |
 | ✅ Done | API Tool Registry | 完成於 v1.26.0 |
+| ✅ Done | WordPress REST API 預設工具庫 | 完成於 v1.27.0（連線設定、端點勾選、端點內編輯、列表查詢防截斷） |
 | 🟠 P1 | SSH / Server Tool | Native Messaging 或後端 proxy，強制 Plan Approval |
 | 🔵 P4 | MiniMax TTS 升級 | 需 Plus 方案（$20/月）；升級方案後再實作 |
 | 🟠 P1 | System Prompt 壓縮 | M2.7 200k token 充分利用 |
@@ -267,6 +268,22 @@
 - secret 不會暴露給模型。
 - API 寫入類操作一定需要使用者批准。
 
+### ✅ Done — WordPress REST API 預設工具庫（v1.27.0）
+
+將 WordPress REST API 從「匯入成自訂工具」改為獨立的預設工具庫設定流程，讓預設端點留在預設卡片內管理。
+
+主要工作：
+- 先設定站台網址、帳號與 Application Password，再勾選要啟用的預設端點。
+- 預設端點可在卡片內編輯說明、相對端點、HTTP 方法、回傳上限與參數。
+- 預設工具與自訂工具分流，自訂工具清單不再顯示 WordPress 預設端點。
+- `wp_get_posts` 使用精簡欄位與 WordPress total headers，避免文章內容過長造成列表被截斷。
+- 清理受限 `status=any/all` 查詢，避免公開文章查詢被 WordPress 權限拒絕。
+
+完成標準：
+- 使用者可完成 WordPress REST API 連線並直接啟用預設端點。
+- 文章列表查詢能正確顯示多篇文章與總筆數。
+- GET / POST 等預設端點不需重複顯示站台基本網址。
+
 ### 🟠 P1 — SSH / Server Tool
 
 讓 AI 可以透過受控橋接方式操作伺服器任務，例如清快取、查容量、列排程。Chrome extension 不能直接 SSH，所以需要 Native Messaging 或後端 proxy。
@@ -361,7 +378,7 @@
 主要工作：
 - 新增 `/blog` 入口。
 - 支援多種文章模式。
-- 接 WordPress REST API 建立/讀取/更新文章。
+- WordPress REST API 端點基礎已完成於 v1.27.0，後續需串接 `/blog` 入口與發布前確認流程。
 - 產生 Markdown 或 HTML 預覽。
 - 發布前使用者確認。
 

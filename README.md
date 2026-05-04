@@ -106,13 +106,27 @@ npm run build:css
 
 ## Changelog
 
+## [1.27.0] - 2026-05-05
+### Added
+- WordPress REST API 預設工具庫改為啟用、連線設定、端點勾選與端點內編輯流程
+- 預設端點支援卡片內編輯說明、端點、HTTP 方法、回傳上限與參數，不再混入自訂工具清單
+
+### Changed
+- WordPress 預設端點以相對端點顯示與編輯，站台基本網址由連線設定統一管理
+- API 工具與 Agent 工具歷程改用 SVG icon，等待狀態文案改為「思考中」與「分析結果中」
+
+### Fixed
+- `wp_get_posts` 改用精簡欄位列表查詢並提高回傳上限，避免完整文章內容截斷導致 AI 只看到第一篇
+- API 工具執行會正確合併既有 URL query，並讀取 WordPress `X-WP-Total` / `X-WP-TotalPages`
+- `wp_get_posts` 會忽略 `any/all/全部/所有/不限` 等受限 status 查詢，避免 WordPress 回傳 `rest_forbidden_status`
+
 ## [1.26.0] - 2026-05-04
 ### Added
 - API Tool Registry：使用者可在設定頁新增自訂 HTTP API 工具（GET/POST/PUT/PATCH/DELETE）
 - 工具支援 query / path / body / header 參數，AI Agent 可在對話中自行判斷並呼叫
 - Auth 支援 Bearer Token、API Key（Header/Query），Secret 僅存本機不傳送給模型
 - 工具啟用/停用切換、回傳長度上限設定
-- 操作歷程面板使用 🔌 圖示標示 API 工具呼叫
+- 操作歷程面板使用 API 圖示標示 API 工具呼叫
 
 ## [1.25.1] - 2026-05-04
 ### Changed
