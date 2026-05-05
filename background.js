@@ -2064,8 +2064,21 @@ async function executeBrowserTool(toolName, args, sessionId) {
     const timeout = Math.min(args.timeout || 5000, 15000);
     const start = Date.now();
     while (Date.now() - start < timeout) {
-      const found = await exec((sel) => !!document.querySelector(sel), [selector]);
-      if (found === true) return { success: true, selector };
+      const found = await exec((sel) => {
+        if (document.querySelector(sel)) return { success: true, selector: sel };
+        if (sel === 'main') {
+          const fallback = document.querySelector('[role="main"], article, #main-content, #content, .main-content, body');
+          if (fallback) {
+            return {
+              success: true,
+              selector: fallback.tagName?.toLowerCase() === 'body' ? 'body' : sel,
+              fallback: fallback.tagName?.toLowerCase() || ''
+            };
+          }
+        }
+        return { success: false };
+      }, [selector]);
+      if (found?.success) return found;
       if (found?.error) return found;
       await new Promise(r => setTimeout(r, 300));
     }
