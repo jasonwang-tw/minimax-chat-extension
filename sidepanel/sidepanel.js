@@ -3103,6 +3103,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const riskText = plan?.risk || '';
     const riskLevel = /高/.test(riskText) ? 'high' : /中/.test(riskText) ? 'medium' : 'low';
     const riskLabel = { high: '高風險', medium: '中風險', low: '低風險' }[riskLevel];
+    const riskReason = riskText.replace(/^(低|中|高)\s*[—\-–]\s*/u, '').trim();
 
     const card = document.createElement('div');
     card.className = 'agent-plan-card';
@@ -3116,7 +3117,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         <div class="agent-plan-section"><span>可用工具</span><strong>${tools.map(escapeHtml).join('、')}</strong></div>
         <div class="agent-plan-section">
           <span>風險等級</span>
-          <strong class="plan-risk-badge plan-risk-${riskLevel}">${riskLabel}${riskText && riskText !== riskLabel ? ` — ${escapeHtml(riskText)}` : ''}</strong>
+          <strong class="plan-risk-badge plan-risk-${riskLevel}">${riskLabel}${riskReason ? ` — ${escapeHtml(riskReason)}` : ''}</strong>
         </div>
         <div class="agent-plan-section">
           <span>執行步驟</span>
