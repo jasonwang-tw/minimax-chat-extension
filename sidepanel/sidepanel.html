@@ -39,6 +39,7 @@
       </div>
     </header>
 
+    <div class="main-area">
     <div class="below-header">
 
     <!-- History Panel -->
@@ -321,11 +322,124 @@
               <svg id="stopIcon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="display:none"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
             </button>
           </div>
-          </div>
         </div>
       </div>
     </footer>
-  </div>
+
+    <!-- Spaces Panel：覆蓋 below-header + footer，header 保持可見 -->
+    <div id="spacesPanel" class="spaces-panel hidden">
+      <!-- 空間列表 view -->
+      <div id="spacesListView" class="spaces-view">
+        <div class="spaces-panel-header">
+          <h3>空間</h3>
+          <div class="spaces-panel-header-actions">
+            <button id="spacesSearchToggleBtn" class="btn-icon" title="搜尋">
+              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+            </button>
+            <button id="spacesPanelClose" class="btn-icon" title="關閉">
+              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+          </div>
+        </div>
+        <div id="spacesSearchBar" class="spaces-search-bar hidden">
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+          <input type="text" id="spacesSearchInput" class="spaces-search-input" placeholder="搜尋空間...">
+          <button id="spacesClearSearch" class="btn-clear-search hidden">
+            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+        <div id="spacesList" class="spaces-list"></div>
+        <div class="spaces-list-footer">
+          <button id="createSpaceBtn" class="btn-create-space">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+            新增空間
+          </button>
+        </div>
+      </div>
+
+      <!-- 空間詳情 view -->
+      <div id="spaceDetailView" class="spaces-view hidden">
+        <div class="spaces-panel-header space-detail-header">
+          <button id="spaceBackBtn" class="btn-icon" title="返回空間列表">
+            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+          </button>
+          <div class="space-detail-title">
+            <span id="spaceDetailEmoji" class="space-detail-emoji"></span>
+            <span id="spaceDetailName" class="space-detail-name"></span>
+          </div>
+          <div class="spaces-panel-header-actions">
+            <button id="spaceSettingsBtn" class="btn-icon" title="空間設定">
+              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+            </button>
+            <button id="spaceDetailClose" class="btn-icon" title="關閉">
+              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+          </div>
+        </div>
+        <div id="spaceInfoBar" class="space-info-bar"></div>
+        <div id="spaceSessionsList" class="space-sessions-list"></div>
+        <div class="space-input-bar">
+          <textarea id="spaceMessageInput" class="space-message-input" placeholder="輸入訊息，開啟新對話..." rows="1"></textarea>
+          <button id="spaceStartSessionBtn" class="btn-space-send" title="開始新對話">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- 空間設定 drawer -->
+      <div id="spaceSettingsDrawer" class="space-settings-drawer hidden">
+        <div class="space-settings-header">
+          <h4>空間設定</h4>
+          <button id="spaceSettingsClose" class="btn-icon" title="關閉">
+            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+        <div class="space-settings-body">
+          <div class="space-settings-section">
+            <label class="space-settings-label">空間名稱</label>
+            <div class="space-name-row">
+              <button id="spaceIconBtn" class="btn-space-icon" title="選擇圖示"></button>
+              <input type="text" id="spaceNameInput" class="space-name-input" placeholder="空間名稱...">
+            </div>
+            <div id="spaceIconPicker" class="space-icon-picker hidden"></div>
+          </div>
+          <div class="space-settings-section">
+            <label class="space-settings-label">空間指示</label>
+            <p class="space-settings-hint">在此空間的每次對話，AI 都會參考這段指示。</p>
+            <textarea id="spaceInstructionsInput" class="space-instructions-input" placeholder="例如：你是一位專注於美股分析的投資顧問..."></textarea>
+          </div>
+          <div class="space-settings-section">
+            <label class="space-settings-label">參考連結</label>
+            <p class="space-settings-hint">AI 在此空間可優先參考的網址。</p>
+            <div class="space-links-add-row">
+              <input type="url" id="spaceLinkInput" class="space-link-input" placeholder="貼上網址...">
+              <button id="spaceAddLinkBtn" class="btn-space-add-link">新增</button>
+            </div>
+            <div id="spaceLinksList" class="space-links-list"></div>
+          </div>
+          <div class="space-settings-section space-settings-danger">
+            <button id="spaceDeleteBtn" class="btn-danger-outline">刪除此空間</button>
+          </div>
+        </div>
+        <div class="space-settings-footer">
+          <button id="spaceSettingsSave" class="btn-primary-sm">儲存</button>
+        </div>
+      </div>
+
+      <!-- 加入現有對話 picker -->
+      <div id="spaceAddSessionDrawer" class="space-settings-drawer hidden">
+        <div class="space-settings-header">
+          <h4>加入現有對話</h4>
+          <button id="spaceAddSessionClose" class="btn-icon" title="關閉">
+            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+        <div id="spaceAddSessionList" class="space-sessions-list"></div>
+      </div>
+    </div>
+
+    </div><!-- /.main-area -->
+  </div><!-- /.container -->
 
   <!-- Region Screenshot Modal -->
   <div id="regionModal" class="region-modal hidden">
@@ -531,111 +645,6 @@
       </div>
       <p class="memory-modal-hint">點擊右側工具列的「立即總結」按鈕，AI 將為當前對話生成摘要並儲存於此。</p>
       <div id="summaryList" class="memory-list"></div>
-    </div>
-  </div>
-
-  <!-- Spaces Panel -->
-  <div id="spacesPanel" class="spaces-panel hidden">
-    <!-- 空間列表 view -->
-    <div id="spacesListView" class="spaces-view">
-      <div class="spaces-panel-header">
-        <h3>空間</h3>
-        <div class="spaces-panel-header-actions">
-          <button id="spacesSearchToggleBtn" class="btn-icon" title="搜尋">
-            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
-          </button>
-          <button id="spacesPanelClose" class="btn-icon" title="關閉">
-            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-          </button>
-        </div>
-      </div>
-      <div id="spacesSearchBar" class="spaces-search-bar hidden">
-        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
-        <input type="text" id="spacesSearchInput" class="spaces-search-input" placeholder="搜尋空間...">
-        <button id="spacesClearSearch" class="btn-clear-search hidden">
-          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-        </button>
-      </div>
-      <div id="spacesList" class="spaces-list"></div>
-      <div class="spaces-list-footer">
-        <button id="createSpaceBtn" class="btn-create-space">
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
-          新增空間
-        </button>
-      </div>
-    </div>
-
-    <!-- 空間詳情 view -->
-    <div id="spaceDetailView" class="spaces-view hidden">
-      <div class="spaces-panel-header space-detail-header">
-        <button id="spaceBackBtn" class="btn-icon" title="返回空間列表">
-          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
-        </button>
-        <div class="space-detail-title">
-          <span id="spaceDetailEmoji" class="space-detail-emoji"></span>
-          <span id="spaceDetailName" class="space-detail-name"></span>
-        </div>
-        <div class="spaces-panel-header-actions">
-          <button id="spaceSettingsBtn" class="btn-icon" title="空間設定">
-            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
-          </button>
-          <button id="spaceDetailClose" class="btn-icon" title="關閉">
-            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-          </button>
-        </div>
-      </div>
-      <div id="spaceInfoBar" class="space-info-bar"></div>
-      <div id="spaceSessionsList" class="space-sessions-list"></div>
-      <div class="space-input-bar">
-        <textarea id="spaceMessageInput" class="space-message-input" placeholder="輸入訊息，開啟新對話..." rows="1"></textarea>
-        <button id="spaceStartSessionBtn" class="btn-space-send" title="開始新對話">
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
-        </button>
-      </div>
-    </div>
-
-    <!-- 空間設定 drawer -->
-    <div id="spaceSettingsDrawer" class="space-settings-drawer hidden">
-      <div class="space-settings-header">
-        <h4>空間設定</h4>
-        <button id="spaceSettingsClose" class="btn-icon" title="關閉">
-          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-        </button>
-      </div>
-      <div class="space-settings-body">
-        <!-- 名稱 & Emoji -->
-        <div class="space-settings-section">
-          <label class="space-settings-label">空間名稱</label>
-          <div class="space-name-row">
-            <button id="spaceIconBtn" class="btn-space-icon" title="選擇圖示"></button>
-            <input type="text" id="spaceNameInput" class="space-name-input" placeholder="空間名稱...">
-          </div>
-          <div id="spaceIconPicker" class="space-icon-picker hidden"></div>
-        </div>
-        <!-- 空間指示 -->
-        <div class="space-settings-section">
-          <label class="space-settings-label">空間指示</label>
-          <p class="space-settings-hint">在此空間的每次對話，AI 都會參考這段指示。</p>
-          <textarea id="spaceInstructionsInput" class="space-instructions-input" placeholder="例如：你是一位專注於美股分析的投資顧問..."></textarea>
-        </div>
-        <!-- 連結 -->
-        <div class="space-settings-section">
-          <label class="space-settings-label">參考連結</label>
-          <p class="space-settings-hint">AI 在此空間可優先參考的網址。</p>
-          <div class="space-links-add-row">
-            <input type="url" id="spaceLinkInput" class="space-link-input" placeholder="貼上網址...">
-            <button id="spaceAddLinkBtn" class="btn-space-add-link">新增</button>
-          </div>
-          <div id="spaceLinksList" class="space-links-list"></div>
-        </div>
-        <!-- 危險操作 -->
-        <div class="space-settings-section space-settings-danger">
-          <button id="spaceDeleteBtn" class="btn-danger-outline">刪除此空間</button>
-        </div>
-      </div>
-      <div class="space-settings-footer">
-        <button id="spaceSettingsSave" class="btn-primary-sm">儲存</button>
-      </div>
     </div>
   </div>
 

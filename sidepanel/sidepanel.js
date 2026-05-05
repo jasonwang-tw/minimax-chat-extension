@@ -5663,7 +5663,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   const spaceInfoBar      = document.getElementById('spaceInfoBar');
   const spaceSessionsList = document.getElementById('spaceSessionsList');
   const spaceMessageInput = document.getElementById('spaceMessageInput');
-  const spaceStartSessionBtn = document.getElementById('spaceStartSessionBtn');
+  const spaceStartSessionBtn   = document.getElementById('spaceStartSessionBtn');
+  const spaceAddSessionDrawer  = document.getElementById('spaceAddSessionDrawer');
+  const spaceAddSessionClose   = document.getElementById('spaceAddSessionClose');
+  const spaceAddSessionList    = document.getElementById('spaceAddSessionList');
   const spaceSettingsDrawer  = document.getElementById('spaceSettingsDrawer');
   const spaceSettingsClose   = document.getElementById('spaceSettingsClose');
   const spaceIconBtn         = document.getElementById('spaceIconBtn');
@@ -5892,14 +5895,22 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   function renderSpaceSessionsList() {
     const spaceSessions = sessions
-      .filter(s => s.spaceId === currentSpaceId)
+      .filter(s => String(s.spaceId) === String(currentSpaceId))
       .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+
+    const addBtn = `<div class="space-add-session-row">
+      <button id="spaceAddExistingBtn" class="btn-add-existing-session">
+        <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+        加入現有對話
+      </button>
+    </div>`;
 
     if (spaceSessions.length === 0) {
       spaceSessionsList.innerHTML = `<div class="space-sessions-empty">
         <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
         <span>尚無對話，在下方輸入開始第一個</span>
-      </div>`;
+      </div>${addBtn}`;
+      document.getElementById('spaceAddExistingBtn')?.addEventListener('click', openAddSessionDrawer);
       return;
     }
 
@@ -5919,13 +5930,70 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     spaceSessionsList.querySelectorAll('.space-session-item').forEach(el => {
       el.addEventListener('click', () => {
-        const idx = sessions.findIndex(s => s.id === el.dataset.id);
+        const idx = sessions.findIndex(s => String(s.id) === el.dataset.id);
         if (idx >= 0) {
           loadSession(idx);
           closeSpacesPanel();
         }
       });
     });
+
+    // 「加入現有對話」按鈕（有對話時也顯示）
+    const addRowHtml = `<div class="space-add-session-row">
+      <button id="spaceAddExistingBtn" class="btn-add-existing-session">
+        <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+        加入現有對話
+      </button>
+    </div>`;
+    spaceSessionsList.insertAdjacentHTML('beforeend', addRowHtml);
+    document.getElementById('spaceAddExistingBtn')?.addEventListener('click', openAddSessionDrawer);
+  }
+
+  function openAddSessionDrawer() {
+    // 列出不屬於目前空間的 sessions
+    const others = sessions
+      .filter(s => String(s.spaceId) !== String(currentSpaceId))
+      .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+
+    if (others.length === 0) {
+      spaceAddSessionList.innerHTML = `<div class="space-sessions-empty"><span>沒有可加入的對話</span></div>`;
+    } else {
+      spaceAddSessionList.innerHTML = others.map(session => {
+        const firstMsg = session.messages.find(m => m.role === 'user');
+        const preview = session.name || (firstMsg ? firstMsg.content.substring(0, 50) : '新對話');
+        const tag = session.spaceId
+          ? `<span class="session-space-tag">${escapeHtml(spaces.find(sp => String(sp.id) === String(session.spaceId))?.name || '其他空間')}</span>`
+          : '';
+        return `<div class="space-session-item space-session-pick" data-id="${session.id}">
+          <div class="space-session-icon">
+            <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+          </div>
+          <div class="space-session-info">
+            <div class="space-session-preview">${escapeHtml(preview)}${tag}</div>
+            <div class="space-session-time">${formatTime(session.timestamp)}</div>
+          </div>
+        </div>`;
+      }).join('');
+
+      spaceAddSessionList.querySelectorAll('.space-session-pick').forEach(el => {
+        el.addEventListener('click', async () => {
+          const s = sessions.find(s => String(s.id) === el.dataset.id);
+          if (!s) return;
+          s.spaceId = currentSpaceId;
+          await chrome.runtime.sendMessage({ type: 'SAVE_SESSION', data: { session: s } });
+          closeAddSessionDrawer();
+          renderSpaceSessionsList();
+        });
+      });
+    }
+
+    spaceAddSessionDrawer.classList.remove('hidden');
+    requestAnimationFrame(() => spaceAddSessionDrawer.classList.add('visible'));
+  }
+
+  function closeAddSessionDrawer() {
+    spaceAddSessionDrawer.classList.remove('visible');
+    setTimeout(() => spaceAddSessionDrawer.classList.add('hidden'), 230);
   }
 
   function openSettingsDrawer(spaceId) {
@@ -6052,6 +6120,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   spaceSettingsClose.addEventListener('click', closeSettingsDrawer);
+  spaceAddSessionClose.addEventListener('click', closeAddSessionDrawer);
 
   spaceIconBtn.addEventListener('click', () => {
     spaceIconPicker.classList.toggle('hidden');
