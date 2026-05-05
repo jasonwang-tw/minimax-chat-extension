@@ -3124,8 +3124,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         </div>
       </div>
       <div class="agent-plan-actions">
-        <button type="button" class="agent-plan-approve">Approve plan</button>
-        <button type="button" class="agent-plan-cancel">Make changes</button>
+        <button type="button" class="agent-plan-approve">批准計畫</button>
+        <button type="button" class="agent-plan-cancel">修改計畫</button>
       </div>
       <div class="agent-plan-footnote">批准後才會執行工具。高風險 API / SSH 工具未啟用。</div>
     `;

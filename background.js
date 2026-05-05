@@ -1011,28 +1011,27 @@ async function generateAgentPlan({ message, history, model, systemPrompt, memory
     .map(m => `${m.role}: ${typeof m.content === 'string' ? m.content.slice(0, 1200) : ''}`)
     .join('\n');
   const planPrompt = `你是計畫模式。請先不要執行工具，也不要回答最終答案。
-根據使用者任務、目前上下文與可用工具，產生一份可供使用者批准的繁體中文執行計畫。
+根據使用者任務與可用工具，產生一份可供使用者批准的繁體中文執行計畫。
 
 可用工具：
 - web_search：一般網路搜尋
 - deep_search：深度搜尋
+- browser_*：瀏覽器操作（點擊、填表、擷取頁面）
 
-請只輸出 JSON，不要 Markdown。格式：
-{
-  "summary": "一句話描述目標",
-  "tools": ["web_search"],
-  "sites": ["example.com"],
-  "steps": ["步驟一", "步驟二", "步驟三"],
-  "risk": "低/中/高與原因"
-}
+**重要規則**：
+- steps 只描述「如何完成這個具體任務」的操作步驟，例如：搜尋關鍵字、分析結果、整理回答。
+- steps 絕對不能包含「了解使用者背景」「分析使用者需求」「確認使用者意圖」等內省式步驟。
+- steps 最多 5 步，每步 15 字以內。
+- risk 欄位只填「低」「中」「高」加上一句理由，不超過 20 字。
+- 請只輸出純 JSON，不要 Markdown 代碼塊。
+
+格式：
+{"summary":"一句話描述目標","tools":["web_search"],"sites":[],"steps":["步驟一","步驟二"],"risk":"低 — 僅讀取資料，無寫入操作"}
 
 使用者任務：
 ${message || '未提供文字任務'}
 
-記憶與系統補充：
-${[memoryContext, systemPrompt].filter(Boolean).join('\n\n') || '無'}
-
-對話摘要：
+對話摘要（僅供參考任務背景，勿用於推斷使用者興趣）：
 ${compactHistory || '無'}`;
   const resp = await fetchWithTimeout(url, {
     method: 'POST',
@@ -1047,10 +1046,16 @@ ${compactHistory || '無'}`;
     throw new Error(extractApiErrorMessage(err, resp.status));
   }
   const data = await resp.json();
-  const raw = getResponseText(data).replace(/```json|```/g, '').trim();
+  const raw = getResponseText(data)
+    .replace(/<think>[\s\S]*?<\/think>/gi, '')
+    .replace(/```json|```/g, '')
+    .trim();
   let parsed = null;
-  try { parsed = JSON.parse(raw); } catch {}
-  const fallbackSteps = raw.split(/\n+/).map(s => s.replace(/^[-*\d.\s]+/, '').trim()).filter(Boolean).slice(0, 5);
+  try { parsed = JSON.parse(raw); } catch {
+    const jsonMatch = raw.match(/\{[\s\S]*\}/);
+    if (jsonMatch) try { parsed = JSON.parse(jsonMatch[0]); } catch {}
+  }
+  const fallbackSteps = raw.split(/\n+/).map(s => s.replace(/^[-*\d.\s]+/, '').trim()).filter(s => s && !/</.test(s)).slice(0, 5);
   return {
     summary: parsed?.summary || '執行使用者任務',
     tools: Array.isArray(parsed?.tools) ? parsed.tools : ['web_search', 'deep_search'],
