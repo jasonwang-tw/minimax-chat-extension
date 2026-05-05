@@ -106,6 +106,19 @@ npm run build:css
 
 ## Changelog
 
+## [1.28.0] - 2026-05-06
+### Added
+- 多空間（Spaces）功能：可建立獨立工作空間，每個空間有獨立對話記錄
+- 空間列表支援搜尋，並附引導頁面（功能說明 + 範例空間快速新增）
+- 空間設定 Drawer：可設定空間指示（自動注入 AI system prompt）、參考連結
+- 空間詳情頁上方顯示空間指示預覽（可展開/收合）與連結 chip
+- 空間圖示選取器：30 個 SVG icon 以 Grid 排列，取代 emoji
+- 空間底部輸入框：直接輸入即建立新 Session 並進入對話
+- Header 新增「空間」按鈕（⊞ 圖示）作為功能入口
+
+### Changed
+- 空間 `icon` 欄位改用 SVG icon ID（向下相容舊有 emoji 空間）
+
 ## [1.27.0] - 2026-05-05
 ### Added
 - WordPress REST API 預設工具庫改為啟用、連線設定、端點勾選與端點內編輯流程

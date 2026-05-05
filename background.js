@@ -949,6 +949,28 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       .catch(error => sendResponse({ success: false, error: error.message }));
     return true;
   }
+
+  // ── Spaces ───────────────────────────────────────────────
+  if (message.type === 'GET_SPACES') {
+    chrome.storage.local.get(['spaces'], result => {
+      sendResponse({ success: true, data: result.spaces || [] });
+    });
+    return true;
+  }
+
+  if (message.type === 'SAVE_SPACE') {
+    saveSpace(message.data.space)
+      .then(() => sendResponse({ success: true }))
+      .catch(error => sendResponse({ success: false, error: error.message }));
+    return true;
+  }
+
+  if (message.type === 'DELETE_SPACE') {
+    deleteSpace(message.data.spaceId)
+      .then(() => sendResponse({ success: true }))
+      .catch(error => sendResponse({ success: false, error: error.message }));
+    return true;
+  }
 });
 
 
@@ -1066,7 +1088,11 @@ ${compactHistory || '無'}`;
   };
 }
 
-async function streamHandleMessage({ message, history, images, image, mode, translateConfig, model, contextCharBudget, maxAgentIterations, systemPrompt, memoryContext, sessionId, skipTools, planMode, planApproved, approvedPlan }, port) {
+async function streamHandleMessage({ message, history, images, image, mode, translateConfig, model, contextCharBudget, maxAgentIterations, systemPrompt, memoryContext, sessionId, skipTools, planMode, planApproved, approvedPlan, spaceInstructions }, port) {
+  // 將空間指示注入 systemPrompt
+  const effectiveSystemPrompt = [spaceInstructions, systemPrompt].filter(Boolean).join('\n\n') || systemPrompt;
+  systemPrompt = effectiveSystemPrompt;
+
   if (planMode && !planApproved) {
     const plan = await generateAgentPlan({ message, history, model, systemPrompt, memoryContext });
     port.postMessage({ type: 'plan_required', plan });
@@ -3149,6 +3175,26 @@ async function pinSession(sessionId, pinned) {
     chatSessions[index].pinned = pinned;
     await chrome.storage.local.set({ chatSessions });
   }
+}
+
+// ── Spaces ──────────────────────────────────────────────────
+async function saveSpace(space) {
+  const { spaces = [] } = await chrome.storage.local.get(['spaces']);
+  const idx = spaces.findIndex(s => s.id === space.id);
+  if (idx >= 0) spaces[idx] = space;
+  else spaces.push(space);
+  await chrome.storage.local.set({ spaces });
+}
+
+async function deleteSpace(spaceId) {
+  const [{ spaces = [] }, { chatSessions = [] }] = await Promise.all([
+    chrome.storage.local.get(['spaces']),
+    chrome.storage.local.get(['chatSessions'])
+  ]);
+  await chrome.storage.local.set({
+    spaces: spaces.filter(s => s.id !== spaceId),
+    chatSessions: chatSessions.map(s => s.spaceId === spaceId ? { ...s, spaceId: null } : s)
+  });
 }
 
 // ── Google TTS ──────────────────────────────────────────────

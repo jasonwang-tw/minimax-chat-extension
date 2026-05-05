@@ -173,7 +173,7 @@
 | 🟡 P2 | 瀏覽器自動化 Phase 2 | chrome.debugger CDP（截圖、JS 執行、網路攔截） |
 | 🟡 P2 | 任務腳本（Task Script） | 長任務腳本化，搭配 Agent |
 | 🟡 P2 | 筆記工具（MD Notes） | write/read/list note |
-| 🟡 P2 | Spaces 多空間 | tab-based 切換，搭配多窗口策略 |
+| ✅ Done | Spaces 多空間 Phase 1 | 完成於 v1.28.0（空間列表、設定、Sessions、指示注入） |
 | 🟡 P2 | 部落格助手 | jasonsbase-blog 實裝 |
 | 🟢 P3 | 瀏覽器自動化 Phase 3 | Native Messaging + Playwright（完整多 tab 自動化） |
 | 🟢 P3 | MiniMax 影片生成 | 需 Max 方案（$50/月）；非同步任務，複雜度高 |
@@ -701,8 +701,10 @@
 | **多視窗**（每個 Space 獨立視窗） | ✅ | `chrome.windows.create` 建立新視窗，各自有獨立 sidepanel 實例與 port |
 | **Tab-based + 暫停/恢復串流** | ✅（UX 最佳） | 切換前保存串流狀態，切回時繼續；技術難度最高 |
 
-- [ ] **決策**：確認 Spaces 採用哪種架構（影響整個資料流設計）
-- [ ] **Phase 1**：依決策實作 space 切換（獨立對話 context）
+- [x] **決策**：採用面板內導航切換（非新視窗），Session 以 spaceId 歸屬
+- [x] **Phase 1**：空間列表 + 詳情 + 設定 Drawer + Sessions 隔離（v1.28.0）
+- [x] **空間指示**：自動注入 AI system prompt（v1.28.0）
+- [x] **SVG Icon 選取器**：30 個圖示，取代 Emoji（v1.28.0）
 - [ ] **Space 用途標示**：規劃 Space / 執行 Space / 筆記 Space
 - [ ] **跨 Space 共享記憶**：長期記憶在所有 Space 共用
 

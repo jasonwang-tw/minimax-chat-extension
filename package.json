@@ -1,6 +1,6 @@
 {
   "name": "open-chat-hub",
-  "version": "1.27.0",
+  "version": "1.28.0",
   "description": "Open Chat Hub - 多模型 AI 側邊欄工作台",
   "scripts": {
     "build:css": "npx sass src/styles/sidepanel.scss sidepanel/sidepanel.css && npx sass src/styles/options.scss options/options.css",
