@@ -691,7 +691,18 @@
 
 > 來源：MiniMax 最佳實踐 — 多窗口策略（第一窗口建框架、第二窗口迭代）
 
-- [ ] **Phase 1**：tab-based space 切換（獨立對話 context）
+### ⚠️ 架構決策（動工前須定案）— Session 並行能力
+
+**背景**：background.js 的 `onConnect` 每次建立獨立 port handler，背景層原生支援多串流並行。但 sidepanel.js 只有單一 `currentPort` / `currentLiveDiv`，切換 session 會中斷正在串流的回覆。
+
+| 實作方式 | 並行？ | 說明 |
+|---------|-------|------|
+| **Tab-based 切換**（同一 sidepanel 內） | ❌ | 切換 Space 會強制中斷當前串流，與現在行為相同 |
+| **多視窗**（每個 Space 獨立視窗） | ✅ | `chrome.windows.create` 建立新視窗，各自有獨立 sidepanel 實例與 port |
+| **Tab-based + 暫停/恢復串流** | ✅（UX 最佳） | 切換前保存串流狀態，切回時繼續；技術難度最高 |
+
+- [ ] **決策**：確認 Spaces 採用哪種架構（影響整個資料流設計）
+- [ ] **Phase 1**：依決策實作 space 切換（獨立對話 context）
 - [ ] **Space 用途標示**：規劃 Space / 執行 Space / 筆記 Space
 - [ ] **跨 Space 共享記憶**：長期記憶在所有 Space 共用
 
