@@ -142,7 +142,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         customModels
       });
       await chrome.storage.sync.remove(['openrouterModel', 'hiddenPresetModelIds']);
-      showMessage('API 設定已儲存', 'success');
+      showMessage('Agent 設定已儲存', 'success');
     } catch (err) {
       showMessage(`儲存失敗：${err.message}`, 'error');
     }
@@ -174,7 +174,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   });
   clearUsageBtn?.addEventListener('click', async () => {
-    if (!confirm('確定清除所有模型使用量與費用紀錄？')) return;
+    if (!confirm('確定清除所有 OpenRouter 使用紀錄？')) return;
     await chrome.storage.local.set({ [MODEL_USAGE_LEDGER_KEY]: [] });
     await renderUsagePage();
     showMessage('使用量紀錄已清除', 'success');
@@ -1380,7 +1380,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       toolPrefix: 'notion_',
       oauthProvider: 'notion',
       scopeNote: '依 Notion integration 設定授權範圍',
-      consoleUrl: 'https://www.notion.so/my-integrations',
+      consoleUrl: 'https://www.notion.so/profile/integrations/public',
       generate: () => {
         const base = 'https://api.notion.com/v1';
         const auth = { authType: 'oauth2', oauthPresetId: 'notion', presetId: 'notion' };
@@ -1414,30 +1414,51 @@ document.addEventListener('DOMContentLoaded', async () => {
             ...auth, responseLimit: 5000, enabled: true
           },
           {
+            name: 'notion_append_block_children', method: 'PATCH', url: `${base}/blocks/{block_id}/children`,
+            description: '在指定 Notion 頁面或區塊底下追加內容區塊（需 Public connection 開啟 Insert content 權限）',
+            parameters: [
+              { name: 'block_id', description: '要追加內容的頁面 ID 或區塊 ID', type: 'string', location: 'path', required: true },
+              { name: 'children', description: '要追加的 Notion block 陣列，單次最多 100 個 children', type: 'array', items: { type: 'object' }, location: 'body', required: true },
+              { name: 'after',    description: '選填，指定要插入在哪個既有 block ID 後方', type: 'string', location: 'body', required: false }
+            ],
+            ...auth, responseLimit: 3000, enabled: true
+          },
+          {
             name: 'notion_create_page', method: 'POST', url: `${base}/pages`,
-            description: '建立新 Notion 頁面（在指定 parent 頁面或資料庫底下）',
+            description: '建立新 Notion 頁面（在指定 parent 頁面或資料庫底下，可用 children 一併寫入初始內容；需 Insert content 權限）',
             parameters: [
               { name: 'parent',     description: 'parent 物件，例如 { "page_id": "..." } 或 { "database_id": "..." }', type: 'object', location: 'body', required: true  },
-              { name: 'properties', description: 'properties 物件（必須符合資料庫 schema）',                            type: 'object', location: 'body', required: true  },
+              { name: 'properties', description: 'properties 物件；page parent 通常使用 { "title": [{ "text": { "content": "標題" } }] }，database parent 必須符合資料庫 schema', type: 'object', location: 'body', required: true  },
               { name: 'children',   description: '子區塊陣列，例如 paragraph、heading_1 等',                              type: 'array',  items: { type: 'object' }, location: 'body', required: false }
             ],
             ...auth, responseLimit: 2000, enabled: true
           },
           {
+            name: 'notion_create_database', method: 'POST', url: `${base}/databases`,
+            description: '在指定 Notion 父頁面底下建立資料庫，並可定義自訂 properties schema（不是把既有頁面原地轉成資料庫）',
+            parameters: [
+              { name: 'parent',     description: 'parent 物件，例如 { "type": "page_id", "page_id": "..." }', type: 'object', location: 'body', required: true },
+              { name: 'title',      description: '資料庫標題 rich text 陣列，例如 [{ "type": "text", "text": { "content": "行程資料庫" } }]', type: 'array', items: { type: 'object' }, location: 'body', required: true },
+              { name: 'properties', description: '資料庫 properties schema。支援 title、rich_text、number、select、multi_select、status、date、people、files、checkbox、url、email、phone_number、formula、relation、rollup、created_time、created_by、last_edited_time、last_edited_by；可用簡寫如 { "開始時間": "date" }，系統會轉為 { "開始時間": { "date": {} } }', type: 'object', location: 'body', required: true },
+              { name: 'is_inline',  description: '是否建立為 inline database', type: 'boolean', location: 'body', required: false }
+            ],
+            ...auth, responseLimit: 3000, enabled: true
+          },
+          {
             name: 'notion_update_page', method: 'PATCH', url: `${base}/pages/{page_id}`,
-            description: '更新頁面屬性或封存頁面',
+            description: '更新 Notion 頁面屬性；僅在明確需要且頁面不是 workspace level page 時才使用 archived。不能用來移動頁面、轉換頁面類型或封存 workspace level pages',
             parameters: [
               { name: 'page_id',    description: '頁面 ID',          type: 'string',  location: 'path', required: true  },
               { name: 'properties', description: '要更新的 properties 物件', type: 'object',  location: 'body', required: false },
-              { name: 'archived',   description: '是否封存（true）或還原（false）', type: 'boolean', location: 'body', required: false }
+              { name: 'archived',   description: '是否封存（true）或還原（false）；Notion API 不支援封存 workspace level pages，不要用於移動或轉換頁面', type: 'boolean', location: 'body', required: false }
             ],
             ...auth, responseLimit: 2000, enabled: true
           },
           {
             name: 'notion_query_database', method: 'POST', url: `${base}/databases/{database_id}/query`,
-            description: '查詢資料庫內容，支援過濾條件與排序',
+            description: '查詢 Notion database 內容，支援過濾條件與排序。只能使用 database_id，不可使用頁面連結取得的 page_id；若只有 page_id，請先用 notion_get_page / notion_get_block_children，或用 notion_create_database 在該頁底下建立 database',
             parameters: [
-              { name: 'database_id', description: '資料庫 ID',                                                                              type: 'string', location: 'path', required: true  },
+              { name: 'database_id', description: '資料庫 ID，不是 page ID。不可填入使用者提供的普通頁面連結 ID',                                                                              type: 'string', location: 'path', required: true  },
               { name: 'filter',      description: '過濾物件，遵循 Notion filter 規格',                                                       type: 'object', location: 'body', required: false },
               { name: 'sorts',       description: '排序陣列，例如 [{ "property": "Name", "direction": "ascending" }]',                       type: 'array',  items: { type: 'object' }, location: 'body', required: false },
               { name: 'page_size',   description: '每頁筆數',                                                                                type: 'number', location: 'body', required: false }
@@ -1797,8 +1818,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     const isImported = imported.length > 0;
     const enabledCount = imported.filter(t => t.enabled).length;
 
-    const eyeSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>`;
-
     card.innerHTML = `
       <div class="api-preset-card-header">
         <span class="api-preset-icon">${preset.icon}</span>
@@ -1838,10 +1857,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         </div>
         <div class="form-group">
           <label>Client Secret</label>
-          <div class="input-wrapper">
-            <input type="password" class="oauth-client-secret" data-role="client-secret" placeholder="OAuth Client Secret" />
-            <button type="button" class="btn-icon oauth-secret-toggle">${eyeSvg}</button>
-          </div>
+          <input type="password" class="oauth-client-secret" data-role="client-secret" placeholder="OAuth Client Secret" />
           <p class="hint">Client Secret 僅儲存於本機，不會傳送給 AI 模型。</p>
         </div>
 
@@ -1895,7 +1911,8 @@ document.addEventListener('DOMContentLoaded', async () => {
       countBadgeEl.textContent = `已啟用 ${active} / ${total} 個工具`;
     }
 
-    let cachedClient = { clientId: '', clientSecret: '' };
+    const SECRET_MASK = '••••••••••••';
+    let cachedClient = { clientId: '', hasClientSecret: false };
     let cachedToken = null;
 
     function setBadge(authorized, accountLabel) {
@@ -2008,9 +2025,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     async function refreshOAuthStatus() {
       const resp = await sendOAuthMessage('OAUTH_GET_STATUS', { presetId: preset.id });
       if (!resp.success) return;
-      const { clientId = '', token, redirectUri } = resp.data || {};
-      cachedClient = { clientId, clientSecret: clientSecInput.value };
+      const { clientId = '', hasClientSecret = false, token, redirectUri } = resp.data || {};
+      cachedClient = { clientId, hasClientSecret };
       clientIdInput.value = clientId;
+      clientSecInput.value = hasClientSecret ? SECRET_MASK : '';
       redirectUriEl.textContent = redirectUri || '';
       cachedToken = token;
       const hasTools = apiToolRegistry.some(t => t.presetId === preset.id || t.name.startsWith(preset.toolPrefix));
@@ -2043,9 +2061,10 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (!open) refreshOAuthStatus();
     });
 
-    // 顯示/隱藏密碼
-    card.querySelector('.oauth-secret-toggle').addEventListener('click', () => {
-      clientSecInput.type = clientSecInput.type === 'password' ? 'text' : 'password';
+    clientSecInput.addEventListener('focus', () => {
+      if (cachedClient.hasClientSecret && clientSecInput.value === SECRET_MASK) {
+        clientSecInput.select();
+      }
     });
 
     // 複製 redirect URI
@@ -2063,13 +2082,19 @@ document.addEventListener('DOMContentLoaded', async () => {
       const clientId = clientIdInput.value.trim();
       const clientSecret = clientSecInput.value.trim();
       if (!clientId) { showMessage('請輸入 Client ID', 'error'); return; }
-      if (!clientSecret) { showMessage('請輸入 Client Secret', 'error'); return; }
+      const useStoredSecret = cachedClient.hasClientSecret && clientSecret === SECRET_MASK && clientId === cachedClient.clientId;
+      if (!clientSecret || (clientSecret === SECRET_MASK && !useStoredSecret)) {
+        showMessage('請輸入 Client Secret', 'error');
+        return;
+      }
       authorizeBtn.disabled = true;
       authorizeBtn.textContent = '授權中…';
-      const saveResp = await sendOAuthMessage('OAUTH_SAVE_CLIENT', { presetId: preset.id, clientId, clientSecret });
-      if (!saveResp.success) {
-        authorizeBtn.disabled = false; authorizeBtn.textContent = '點此授權';
-        showMessage(`儲存 Client 失敗：${saveResp.error}`, 'error'); return;
+      if (!useStoredSecret) {
+        const saveResp = await sendOAuthMessage('OAUTH_SAVE_CLIENT', { presetId: preset.id, clientId, clientSecret });
+        if (!saveResp.success) {
+          authorizeBtn.disabled = false; authorizeBtn.textContent = '點此授權';
+          showMessage(`儲存 Client 失敗：${saveResp.error}`, 'error'); return;
+        }
       }
       const authResp = await sendOAuthMessage('OAUTH_AUTHORIZE', { presetId: preset.id });
       authorizeBtn.disabled = false;
@@ -2177,7 +2202,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (!listEl) return;
     const customTools = apiToolRegistry.filter(tool => !tool.presetId && !API_PRESETS.some(preset => tool.name?.startsWith(preset.toolPrefix)));
     if (!customTools.length) {
-      listEl.innerHTML = '<p class="hint" style="text-align:center;padding:14px 0">尚未建立任何 API 工具</p>';
+      listEl.innerHTML = '<p class="hint" style="text-align:center;padding:14px 0">尚未建立任何連接應用程式</p>';
       return;
     }
     listEl.innerHTML = '';
@@ -2321,6 +2346,18 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
       return tool;
     });
+    const hasNotionPreset = apiToolRegistry.some(tool => tool.presetId === 'notion' || tool.name?.startsWith('notion_'));
+    if (hasNotionPreset) {
+      const generatedNotionTools = API_PRESETS.find(preset => preset.id === 'notion')?.generate() || [];
+      for (const toolName of ['notion_append_block_children', 'notion_create_database']) {
+        const hasTool = apiToolRegistry.some(tool => tool.name === toolName);
+        const generatedTool = generatedNotionTools.find(tool => tool.name === toolName);
+        if (!hasTool && generatedTool) {
+          apiToolRegistry.push(generatedTool);
+          migrated = true;
+        }
+      }
+    }
     if (migrated) await chrome.storage.local.set({ apiToolRegistry });
     renderApiPresets();
     renderApiToolRegistry();
@@ -2385,7 +2422,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     renderApiToolRegistry();
     document.getElementById('apiToolForm').style.display = 'none';
     editingToolId = null;
-    showMessage('API 工具已儲存', 'success');
+    showMessage('連接應用程式已儲存', 'success');
   });
 
   console.log('[Options] All listeners bound, starting data load');

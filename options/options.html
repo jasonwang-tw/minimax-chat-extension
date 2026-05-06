@@ -28,9 +28,9 @@
     <div class="settings-layout">
       <aside class="toc-sidebar">
         <nav class="toc">
-          <a href="#" data-page="sec-api" class="active">API 設定</a>
-          <a href="#" data-page="sec-api-tools">API 工具</a>
-          <a href="#" data-page="sec-usage">使用量與費用</a>
+          <a href="#" data-page="sec-api" class="active">Agent 設定</a>
+          <a href="#" data-page="sec-api-tools">連接應用程式</a>
+          <a href="#" data-page="sec-usage">OpenRouter 設定</a>
           <a href="#" data-page="sec-chat">對話設定</a>
           <a href="#" data-page="sec-prompts">提示詞</a>
           <a href="#" data-page="sec-commands">自訂指令</a>
@@ -43,7 +43,7 @@
 
       <main class="main">
       <section class="section active" id="sec-api">
-        <h2>API 設定</h2>
+        <h2>Agent 設定</h2>
         <div class="form-group">
           <label for="apiKey">MiniMax API Key</label>
           <div class="input-wrapper">
@@ -179,8 +179,8 @@
       </section>
 
       <section class="section" id="sec-usage">
-        <h2>使用量與費用</h2>
-        <p class="section-desc">依 OpenRouter 回傳的 token usage 與當下快取價格估算。歷史紀錄會保留請求當時的價格，不會因日後價格變更而重算。</p>
+        <h2>OpenRouter 設定</h2>
+        <p class="section-desc">需先啟用 OpenRouter API。此頁依 OpenRouter 回傳的 token usage 與當下快取價格估算；歷史紀錄會保留請求當時的價格，不會因日後價格變更而重算。</p>
 
         <div class="usage-toolbar">
           <select id="usageRange">
@@ -444,7 +444,7 @@
       </section>
 
       <section class="section" id="sec-api-tools">
-        <h2>API 工具</h2>
+        <h2>連接應用程式</h2>
         <p class="section-desc">讓 AI Agent 在對話中呼叫自訂 HTTP API。Auth Secret 僅存於本機，不會傳送給模型。非 GET 操作建議搭配計畫模式使用。</p>
 
         <!-- 預設工具庫 -->
@@ -568,7 +568,7 @@
       <section class="section" id="sec-about">
         <h2>關於</h2>
         <div class="about-info">
-          <p><strong>版本:</strong> 1.29.0</p>
+          <p><strong>版本:</strong> 1.31.0</p>
           <p><strong>預設對話模型:</strong> MiniMax-M2.7（可切換 OpenRouter 自訂模型）</p>
           <p><strong>預設圖片模型:</strong> Gemini 2.5 Flash-lite</p>
           <p>Open Chat Hub 是多模型 AI 側邊欄工作台，支援聊天、截圖、OCR、翻譯、檔案分析、知識庫與同步備份。</p>

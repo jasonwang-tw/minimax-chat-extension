@@ -107,8 +107,8 @@ Open Chat Hub 是一個多模型 AI 側邊欄工作台，讓你在瀏覽器內�
 
 ### Notion
 
-1. 進入 [Notion Developers](https://www.notion.so/my-integrations) → 「+ New integration」
-2. 類型選「**Public integration**」（OAuth 必須是 public 類型）
+1. 進入 [Notion Developers](https://www.notion.so/profile/integrations/public) → 「Create new connection」
+2. 建立「**Public connection**」（OAuth 必須是 public 類型）
 3. 「Redirect URIs」貼上設定頁顯示的 Notion Redirect URI
 4. 在 Capabilities 勾選需要的權限（Read/Update/Insert content）
 5. 取得 OAuth client ID 與 OAuth client secret，貼回設定頁
@@ -148,6 +148,22 @@ npm run build:css
 
 ## Changelog
 
+## [1.31.0] - 2026-05-07
+### Added
+- Notion 工具庫新增 `notion_append_block_children`（追加內容區塊）與 `notion_create_database`（建立資料庫）兩項工具
+- Agent 新增請求重試機制（`AGENT_REQUEST_RETRY_COUNT`）與自動分段繼續（`AGENT_AUTO_CONTINUE_SEGMENTS`）
+- API 工具參數型別自動轉換：model 接收到字串時可自動轉為 object / array / boolean / number
+- Notion database properties schema 新增簡寫別名（如 `"date"` → `{ "date": {} }`）
+- `notion_create_database` 支援預設 property schema 正規化
+- background 層內建 Notion preset 工具定義，無需從 options 匯入即可在 Agent 中使用
+
+### Changed
+- Agent 請求逾時從 45s 延長至 120s，提升長任務穩定性
+- 設定頁側邊欄標籤更名：「API 設定」→「Agent 設定」、「API 工具」→「連接應用程式」、「使用量與費用」→「OpenRouter 設定」
+- OAuth Client Secret 欄位改為遮罩顯示（`••••••••••••`），點擊輸入框自動全選以便重新輸入，移除顯示/隱藏切換按鈕
+- Notion console URL 更新為 Public connection 連結
+- `notion_create_page`、`notion_update_page`、`notion_query_database` 工具描述更精確，避免誤用
+
 ## [1.30.0] - 2026-05-06
 ### Added
 - API 工具新增四組 OAuth2 預設工具庫：Gmail、Google 日曆、Notion、Google Analytics 4
@@ -165,7 +181,7 @@ npm run build:css
 ### 預設端點
 - **Gmail**：`gmail_list_messages`、`gmail_get_message`、`gmail_list_threads`、`gmail_get_thread`、`gmail_list_labels`
 - **Google 日曆**：`gcal_list_calendars`、`gcal_list_events`、`gcal_get_event`、`gcal_create_event`、`gcal_update_event`、`gcal_delete_event`
-- **Notion**：`notion_search`、`notion_get_page`、`notion_get_block_children`、`notion_create_page`、`notion_update_page`、`notion_query_database`
+- **Notion**：`notion_search`、`notion_get_page`、`notion_get_block_children`、`notion_append_block_children`、`notion_create_page`、`notion_create_database`、`notion_update_page`、`notion_query_database`
 - **Google Analytics 4**：`ga_list_account_summaries`、`ga_run_report`
 
 ## [1.29.0] - 2026-05-06

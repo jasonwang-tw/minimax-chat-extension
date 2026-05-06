@@ -501,7 +501,7 @@ input.cmd-trigger {
   text-align: center;
 }
 
-/* ── 使用量與費用 ─────────────────────────────────────── */
+/* ── OpenRouter 設定 ───────────────────────────────────── */
 .usage-toolbar {
   display: flex;
   gap: 8px;

@@ -12,7 +12,8 @@ const OPENROUTER_MODELS_API_URL = 'https://openrouter.ai/api/v1/models';
 const MODEL_PRICING_CACHE_KEY = 'openrouterModelPricingCache';
 const MODEL_USAGE_LEDGER_KEY = 'modelUsageLedger';
 const MODEL_USAGE_LEDGER_LIMIT = 1000;
-const AGENT_REQUEST_TIMEOUT_MS = 45000;
+const AGENT_REQUEST_TIMEOUT_MS = 120000;
+const AGENT_REQUEST_RETRY_COUNT = 1;
 const AGENT_SYNTHESIS_TIMEOUT_MS = 90000;
 const STREAM_IDLE_TIMEOUT_MS = 60000;
 const PORT_KEEPALIVE_INTERVAL_MS = 20000;
@@ -22,6 +23,7 @@ const AGENT_FINAL_CONTEXT_LIMIT = 8000;
 const AGENT_ITER_MIN = 3;
 const AGENT_ITER_DEFAULT = 6;
 const AGENT_ITER_MAX = 12;
+const AGENT_AUTO_CONTINUE_SEGMENTS = 3;
 
 const DEFAULT_PROMPTS = {
   chat: '',
@@ -2237,6 +2239,22 @@ function formatXmlToolResultForAgent(name, args, result) {
   return `[工具 ${name} 的結果]\n${truncateAgentText(JSON.stringify(compact), AGENT_TOOL_RESULT_LIMIT)}`;
 }
 
+function normalizeNotionId(id) {
+  const compact = String(id || '').replace(/-/g, '').trim();
+  if (!/^[a-f0-9]{32}$/i.test(compact)) return '';
+  return `${compact.slice(0, 8)}-${compact.slice(8, 12)}-${compact.slice(12, 16)}-${compact.slice(16, 20)}-${compact.slice(20)}`;
+}
+
+function extractNotionPageId(text) {
+  const value = String(text || '');
+  const hyphenated = value.match(/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}/i);
+  if (hyphenated) return normalizeNotionId(hyphenated[0]);
+  const notionUrl = value.match(/https?:\/\/(?:www\.)?notion\.(?:so|site)\/[^\s)]+/i)?.[0] || '';
+  const source = notionUrl || value;
+  const compact = source.match(/[a-f0-9]{32}/i);
+  return compact ? normalizeNotionId(compact[0]) : '';
+}
+
 // ── Tool 執行路由 ─────────────────────────────────────────────
 async function handleToolCall(name, args, sessionId) {
   if (name === 'web_search') {
@@ -2258,6 +2276,75 @@ async function handleToolCall(name, args, sessionId) {
   const regTool = (apiToolRegistry || []).find(t => t.enabled && t.name === name);
   if (regTool) return await executeApiTool(regTool, args);
   return { error: `未知工具: ${name}` };
+}
+
+async function isMutatingRegistryTool(name) {
+  const { apiToolRegistry } = await chrome.storage.local.get('apiToolRegistry');
+  const regTool = (apiToolRegistry || []).find(t => t.enabled && t.name === name);
+  return !!regTool && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(String(regTool.method || 'GET').toUpperCase());
+}
+
+function getBackgroundNotionPresetTool(name) {
+  const base = 'https://api.notion.com/v1';
+  const auth = { authType: 'oauth2', oauthPresetId: 'notion', presetId: 'notion' };
+  const tools = {
+    notion_append_block_children: {
+      name: 'notion_append_block_children',
+      method: 'PATCH',
+      url: `${base}/blocks/{block_id}/children`,
+      description: '在指定 Notion 頁面或區塊底下追加內容區塊（需 Public connection 開啟 Insert content 權限）',
+      parameters: [
+        { name: 'block_id', description: '要追加內容的頁面 ID 或區塊 ID', type: 'string', location: 'path', required: true },
+        { name: 'children', description: '要追加的 Notion block 陣列，單次最多 100 個 children', type: 'array', items: { type: 'object' }, location: 'body', required: true },
+        { name: 'after', description: '選填，指定要插入在哪個既有 block ID 後方', type: 'string', location: 'body', required: false }
+      ],
+      ...auth,
+      responseLimit: 3000,
+      enabled: true,
+      presetId: 'notion'
+    },
+    notion_create_database: {
+      name: 'notion_create_database',
+      method: 'POST',
+      url: `${base}/databases`,
+      description: '在指定 Notion 父頁面底下建立資料庫，並可定義自訂 properties schema（不是把既有頁面原地轉成資料庫）',
+      parameters: [
+        { name: 'parent', description: 'parent 物件，例如 { "type": "page_id", "page_id": "..." }', type: 'object', location: 'body', required: true },
+        { name: 'title', description: '資料庫標題 rich text 陣列，例如 [{ "type": "text", "text": { "content": "行程資料庫" } }]', type: 'array', items: { type: 'object' }, location: 'body', required: true },
+        { name: 'properties', description: '資料庫 properties schema。支援 title、rich_text、number、select、multi_select、status、date、people、files、checkbox、url、email、phone_number、formula、relation、rollup、created_time、created_by、last_edited_time、last_edited_by；可用簡寫如 { "開始時間": "date" }，系統會轉為 { "開始時間": { "date": {} } }', type: 'object', location: 'body', required: true },
+        { name: 'is_inline', description: '是否建立為 inline database', type: 'boolean', location: 'body', required: false }
+      ],
+      ...auth,
+      responseLimit: 3000,
+      enabled: true,
+      presetId: 'notion'
+    }
+  };
+  return tools[name] || null;
+}
+
+async function loadApiToolRegistryForAgent() {
+  const { apiToolRegistry: stored = [] } = await chrome.storage.local.get('apiToolRegistry');
+  const registry = Array.isArray(stored) ? [...stored] : [];
+  const hasNotionPreset = registry.some(tool => tool.presetId === 'notion' || tool.name?.startsWith('notion_'));
+  let migrated = false;
+  if (hasNotionPreset) {
+    for (const toolName of ['notion_append_block_children', 'notion_create_database']) {
+      const existing = registry.find(tool => tool.name === toolName);
+      if (!existing) {
+        const generated = getBackgroundNotionPresetTool(toolName);
+        if (generated) {
+          registry.push({ ...generated, id: `preset_notion_${toolName}` });
+          migrated = true;
+        }
+      } else if (existing.enabled === false) {
+        existing.enabled = true;
+        migrated = true;
+      }
+    }
+  }
+  if (migrated) await chrome.storage.local.set({ apiToolRegistry: registry });
+  return registry;
 }
 
 // ── API Tool Registry ────────────────────────────────────────
@@ -2502,6 +2589,224 @@ function sanitizeOAuthForClient(token) {
   return { ...rest, hasAccessToken: !!accessToken, hasRefreshToken: !!refreshToken };
 }
 
+function coerceApiToolParamValue(param, value) {
+  if (value === undefined) return value;
+  const type = param?.type || 'string';
+  if (type === 'object' || type === 'array') {
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      if (!trimmed) return type === 'array' ? [] : {};
+      try {
+        value = JSON.parse(trimmed);
+      } catch {
+        throw new Error(`${param.name} 必須是有效的 JSON ${type === 'array' ? '陣列' : '物件'}，目前收到字串。`);
+      }
+    }
+    if (type === 'array' && !Array.isArray(value)) {
+      throw new Error(`${param.name} 必須是陣列。`);
+    }
+    if (type === 'object' && (!value || typeof value !== 'object' || Array.isArray(value))) {
+      throw new Error(`${param.name} 必須是物件。`);
+    }
+    return value;
+  }
+  if (type === 'number') {
+    const n = Number(value);
+    if (!Number.isFinite(n)) throw new Error(`${param.name} 必須是數字。`);
+    return n;
+  }
+  if (type === 'boolean') {
+    if (typeof value === 'boolean') return value;
+    const normalized = String(value).trim().toLowerCase();
+    if (['true', '1', 'yes', 'y', '是'].includes(normalized)) return true;
+    if (['false', '0', 'no', 'n', '否'].includes(normalized)) return false;
+    throw new Error(`${param.name} 必須是布林值 true/false。`);
+  }
+  return value;
+}
+
+function normalizeNotionDatabaseProperties(properties) {
+  if (!properties || typeof properties !== 'object' || Array.isArray(properties)) return properties;
+  const aliases = {
+    text: 'rich_text',
+    string: 'rich_text',
+    url: 'url',
+    link: 'url',
+    checkbox: 'checkbox',
+    boolean: 'checkbox',
+    number: 'number',
+    date: 'date',
+    datetime: 'date',
+    time: 'date',
+    select: 'select',
+    single_select: 'select',
+    multi_select: 'multi_select',
+    multiselect: 'multi_select',
+    status: 'status',
+    title: 'title',
+    name: 'title',
+    people: 'people',
+    person: 'people',
+    files: 'files',
+    file: 'files',
+    email: 'email',
+    phone: 'phone_number',
+    phone_number: 'phone_number',
+    formula: 'formula',
+    relation: 'relation',
+    rollup: 'rollup',
+    created_time: 'created_time',
+    last_edited_time: 'last_edited_time',
+    created_by: 'created_by',
+    last_edited_by: 'last_edited_by'
+  };
+  const canonicalTypes = new Set(Object.values(aliases));
+  const emptySchemaTypes = new Set([
+    'title', 'rich_text', 'number', 'url', 'email', 'phone_number', 'checkbox',
+    'date', 'people', 'files', 'created_time', 'created_by', 'last_edited_time', 'last_edited_by'
+  ]);
+
+  function normalizeOptions(options) {
+    if (!Array.isArray(options)) return undefined;
+    return options
+      .map(option => {
+        if (typeof option === 'string') return { name: option };
+        if (!option || typeof option !== 'object' || Array.isArray(option)) return null;
+        const normalized = { ...option };
+        if (normalized.name !== undefined) normalized.name = String(normalized.name);
+        return normalized.name ? normalized : null;
+      })
+      .filter(Boolean);
+  }
+
+  function normalizeSchemaConfig(type, rawSchema = {}) {
+    const source = rawSchema && typeof rawSchema === 'object' && !Array.isArray(rawSchema) ? rawSchema : {};
+    const direct = source[type] && typeof source[type] === 'object' && !Array.isArray(source[type])
+      ? { ...source[type] }
+      : {};
+    if (type === 'select' || type === 'multi_select' || type === 'status') {
+      const options = normalizeOptions(direct.options || source.options);
+      return options?.length ? { options } : {};
+    }
+    if (type === 'number') {
+      const format = direct.format || source.format;
+      return format ? { format } : {};
+    }
+    if (type === 'formula') {
+      const expression = direct.expression || source.expression || source.formula;
+      return expression ? { expression: String(expression) } : {};
+    }
+    if (type === 'relation') {
+      const databaseId = direct.database_id || source.database_id || source.databaseId;
+      const relationType = direct.type || source.relation_type || source.relationType || source.type;
+      const config = {};
+      if (databaseId) config.database_id = String(databaseId);
+      if (relationType === 'single_property' || relationType === 'dual_property') {
+        config.type = relationType;
+        config[relationType] = direct[relationType] || source[relationType] || {};
+      }
+      return config;
+    }
+    if (type === 'rollup') {
+      const config = { ...direct };
+      for (const key of ['relation_property_name', 'relation_property_id', 'rollup_property_name', 'rollup_property_id', 'function']) {
+        if (source[key] !== undefined && config[key] === undefined) config[key] = source[key];
+      }
+      return config;
+    }
+    return emptySchemaTypes.has(type) ? {} : direct;
+  }
+
+  const normalized = {};
+  for (const [name, rawSchema] of Object.entries(properties)) {
+    if (typeof rawSchema === 'string') {
+      const type = aliases[rawSchema.trim().toLowerCase()] || rawSchema.trim();
+      normalized[name] = { [type]: normalizeSchemaConfig(type) };
+      continue;
+    }
+    if (!rawSchema || typeof rawSchema !== 'object' || Array.isArray(rawSchema)) {
+      normalized[name] = { rich_text: {} };
+      continue;
+    }
+    const explicitType = typeof rawSchema.type === 'string'
+      ? aliases[rawSchema.type.trim().toLowerCase()] || rawSchema.type.trim()
+      : '';
+    if (explicitType) {
+      normalized[name] = { [explicitType]: normalizeSchemaConfig(explicitType, rawSchema) };
+      continue;
+    }
+    const schemaKey = Object.keys(rawSchema).find(key => {
+      const normalizedKey = typeof key === 'string' ? key.trim().toLowerCase() : key;
+      const type = aliases[normalizedKey] || key;
+      return canonicalTypes.has(type);
+    });
+    if (schemaKey) {
+      const type = aliases[schemaKey.trim().toLowerCase()] || schemaKey;
+      normalized[name] = { [type]: normalizeSchemaConfig(type, rawSchema) };
+      continue;
+    }
+    normalized[name] = rawSchema;
+  }
+  if (!Object.values(normalized).some(schema => schema?.title !== undefined)) {
+    const titleName = normalized.Name ? 'Title' : 'Name';
+    normalized[titleName] = { title: {} };
+  }
+  return normalized;
+}
+
+function deepParseJsonStrings(value, depth = 0) {
+  if (depth > 4) return value;
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
+      try {
+        return deepParseJsonStrings(JSON.parse(trimmed), depth + 1);
+      } catch {
+        return value;
+      }
+    }
+    return value;
+  }
+  if (Array.isArray(value)) return value.map(item => deepParseJsonStrings(item, depth + 1));
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, deepParseJsonStrings(item, depth + 1)]));
+  }
+  return value;
+}
+
+function normalizeNotionAppendChildren(children) {
+  const parsed = deepParseJsonStrings(children);
+  if (!Array.isArray(parsed)) throw new Error('children 必須是 Notion block 物件陣列。');
+  const invalidPage = parsed.find(child => child?.object === 'page' || child?.properties);
+  if (invalidPage) {
+    throw new Error('notion_append_block_children 只能追加 block 物件，不能追加 page/資料庫資料列。若要在 database 新增資料列，請改用 notion_create_page，parent 使用 { "database_id": "..." }，properties 放資料列欄位。');
+  }
+  return parsed;
+}
+
+function formatApiToolHttpError(tool, status, text) {
+  const raw = text.slice(0, 500);
+  if ((tool.oauthPresetId || tool.presetId) === 'notion') {
+    let parsed = null;
+    try { parsed = JSON.parse(text); } catch {}
+    const code = parsed?.code || '';
+    const message = parsed?.message || raw;
+    if (status === 404 && code === 'object_not_found') {
+      return `HTTP 404: ${message}\n\nNotion API 無法存取此頁面或區塊。這通常不是 Copy Link 無效，而是頁面沒有授權給 integration。請在 Notion 開啟該頁面，右上角「...」→ Connections / Connect to → 選擇「Open Chat Hub」。如果頁面剛被移動到其他位置，請在移動後的新頁面位置重新確認 connection；單純貼上分享連結或 Copy Link 不會授權 API 存取。`;
+    }
+    if (status === 403) {
+      return `HTTP 403: ${message}\n\nNotion integration 權限不足。請確認 Public connection capabilities 已開啟 Read content / Insert content / Update content 中這次操作需要的權限，並重新授權。`;
+    }
+    if (status === 400 && /Archiving workspace level pages via API not supported/i.test(message)) {
+      return `HTTP 400: ${message}\n\nNotion API 不支援封存 workspace level pages。請不要用 notion_update_page archived=true 來移動、轉換或清理頂層頁面。若目標是建立資料庫，請改用 notion_create_database 在可存取的父頁面底下建立新 database；若目標是移動頁面，Notion API 目前不支援移動頁面，需在 Notion UI 手動移動。`;
+    }
+    if (status === 400 && /is a page, not a database/i.test(message)) {
+      return `HTTP 400: ${message}\n\n這個 ID 是 Notion page_id，不是 database_id。請不要把使用者提供的頁面連結 ID 用於 notion_query_database。正確流程是：若要在此頁下建立資料庫，先用 notion_create_database，parent 使用 { "type": "page_id", "page_id": "此頁面 ID" }；建立成功後使用回傳的 database id 來 query database 或建立資料列。若只是讀頁面內容，請改用 notion_get_page 或 notion_get_block_children。`;
+    }
+  }
+  return `HTTP ${status}: ${raw}`;
+}
+
 async function executeApiTool(tool, args) {
   try {
     let url = tool.url || '';
@@ -2555,7 +2860,13 @@ async function executeApiTool(tool, args) {
 
     const bodyObj = {};
     for (const p of (tool.parameters || []).filter(p => p.location === 'body')) {
-      if (safeArgs[p.name] !== undefined) bodyObj[p.name] = safeArgs[p.name];
+      if (safeArgs[p.name] !== undefined) bodyObj[p.name] = coerceApiToolParamValue(p, safeArgs[p.name]);
+    }
+    if (tool.name === 'notion_create_database' && bodyObj.properties) {
+      bodyObj.properties = normalizeNotionDatabaseProperties(bodyObj.properties);
+    }
+    if (tool.name === 'notion_append_block_children' && bodyObj.children) {
+      bodyObj.children = normalizeNotionAppendChildren(bodyObj.children);
     }
 
     for (const p of (tool.parameters || []).filter(p => p.location === 'header')) {
@@ -2584,7 +2895,7 @@ async function executeApiTool(tool, args) {
       ? Math.max(tool.responseLimit || 0, 8000)
       : (tool.responseLimit || 2000);
 
-    if (!resp.ok) return { error: `HTTP ${resp.status}: ${text.slice(0, 500)}` };
+    if (!resp.ok) return { error: formatApiToolHttpError(tool, resp.status, text) };
 
     try {
       const parsed = JSON.parse(text);
@@ -2614,8 +2925,9 @@ async function streamAgentChat(message, history, translateConfig, model, systemP
 
   // 決定可用工具（瀏覽器工具永遠可用，搜尋工具視 API Key 決定，Registry 工具依設定載入）
   const { braveApiKey, exaApiKey } = await chrome.storage.sync.get(['braveApiKey', 'exaApiKey']);
-  const { apiToolRegistry } = await chrome.storage.local.get('apiToolRegistry');
-  const registryTools = (apiToolRegistry || []).filter(t => t.enabled).map(buildRegistryTool);
+  const apiToolRegistry = await loadApiToolRegistryForAgent();
+  const enabledRegistryTools = apiToolRegistry.filter(t => t.enabled);
+  const registryTools = enabledRegistryTools.map(buildRegistryTool);
   const tools = [...AGENT_TOOLS_BROWSER, ...registryTools];
   if (braveApiKey || exaApiKey) tools.push(AGENT_TOOLS_SEARCH[0]); // web_search
   if (exaApiKey) tools.push(AGENT_TOOLS_SEARCH[1]);                 // deep_search
@@ -2651,8 +2963,9 @@ async function streamAgentChat(message, history, translateConfig, model, systemP
   const now = new Date();
   const dateStr = `${now.getFullYear()}年${now.getMonth() + 1}月${now.getDate()}日`;
   const dateContext = `當前日期：${dateStr}。搜尋資訊時，除非使用者明確指定時間範圍，否則一律以接近當前日期的資訊為準。回答中引用網路搜尋結果時，來源必須以 Markdown 超連結格式標注，例如：[標題](https://example.com)，不可只寫來源名稱而不附 URL。`;
+  const toolAuthContext = '可用 API 工具已由擴充功能代管 OAuth 或本機憑證。需要存取 Notion、Gmail、Google Calendar、GA4、WordPress 等已連接服務時，請直接呼叫可用工具，不要要求使用者提供 API Token、環境變數或密鑰。Notion 的 Copy Link / 分享連結只提供頁面 URL，不會授權 API integration；如果 Notion 工具回傳 object_not_found 或 404，請明確要求使用者在該頁面右上角「...」→ Connections / Connect to → 選擇 Open Chat Hub，尤其是頁面移動到新位置之後。不要把「直接分享連結」當成 API 存取權限的解法。若工具回傳尚未授權或權限不足，請要求使用者到設定頁重新授權或調整 connection capabilities。沒有實際呼叫工具前，不得宣稱正在等待 API、正在寫入、已建立、已更新、已完成或即將提供連結。對 Notion/database/寫入類大型任務，必須分段完成：先建立 schema 或父頁，再分批寫入資料列/blocks；每段成功後繼續下一段，不要把大量內容留到最後一次整理，也不要用簡略摘要取代實際寫入。Notion page_id 與 database_id 不可混用：使用者提供的頁面連結通常是 page_id，只能用於 notion_get_page、notion_get_block_children，或作為 notion_create_database 的 parent.page_id；只有 notion_create_database 回傳的 database id 才能用於 notion_query_database 或作為資料列 parent.database_id。';
 
-  const finalSystemPrompt = [dateContext, memoryContext, globalPrompt, modePrompt].filter(Boolean).join('\n\n');
+  const finalSystemPrompt = [dateContext, toolAuthContext, memoryContext, globalPrompt, modePrompt].filter(Boolean).join('\n\n');
   const effectiveContextChars = normalizeContextCharBudget(contextCharBudget);
   const fixedChars = (finalSystemPrompt?.length || 0) + message.length;
   const historyBudget = Math.max(0, effectiveContextChars - fixedChars);
@@ -2666,8 +2979,15 @@ async function streamAgentChat(message, history, translateConfig, model, systemP
   const messages = buildMessages(message, compressedHistory, translateConfig, effectiveSystemPrompt, globalPrompt, effectiveContextChars);
 
   let toolsExecuted = false;
+  let mutatingToolExecuted = false;
+  let forcedToolCallRetry = false;
   const toolObservations = [];
   const maxIter = normalizeAgentIterations(maxAgentIterations);
+  const enabledToolNames = enabledRegistryTools.map(t => t.name);
+  const requiresConnectedToolTask = messageRequiresConnectedTool();
+  const autoContinueMax = requiresConnectedToolTask ? AGENT_AUTO_CONTINUE_SEGMENTS : 0;
+  const effectiveMaxIter = maxIter * (autoContinueMax + 1);
+  let autoContinueCount = 0;
 
   function getMessageText(msg) {
     if (Array.isArray(msg?.content)) {
@@ -2682,6 +3002,26 @@ async function streamAgentChat(message, history, translateConfig, model, systemP
       .replace(/<think>[\s\S]*?<\/think>/gi, '')
       .replace(/<result>[\s\S]*?<\/result>/gi, '')
       .trim();
+  }
+
+  function messageRequiresConnectedTool() {
+    const text = String(message || '').toLowerCase();
+    const mentionsService = [
+      { key: 'notion', prefix: 'notion_' },
+      { key: 'notion.so', prefix: 'notion_' },
+      { key: 'notion.site', prefix: 'notion_' },
+      { key: 'gmail', prefix: 'gmail_' },
+      { key: 'google calendar', prefix: 'gcal_' },
+      { key: '日曆', prefix: 'gcal_' },
+      { key: 'ga4', prefix: 'ga_' },
+      { key: 'wordpress', prefix: 'wp_' }
+    ].some(({ key, prefix }) => text.includes(key) && enabledToolNames.some(name => name.startsWith(prefix)));
+    const toolAction = /(建立|新增|寫入|更新|修改|刪除|查詢|搜尋|取得|讀取|連接|檢查|確認|查看|看到|看不到|有沒有|是否|create|post|patch|delete|get|search|query|check|verify|inspect|api)/i.test(message || '');
+    return mentionsService && toolAction;
+  }
+
+  function replyLooksLikeFakeToolProgress(reply) {
+    return /(等待\s*api|api\s*回應|正在執行|執行中|建立頁面中|寫入.*內容|取得.*連結|post\s+\/?v?1\/|patch\s+\/?v?1\/|https:\/\/api\.notion\.com)/i.test(reply || '');
   }
 
   async function requestFinalSynthesis(reason = '') {
@@ -2711,18 +3051,23 @@ async function streamAgentChat(message, history, translateConfig, model, systemP
     return reply;
   }
 
-  function buildFinalFallbackPrompt(reason = '', errorMessage = '') {
+  function buildDeterministicFallbackReply(reason = '', errorMessage = '') {
     const toolContext = truncateAgentText(toolObservations.join('\n\n---\n\n'), AGENT_FINAL_CONTEXT_LIMIT);
-    return `以下是 Agent 已經取得的工具結果。請不要再呼叫工具，直接根據這些資料用繁體中文回答使用者原始問題。
+    const mutatingStatus = mutatingToolExecuted
+      ? '已偵測到至少一次寫入類 API 工具成功執行。'
+      : '目前沒有偵測到成功的寫入類 API 工具。';
+    return `Agent 任務未完成最終整理。
 
-使用者原始問題：
-${message || '未提供'}
+停止原因：${reason || '模型未能產生最終回答。'}${errorMessage ? `\n錯誤原因：${errorMessage}` : ''}
 
-工具結果：
+API 狀態：${mutatingStatus}
+
+已取得的工具結果摘要：
+\`\`\`text
 ${toolContext || '沒有可用工具結果'}
+\`\`\`
 
-${reason ? `補充狀態：${reason}\n` : ''}${errorMessage ? `前一次整理失敗原因：${errorMessage}\n` : ''}
-請輸出完整、條理清楚的最終回答。`;
+我已停止等待模型整理，避免長時間卡住。你可以點下方「繼續深入搜尋」續跑，或重新送出更精簡的指令。`;
   }
 
   function buildContinuationPrompt(reason = '') {
@@ -2751,41 +3096,140 @@ ${toolContext}
     return prompt ? { prompt, label: '繼續深入搜尋' } : null;
   }
 
-  async function streamFinalFallback(reason = '', errorMessage = '') {
+  function enqueueAutoContinuation(reason = '') {
+    if (!requiresConnectedToolTask || autoContinueCount >= autoContinueMax) return false;
+    autoContinueCount += 1;
+    const toolContext = truncateAgentText(toolObservations.join('\n\n---\n\n'), AGENT_FINAL_CONTEXT_LIMIT);
     port.postMessage({
       type: 'agent_notice',
-      text: `最終整理逾時，已改用已取得的工具結果直接整理回覆。${errorMessage ? `原因：${errorMessage}` : ''}`,
-      level: 'warning'
+      text: `本段尚未完成，正在自動接續第 ${autoContinueCount} 段。`,
+      level: 'info'
     });
-    const fallbackSystemPrompt = [
-      systemPrompt,
-      '你正在整理已取得的工具結果。請直接回答使用者問題，不要呼叫工具，不要輸出 XML、HTML 或任何工具呼叫標籤，例如 <search>、<query>、<minimax:tool_call>。'
-    ].filter(Boolean).join('\n\n');
-    await streamMiniMaxChat(
-      buildFinalFallbackPrompt(reason, errorMessage),
-      [],
-      null,
-      model,
-      fallbackSystemPrompt,
-      memoryContext,
-      port,
-      sessionId,
-      contextCharBudget
-    );
+    messages.push({
+      role: 'user',
+      content: `自動接續第 ${autoContinueCount} 段。請不要輸出最終摘要，也不要停在規劃文字。請根據原始任務與目前工具結果，繼續呼叫必要工具完成下一批實際操作。
+
+原始任務：
+${message || '未提供'}
+
+接續原因：
+${reason || '上一段尚未完成。'}
+
+目前工具結果摘要：
+${toolContext || '尚無工具結果'}
+
+要求：
+- 若是 Notion/database 寫入任務，請分段建立 schema、資料庫、資料列或 blocks。
+- 每次只處理下一個明確批次，成功後再繼續下一批。
+- 不要產生簡略版取代完整資料。
+- 如果任務已完全完成，才輸出完成狀態與可用連結；否則必須繼續呼叫工具。`
+    });
+    return true;
   }
 
-  for (let iter = 0; iter < maxIter; iter++) {
-    port.postMessage({ type: 'agent_thinking', iter: iter + 1, maxIter });
+  function sendFinalFallback(reason = '', errorMessage = '') {
+    port.postMessage({
+      type: 'agent_notice',
+      text: `最終整理失敗，已停止等待並回傳目前工具結果。${errorMessage ? `原因：${errorMessage}` : ''}`,
+      level: 'warning'
+    });
+    port.postMessage({
+      type: 'done',
+      reply: buildDeterministicFallbackReply(reason, errorMessage),
+      continuation: buildContinuationPayload(reason || errorMessage || '最終整理失敗')
+    });
+  }
+
+  function isRetryableAgentError(err) {
+    const msg = String(err?.message || err || '');
+    return msg.includes('請求逾時') || /network|failed to fetch|temporarily unavailable/i.test(msg);
+  }
+
+  async function requestAgentAnalysis() {
+    const fetchOptions = {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${agentKey}`, 'Content-Type': 'application/json', ...agentExtraHeaders },
+      body: JSON.stringify({ model: useModel, messages, tools })
+    };
+
+    for (let attempt = 0; attempt <= AGENT_REQUEST_RETRY_COUNT; attempt++) {
+      try {
+        return await fetchWithTimeout(agentUrl, fetchOptions);
+      } catch (err) {
+        const canRetry = attempt < AGENT_REQUEST_RETRY_COUNT && isRetryableAgentError(err) && !mutatingToolExecuted;
+        if (!canRetry) throw err;
+        port.postMessage({
+          type: 'agent_notice',
+          text: `Agent 分析請求失敗：${err.message} 正在自動重試 1 次。`,
+          level: 'warning'
+        });
+      }
+    }
+  }
+
+  async function runInitialNotionPreflight() {
+    if (!requiresConnectedToolTask || !enabledToolNames.includes('notion_get_page')) return;
+    const pageId = extractNotionPageId(message);
+    if (!pageId) {
+      messages.push({
+        role: 'user',
+        content: `第一輪限制：這是已連接工具任務。請不要先規劃完整內容；第一個回合只能做最小驗證或建立步驟。
+
+若是 Notion 任務：
+- 有目標頁面時，先呼叫 notion_search 或 notion_get_page 驗證 parent/page。
+- 要建立 database 時，先建立 schema，不要同時寫入全部資料。
+- 要寫入大量資料時，一次只寫第一批 3-5 筆或第一段 blocks。`
+      });
+      return;
+    }
+
+    port.postMessage({
+      type: 'agent_notice',
+      text: '已偵測到 Notion 連結，先驗證目標頁面存取權，再交給 Agent 接續下一個小步驟。',
+      level: 'info'
+    });
+    port.postMessage({ type: 'tool_start', tool: 'notion_get_page', query: pageId });
+    let result;
+    try {
+      result = await handleToolCall('notion_get_page', { page_id: pageId }, sessionId);
+    } catch (err) {
+      result = { error: err.message };
+    }
+    port.postMessage({ type: 'tool_done', tool: 'notion_get_page', count: null, error: result.error || null });
+    toolsExecuted = true;
+    const formattedResult = formatXmlToolResultForAgent('notion_get_page', { page_id: pageId }, result);
+    toolObservations.push(formattedResult);
+    messages.push({
+      role: 'user',
+      content: `${formattedResult}
+
+第一步已由系統完成：已用使用者提供的 Notion URL 驗證 page_id=${pageId}。
+
+接下來請只執行下一個最小批次：
+- 若要建立 database，先呼叫 notion_create_database 建 schema。
+- 若 database 已建立，下一步只新增第一批 3-5 筆資料列。
+- 若要寫入 blocks，下一步只 append 第一段 blocks。
+- 不要輸出完整最終整理，不要宣稱完成，除非所有資料都已實際寫入。`
+    });
+  }
+
+  await runInitialNotionPreflight();
+
+  for (let iter = 0; iter < effectiveMaxIter; iter++) {
+    port.postMessage({ type: 'agent_thinking', iter: iter + 1, maxIter: effectiveMaxIter });
     let resp;
     try {
-      resp = await fetchWithTimeout(agentUrl, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${agentKey}`, 'Content-Type': 'application/json', ...agentExtraHeaders },
-        body: JSON.stringify({ model: useModel, messages, tools })
-      });
+      resp = await requestAgentAnalysis();
     } catch (err) {
       if (toolsExecuted || toolObservations.length > 0) {
-        await streamFinalFallback('Agent 分析請求失敗，改用已取得的工具結果整理回覆。', err.message);
+        sendFinalFallback('Agent 分析請求失敗，已回傳目前工具結果。', err.message);
+        return;
+      }
+      if (requiresConnectedToolTask) {
+        if (enqueueAutoContinuation(`Agent 分析請求失敗：${err.message}。請改用最小工具步驟重新嘗試。`)) {
+          continue;
+        }
+        sendFinalFallback('Agent 分析請求失敗，且這是已連接工具任務，因此未改用一般串流。', err.message);
         return;
       }
       port.postMessage({
@@ -2831,6 +3275,7 @@ ${toolContext}
           port.postMessage({ type: 'tool_start', tool: name, query: toolDisplayQuery(name, args) });
           let result;
           try { result = await handleToolCall(name, args, sessionId); } catch (e) { result = { error: e.message }; }
+          if (!result.error && await isMutatingRegistryTool(name)) mutatingToolExecuted = true;
           if (result.error) {
             port.postMessage({
               type: 'agent_notice',
@@ -2856,6 +3301,7 @@ ${toolContext}
           port.postMessage({ type: 'tool_start', tool: tc.name, query: toolDisplayQuery(tc.name, tc.args) });
           let result;
           try { result = await handleToolCall(tc.name, tc.args, sessionId); } catch (e) { result = { error: e.message }; }
+          if (!result.error && await isMutatingRegistryTool(tc.name)) mutatingToolExecuted = true;
           if (result.error) {
             port.postMessage({
               type: 'agent_notice',
@@ -2877,9 +3323,36 @@ ${toolContext}
     if (!toolsExecuted) {
       const directReply = cleanAgentReply(contentStr);
       if (directReply) {
+        const requiresTool = requiresConnectedToolTask;
+        const fakeProgress = replyLooksLikeFakeToolProgress(directReply);
+        if ((requiresTool || fakeProgress) && !forcedToolCallRetry) {
+          forcedToolCallRetry = true;
+          port.postMessage({
+            type: 'agent_notice',
+            text: 'AI 未實際呼叫已連接工具，但回覆內容看起來需要 API 操作。正在要求模型改用工具執行。',
+            level: 'warning'
+          });
+          messages.push({
+            role: 'user',
+            content: `你剛才沒有呼叫任何工具，因此尚未執行 API，也不能宣稱正在等待 API、正在建立、已寫入或即將提供連結。使用者這次任務需要使用已連接工具完成。請立即呼叫正確工具執行；如果可用工具不足，請明確說明缺哪個工具或權限。`
+          });
+          continue;
+        }
+        if ((requiresTool || fakeProgress) && forcedToolCallRetry) {
+          port.postMessage({
+            type: 'agent_notice',
+            text: 'AI 仍未呼叫工具，因此已停止這次 API 操作，避免顯示不真實的等待狀態。',
+            level: 'warning'
+          });
+          port.postMessage({
+            type: 'done',
+            reply: '尚未執行 API，也沒有寫入 Notion。模型沒有呼叫已連接的 Notion 工具，因此這次操作已停止。請確認目前模型支援 tool use，並重新送出任務；若仍發生，請切換到支援工具呼叫較穩定的模型。'
+          });
+          return;
+        }
         port.postMessage({
           type: 'agent_notice',
-          text: 'AI 判斷這次不需要使用搜尋工具，已直接回覆。',
+          text: 'AI 判斷這次不需要使用工具，已直接回覆。',
           level: 'info'
         });
         port.postMessage({ type: 'done', reply: directReply });
@@ -2890,12 +3363,40 @@ ${toolContext}
         text: 'AI 未呼叫工具且未產生有效內容，已改用一般串流回覆。',
         level: 'warning'
       });
+      if (requiresConnectedToolTask) {
+        if (enqueueAutoContinuation('AI 未呼叫工具且未產生有效內容；這是已連接工具任務，禁止改用一般串流，請繼續呼叫工具。')) {
+          continue;
+        }
+        sendFinalFallback('AI 未呼叫工具且未產生有效內容。', '已連接工具任務不允許改用一般串流假裝執行。');
+        return;
+      }
       return streamMiniMaxChat(message, history, translateConfig, model, systemPrompt, memoryContext, port, sessionId, contextCharBudget);
     }
 
     // 工具執行完畢後的最終回答：清除 XML/think 後直接送出
     let finalReply = cleanAgentReply(contentStr);
+    if (finalReply && replyLooksLikeFakeToolProgress(finalReply)) {
+      if (enqueueAutoContinuation('模型輸出了等待 API/正在建立等假進度文字，但沒有呼叫下一個工具。請繼續實際工具操作。')) {
+        continue;
+      }
+      sendFinalFallback('模型輸出假進度但未呼叫下一個工具。', '任務可能尚未完整完成，未產生簡略最終版。');
+      return;
+    }
+    if (finalReply && requiresConnectedToolTask && !mutatingToolExecuted) {
+      if (enqueueAutoContinuation('目前只完成讀取/驗證，尚未偵測到成功的寫入類 API。請繼續呼叫寫入工具完成下一段。')) {
+        continue;
+      }
+      sendFinalFallback('尚未偵測到成功的寫入類 API。', '任務可能尚未完整完成，未產生簡略最終版。');
+      return;
+    }
     if (!finalReply) {
+      if (enqueueAutoContinuation('工具已執行，但模型沒有產生 final answer。請繼續下一段實際工具操作。')) {
+        continue;
+      }
+      if (requiresConnectedToolTask) {
+        sendFinalFallback('自動分段接續已達上限，但模型仍未產生完成狀態。', '任務可能尚未完整完成，未產生簡略最終版。');
+        return;
+      }
       port.postMessage({
         type: 'agent_notice',
         text: '工具執行後模型未產生最終回答，正在改用補救整理流程。',
@@ -2904,7 +3405,7 @@ ${toolContext}
       try {
         finalReply = await requestFinalSynthesis('上一輪模型未產生 final answer。');
       } catch (err) {
-        await streamFinalFallback('上一輪模型未產生 final answer。', err.message);
+        sendFinalFallback('上一輪模型未產生 final answer。', err.message);
         return;
       }
     }
@@ -2913,17 +3414,21 @@ ${toolContext}
   }
 
   if (toolsExecuted) {
-    const limitReason = `已達工具迭代上限 ${maxIter} 輪。`;
+    const limitReason = `已達工具迭代上限 ${effectiveMaxIter} 輪。`;
+    if (requiresConnectedToolTask) {
+      sendFinalFallback(limitReason, '自動分段已達上限，任務可能尚未完整完成，未產生簡略最終版。');
+      return;
+    }
     port.postMessage({
       type: 'agent_notice',
-      text: `工具呼叫已達 ${maxIter} 輪上限，正在根據目前結果穩定整理回覆。若需要更完整搜尋，可將 Agent 深度切換為深入或研究後重試。`,
+      text: `工具呼叫已達 ${effectiveMaxIter} 輪上限，正在根據目前結果穩定整理回覆。若需要更完整搜尋，可將 Agent 深度切換為深入或研究後重試。`,
       level: 'warning'
     });
     let finalReply;
     try {
       finalReply = await requestFinalSynthesis(`${limitReason}請根據現有資料產生完整回答，並明確指出仍可能需要使用者確認或後續查證的部分。`);
     } catch (err) {
-      await streamFinalFallback(limitReason, err.message);
+      sendFinalFallback(limitReason, err.message);
       return;
     }
     port.postMessage({ type: 'done', reply: finalReply, continuation: buildContinuationPayload(limitReason) });
