@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Open Chat Hub",
-  "version": "1.29.0",
+  "version": "1.30.0",
   "description": "多模型 AI 側邊欄工作台，支援聊天、網頁閱讀、截圖、OCR、翻譯、檔案分析、知識庫與同步備份",
   "permissions": [
     "storage",
@@ -24,7 +24,11 @@
     "https://openrouter.ai/*",
     "https://accounts.google.com/*",
     "https://oauth2.googleapis.com/*",
-    "https://www.googleapis.com/*"
+    "https://www.googleapis.com/*",
+    "https://gmail.googleapis.com/*",
+    "https://analyticsdata.googleapis.com/*",
+    "https://analyticsadmin.googleapis.com/*",
+    "https://api.notion.com/*"
   ],
   "background": {
     "service_worker": "background.js",

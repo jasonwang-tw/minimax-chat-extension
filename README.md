@@ -6,7 +6,7 @@ Open Chat Hub 是一個多模型 AI 側邊欄工作台，讓你在瀏覽器內�
 
 ## 版本
 
-**v1.29.0** (2026-05-06)
+**v1.30.0** (2026-05-06)
 
 ## 功能特色
 
@@ -80,6 +80,48 @@ Open Chat Hub 是一個多模型 AI 側邊欄工作台，讓你在瀏覽器內�
 - **Brave Search API Key**：至 [Brave Search API](https://brave.com/search/api/) 取得
 - **Exa Search API Key**：至 [Exa](https://exa.ai/) 取得
 
+## API 工具 OAuth 設定（Gmail / Google 日曆 / Notion / GA4）
+
+設定頁「API 工具」區塊有四組預設工具，需要先在對應服務商建立 OAuth Client，再將 Client ID/Secret 貼回設定頁。每個預設**獨立一組** OAuth Client（不共用）。
+
+### 共通：取得 Redirect URI
+
+1. 開啟設定頁 → API 工具 → 點擊任一預設（如 Gmail）的「設定」按鈕
+2. 卡片會顯示 Redirect URI（格式：`https://<extension-id>.chromiumapp.org/<path>`），點擊「複製」
+3. 將此 URI 加入下面對應的 OAuth Console「已授權的重新導向 URI」欄位
+
+### Google 三服務（Gmail / Google 日曆 / Google Analytics 4）
+
+每項服務都需要獨立建立 OAuth Client：
+
+1. 進入 [Google Cloud Console](https://console.cloud.google.com/apis/credentials)
+2. 建立新專案（或選現有專案），啟用對應 API：
+   - **Gmail**：搜尋「Gmail API」→ 啟用
+   - **Google 日曆**：搜尋「Google Calendar API」→ 啟用
+   - **GA4**：同時啟用「Google Analytics Data API」與「Google Analytics Admin API」
+3. 「OAuth 同意畫面」設定為「外部」（個人 Google 帳號可用）；測試使用者加入自己的帳號
+4. 點「建立憑證」→「OAuth 用戶端 ID」→ 應用程式類型選「**網頁應用程式**」
+5. 「已授權的重新導向 URI」貼上設定頁顯示的 Redirect URI（每組 Client 對應一個）
+6. 建立後複製 Client ID 與 Client Secret 貼回設定頁
+7. 點擊「點此授權」→ 跳出 Google 同意畫面 → 同意後即完成
+
+### Notion
+
+1. 進入 [Notion Developers](https://www.notion.so/my-integrations) → 「+ New integration」
+2. 類型選「**Public integration**」（OAuth 必須是 public 類型）
+3. 「Redirect URIs」貼上設定頁顯示的 Notion Redirect URI
+4. 在 Capabilities 勾選需要的權限（Read/Update/Insert content）
+5. 取得 OAuth client ID 與 OAuth client secret，貼回設定頁
+6. 點擊「點此授權」→ 跳出 Notion 同意畫面 → 選擇要授權的頁面/資料庫 → 完成
+7. **重要**：Notion 預設只能存取「明確分享給此 integration」的頁面。請至要使用的頁面 → 右上角「⋯」 → 「Connect to」 → 選擇你的 integration
+
+### Token 行為
+
+- Google access token 有效期約 1 小時，背景會在過期前用 refresh_token 自動續發
+- Notion access token 永久有效（除非使用者在 Notion 撤銷授權）
+- Client Secret 與 token 僅儲存於 `chrome.storage.local`，**不會傳送給 AI 模型**
+- 點擊「取消授權」會清除本機 token；Google 會額外呼叫 revoke endpoint
+
 ## 隱私與資料
 
 Open Chat Hub 不會自行販售或分享使用者資料。你輸入的訊息、頁面內容、截圖、檔案與搜尋查詢，只有在你主動使用對應功能時才會送往你設定的第三方 provider。
@@ -105,6 +147,26 @@ npm run build:css
 - **TailwindCSS + SCSS**：樣式設計
 
 ## Changelog
+
+## [1.30.0] - 2026-05-06
+### Added
+- API 工具新增四組 OAuth2 預設工具庫：Gmail、Google 日曆、Notion、Google Analytics 4
+- 授權方式採用 `chrome.identity.launchWebAuthFlow`：點擊「授權」即跳出 OAuth 同意視窗，授權成功後 access token 存於 `chrome.storage.local`，AI 工具呼叫時自動帶入 `Authorization: Bearer …`
+- Google 三項服務分別獨立的 OAuth Client（不共用 scope）：
+  - Gmail：`gmail.readonly` + `gmail.send` + `gmail.modify`
+  - Google 日曆：`calendar`（讀寫）
+  - GA4：`analytics.readonly`
+- Notion 採 authorization code flow；自動附加 `Notion-Version: 2022-06-28` header
+- Google access token 過期自動以 refresh_token 續發；Notion token 不過期
+- 設定頁顯示每個預設的 Redirect URI 並提供複製按鈕，方便貼回 OAuth Console
+- API Tool 參數新增 `array` / `object` 型別支援，可讓 AI 傳遞結構化參數（如 GA4 dateRanges、Notion filter）
+- `manifest.json` 新增 `gmail.googleapis.com`、`analyticsdata.googleapis.com`、`analyticsadmin.googleapis.com`、`api.notion.com` host_permissions
+
+### 預設端點
+- **Gmail**：`gmail_list_messages`、`gmail_get_message`、`gmail_list_threads`、`gmail_get_thread`、`gmail_list_labels`
+- **Google 日曆**：`gcal_list_calendars`、`gcal_list_events`、`gcal_get_event`、`gcal_create_event`、`gcal_update_event`、`gcal_delete_event`
+- **Notion**：`notion_search`、`notion_get_page`、`notion_get_block_children`、`notion_create_page`、`notion_update_page`、`notion_query_database`
+- **Google Analytics 4**：`ga_list_account_summaries`、`ga_run_report`
 
 ## [1.29.0] - 2026-05-06
 ### Added

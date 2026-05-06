@@ -138,6 +138,14 @@
   - 計畫卡狀態（pending / approved / cancelled）寫入 session，切換對話後可追蹤歷程
   - `Make changes` 按鈕改為把原始任務帶回輸入框並恢復 `/plan` chip，而非單純取消
 
+## Done (v1.30.0)
+
+- API Tool OAuth2 基礎建設：`launchWebAuthFlow` 授權、token storage、Google refresh token 自動續發、Notion authorization code flow（含 Basic Auth 與 Notion-Version header）
+- 新增四組 OAuth2 預設工具庫：Gmail（5 endpoints）、Google 日曆（6 endpoints）、Notion（6 endpoints）、Google Analytics 4（2 endpoints）
+- API Tool 參數型別擴充至 `array` / `object`，支援 AI 傳遞結構化參數
+- 設定頁 OAuth 卡片：Redirect URI 顯示與複製、Client ID/Secret 輸入、授權 / 取消授權、端點啟用切換
+- README 新增「API 工具 OAuth 設定」章節（Google Cloud Console 與 Notion Developers 步驟）
+
 ## Done (v1.24.x)
 
 - 瀏覽器自動化 Phase 1：8 個 browser_* Agent Tools（click / fill / select / get_text / get_html / scroll / wait_for / navigate）
@@ -181,7 +189,7 @@
 | 🔵 P4 | Skill 執行工具 | run_skill；Agent Loop + API Tool 已夠用，只有需要「保證固定步驟的可重複流程」時才有額外價值 |
 | 🟢 P3 | 財經功能 | /stock、/twstock、/news |
 | 🔵 P4 | MiniMax 音樂生成 | 需 Max 方案（$50/月）；較小眾 |
-| 🔵 P4 | 自動化 Gmail Digest | chrome.alarms + chrome.identity |
+| 🔵 P4 | 自動化 Gmail Digest | chrome.alarms + chrome.identity（OAuth 基礎建設已完成於 v1.30.0） |
 | 🔵 P4 | Token lifecycle policy | expiration / rotation / cleanup |
 | 🔵 P4 | Encrypted backup | 設定備份加密 |
 | 🔵 P4 | Backup version history | 備份版本記錄 |

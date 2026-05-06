@@ -950,6 +950,57 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  // ── API Tool OAuth ───────────────────────────────────────
+  if (message.type === 'OAUTH_GET_REDIRECT_URI') {
+    const uri = getOAuthRedirectUri(message.data?.presetId || '');
+    sendResponse({ success: !!uri, data: uri });
+    return true;
+  }
+
+  if (message.type === 'OAUTH_GET_STATUS') {
+    (async () => {
+      const presetId = message.data?.presetId || '';
+      const client = await getOAuthClient(presetId);
+      const token = await getOAuthToken(presetId);
+      sendResponse({
+        success: true,
+        data: {
+          presetId,
+          hasClientId: !!client?.clientId,
+          hasClientSecret: !!client?.clientSecret,
+          clientId: client?.clientId || '',
+          token: sanitizeOAuthForClient(token),
+          redirectUri: getOAuthRedirectUri(presetId)
+        }
+      });
+    })().catch(err => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  if (message.type === 'OAUTH_SAVE_CLIENT') {
+    setOAuthClient(message.data?.presetId, {
+      clientId: String(message.data?.clientId || '').trim(),
+      clientSecret: String(message.data?.clientSecret || '').trim()
+    })
+      .then(() => sendResponse({ success: true }))
+      .catch(err => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  if (message.type === 'OAUTH_AUTHORIZE') {
+    authorizeOAuth(message.data?.presetId)
+      .then(token => sendResponse({ success: true, data: sanitizeOAuthForClient(token) }))
+      .catch(err => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  if (message.type === 'OAUTH_REVOKE') {
+    revokeOAuth(message.data?.presetId)
+      .then(() => sendResponse({ success: true }))
+      .catch(err => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
   // ── Spaces ───────────────────────────────────────────────
   if (message.type === 'GET_SPACES') {
     chrome.storage.local.get(['spaces'], result => {
@@ -2214,7 +2265,17 @@ function buildRegistryTool(tool) {
   const props = {};
   const required = [];
   for (const p of (tool.parameters || [])) {
-    props[p.name] = { type: p.type || 'string', description: p.description || '' };
+    const t = p.type || 'string';
+    const schema = { description: p.description || '' };
+    if (t === 'array') {
+      schema.type = 'array';
+      schema.items = p.items || { type: 'string' };
+    } else if (t === 'object') {
+      schema.type = 'object';
+    } else {
+      schema.type = t;
+    }
+    props[p.name] = schema;
     if (p.required) required.push(p.name);
   }
   return {
@@ -2225,6 +2286,220 @@ function buildRegistryTool(tool) {
       parameters: { type: 'object', properties: props, ...(required.length ? { required } : {}) }
     }
   };
+}
+
+// ── OAuth2（API Tools）──────────────────────────────────────
+const OAUTH_PRESETS = {
+  gmail: { provider: 'google', redirectPath: 'gmail-oauth',  scope: 'https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/gmail.modify' },
+  gcal:  { provider: 'google', redirectPath: 'gcal-oauth',   scope: 'https://www.googleapis.com/auth/calendar' },
+  ga4:   { provider: 'google', redirectPath: 'ga4-oauth',    scope: 'https://www.googleapis.com/auth/analytics.readonly' },
+  notion:{ provider: 'notion', redirectPath: 'notion-oauth', scope: '' }
+};
+
+const GOOGLE_OAUTH_AUTH = 'https://accounts.google.com/o/oauth2/v2/auth';
+const GOOGLE_OAUTH_TOKEN = 'https://oauth2.googleapis.com/token';
+const GOOGLE_OAUTH_REVOKE = 'https://oauth2.googleapis.com/revoke';
+const GOOGLE_USERINFO = 'https://www.googleapis.com/oauth2/v2/userinfo';
+const NOTION_OAUTH_AUTH = 'https://api.notion.com/v1/oauth/authorize';
+const NOTION_OAUTH_TOKEN = 'https://api.notion.com/v1/oauth/token';
+const NOTION_VERSION = '2022-06-28';
+
+function getOAuthRedirectUri(presetId) {
+  const cfg = OAUTH_PRESETS[presetId];
+  if (!cfg) return '';
+  return chrome.identity.getRedirectURL(cfg.redirectPath);
+}
+
+async function getOAuthClient(presetId) {
+  const { oauthClients = {} } = await chrome.storage.local.get('oauthClients');
+  return oauthClients[presetId] || null;
+}
+
+async function setOAuthClient(presetId, client) {
+  const { oauthClients = {} } = await chrome.storage.local.get('oauthClients');
+  if (client) oauthClients[presetId] = client;
+  else delete oauthClients[presetId];
+  await chrome.storage.local.set({ oauthClients });
+}
+
+async function getOAuthToken(presetId) {
+  const { oauthTokens = {} } = await chrome.storage.local.get('oauthTokens');
+  return oauthTokens[presetId] || null;
+}
+
+async function setOAuthToken(presetId, token) {
+  const { oauthTokens = {} } = await chrome.storage.local.get('oauthTokens');
+  if (token) oauthTokens[presetId] = token;
+  else delete oauthTokens[presetId];
+  await chrome.storage.local.set({ oauthTokens });
+}
+
+async function fetchGoogleProfile(accessToken) {
+  try {
+    const res = await fetch(GOOGLE_USERINFO, { headers: { Authorization: `Bearer ${accessToken}` } });
+    if (!res.ok) return null;
+    const d = await res.json();
+    return { id: d.id || '', email: d.email || '', name: d.name || '' };
+  } catch { return null; }
+}
+
+async function authorizeOAuth(presetId) {
+  const cfg = OAUTH_PRESETS[presetId];
+  if (!cfg) throw new Error(`未知的 OAuth 預設：${presetId}`);
+  const client = await getOAuthClient(presetId);
+  if (!client?.clientId) throw new Error('請先輸入 Client ID');
+  if (!client.clientSecret) throw new Error('請輸入 Client Secret');
+
+  const redirectUri = getOAuthRedirectUri(presetId);
+  const state = crypto.randomUUID();
+  let authUrl = '';
+
+  if (cfg.provider === 'google') {
+    const params = new URLSearchParams({
+      client_id: client.clientId,
+      response_type: 'code',
+      access_type: 'offline',
+      prompt: 'consent',
+      redirect_uri: redirectUri,
+      scope: cfg.scope,
+      state
+    });
+    authUrl = `${GOOGLE_OAUTH_AUTH}?${params}`;
+  } else if (cfg.provider === 'notion') {
+    const params = new URLSearchParams({
+      client_id: client.clientId,
+      response_type: 'code',
+      owner: 'user',
+      redirect_uri: redirectUri,
+      state
+    });
+    authUrl = `${NOTION_OAUTH_AUTH}?${params}`;
+  }
+
+  const responseUrl = await chrome.identity.launchWebAuthFlow({ url: authUrl, interactive: true });
+  if (!responseUrl) throw new Error('OAuth 授權失敗：未收到回傳網址');
+
+  const parsed = new URL(responseUrl);
+  const respParams = new URLSearchParams(parsed.search || (parsed.hash ? parsed.hash.slice(1) : ''));
+  if (respParams.get('error')) throw new Error(`授權被拒：${respParams.get('error')}`);
+  if (respParams.get('state') !== state) throw new Error('OAuth state 驗證失敗，請重試');
+  const code = respParams.get('code');
+  if (!code) throw new Error('OAuth 授權失敗：未取得 authorization code');
+
+  if (cfg.provider === 'google') {
+    const body = new URLSearchParams({
+      code,
+      client_id: client.clientId,
+      client_secret: client.clientSecret,
+      redirect_uri: redirectUri,
+      grant_type: 'authorization_code'
+    });
+    const res = await fetch(GOOGLE_OAUTH_TOKEN, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: body.toString()
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(`Google token 交換失敗 (${res.status}): ${data.error_description || data.error || '未知錯誤'}`);
+    const profile = await fetchGoogleProfile(data.access_token);
+    const token = {
+      accessToken: data.access_token,
+      refreshToken: data.refresh_token || null,
+      expiresAt: Date.now() + Math.max(60, Number(data.expires_in || 3600) - 60) * 1000,
+      scope: data.scope || cfg.scope,
+      account: profile,
+      connectedAt: Date.now()
+    };
+    await setOAuthToken(presetId, token);
+    return token;
+  } else if (cfg.provider === 'notion') {
+    const auth = btoa(`${client.clientId}:${client.clientSecret}`);
+    const res = await fetch(NOTION_OAUTH_TOKEN, {
+      method: 'POST',
+      headers: { 'Authorization': `Basic ${auth}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ grant_type: 'authorization_code', code, redirect_uri: redirectUri })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(`Notion token 交換失敗 (${res.status}): ${data.error || data.message || '未知錯誤'}`);
+    const ownerName = data.owner?.user?.name || data.owner?.workspace?.name || data.workspace_name || '';
+    const ownerEmail = data.owner?.user?.person?.email || '';
+    const token = {
+      accessToken: data.access_token,
+      botId: data.bot_id || '',
+      workspaceId: data.workspace_id || '',
+      workspaceName: data.workspace_name || '',
+      workspaceIcon: data.workspace_icon || '',
+      account: { name: ownerName || data.workspace_name || 'Notion', email: ownerEmail },
+      expiresAt: null,
+      connectedAt: Date.now()
+    };
+    await setOAuthToken(presetId, token);
+    return token;
+  }
+}
+
+async function refreshGoogleToken(presetId) {
+  const cfg = OAUTH_PRESETS[presetId];
+  if (cfg?.provider !== 'google') return null;
+  const client = await getOAuthClient(presetId);
+  const token = await getOAuthToken(presetId);
+  if (!token?.refreshToken || !client?.clientId || !client?.clientSecret) return null;
+  const body = new URLSearchParams({
+    client_id: client.clientId,
+    client_secret: client.clientSecret,
+    refresh_token: token.refreshToken,
+    grant_type: 'refresh_token'
+  });
+  try {
+    const res = await fetch(GOOGLE_OAUTH_TOKEN, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: body.toString()
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const next = {
+      ...token,
+      accessToken: data.access_token,
+      expiresAt: Date.now() + Math.max(60, Number(data.expires_in || 3600) - 60) * 1000
+    };
+    if (data.refresh_token) next.refreshToken = data.refresh_token;
+    if (data.scope) next.scope = data.scope;
+    await setOAuthToken(presetId, next);
+    return next;
+  } catch {
+    return null;
+  }
+}
+
+async function ensureValidOAuthToken(presetId) {
+  const token = await getOAuthToken(presetId);
+  if (!token?.accessToken) return null;
+  if (!token.expiresAt || Date.now() < token.expiresAt) return token;
+  const cfg = OAUTH_PRESETS[presetId];
+  if (cfg?.provider === 'google' && token.refreshToken) {
+    return await refreshGoogleToken(presetId);
+  }
+  return null;
+}
+
+async function revokeOAuth(presetId) {
+  const cfg = OAUTH_PRESETS[presetId];
+  const token = await getOAuthToken(presetId);
+  if (token?.accessToken && cfg?.provider === 'google') {
+    try {
+      await fetch(`${GOOGLE_OAUTH_REVOKE}?token=${encodeURIComponent(token.accessToken)}`, { method: 'POST' });
+    } catch (err) {
+      console.warn('[OAuth] revoke failed:', err?.message || err);
+    }
+  }
+  await setOAuthToken(presetId, null);
+}
+
+function sanitizeOAuthForClient(token) {
+  if (!token) return null;
+  const { accessToken, refreshToken, ...rest } = token;
+  return { ...rest, hasAccessToken: !!accessToken, hasRefreshToken: !!refreshToken };
 }
 
 async function executeApiTool(tool, args) {
@@ -2264,6 +2539,14 @@ async function executeApiTool(tool, args) {
       queryParams.set(tool.authKeyName, tool.authSecret || '');
     } else if (tool.authType === 'basic_auth') {
       headers['Authorization'] = `Basic ${btoa(`${tool.authUsername || ''}:${tool.authPassword || ''}`)}`;
+    } else if (tool.authType === 'oauth2') {
+      const oauthPresetId = tool.oauthPresetId || tool.presetId;
+      const oauthCfg = OAUTH_PRESETS[oauthPresetId];
+      if (!oauthCfg) return { error: `OAuth 預設未定義：${oauthPresetId}` };
+      const token = await ensureValidOAuthToken(oauthPresetId);
+      if (!token?.accessToken) return { error: `尚未授權 ${oauthPresetId}，請至設定頁的 API 工具區塊點擊「授權」。` };
+      headers['Authorization'] = `Bearer ${token.accessToken}`;
+      if (oauthCfg.provider === 'notion') headers['Notion-Version'] = NOTION_VERSION;
     }
 
     for (const p of (tool.parameters || []).filter(p => p.location === 'query')) {
@@ -3140,13 +3423,20 @@ async function saveSession(session) {
 
   const existingIndex = chatSessions.findIndex(s => s.id === session.id);
   if (existingIndex >= 0) {
-    chatSessions[existingIndex] = session;
+    const existing = chatSessions[existingIndex];
+    chatSessions[existingIndex] = {
+      ...existing,
+      ...session,
+      pinned: Object.prototype.hasOwnProperty.call(session, 'pinned') ? session.pinned : existing.pinned,
+      spaceId: Object.prototype.hasOwnProperty.call(session, 'spaceId') ? session.spaceId : existing.spaceId
+    };
   } else {
     chatSessions.push(session);
   }
 
   while (chatSessions.length > maxHistory) {
-    chatSessions.shift();
+    const removableIndex = chatSessions.findIndex(s => !s.pinned);
+    chatSessions.splice(removableIndex >= 0 ? removableIndex : 0, 1);
   }
 
   await new Promise((resolve, reject) => {

@@ -1148,6 +1148,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   // ── API 預設工具庫 ─────────────────────────────────────────
   const API_ICON_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v4"/><path d="M12 17v4"/><path d="M4.2 7.5l3.5 2"/><path d="M16.3 14.5l3.5 2"/><path d="M19.8 7.5l-3.5 2"/><path d="M7.7 14.5l-3.5 2"/><circle cx="12" cy="12" r="5"/></svg>';
   const GLOBE_ICON_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a14 14 0 0 1 0 18"/><path d="M12 3a14 14 0 0 0 0 18"/></svg>';
+  const GMAIL_ICON_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 7 9-7"/></svg>';
+  const CALENDAR_ICON_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 9h18"/><path d="M8 3v4"/><path d="M16 3v4"/></svg>';
+  const NOTION_ICON_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M9 8v9"/><path d="M9 8l6 9"/><path d="M15 8v9"/></svg>';
+  const ANALYTICS_ICON_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 21V9"/><path d="M9 21V5"/><path d="M15 21v-8"/><path d="M21 21V3"/></svg>';
 
   const API_PRESETS = [
     {
@@ -1223,6 +1227,262 @@ document.addEventListener('DOMContentLoaded', async () => {
           }
         ];
       }
+    },
+    {
+      id: 'gmail',
+      kind: 'oauth2',
+      name: 'Gmail',
+      description: '讓 AI 搜尋、列出、讀取 Gmail 信件、線串與標籤',
+      icon: GMAIL_ICON_SVG,
+      toolPrefix: 'gmail_',
+      oauthProvider: 'google',
+      scopeNote: 'gmail.readonly · gmail.send · gmail.modify',
+      consoleUrl: 'https://console.cloud.google.com/apis/credentials',
+      generate: () => {
+        const base = 'https://gmail.googleapis.com/gmail/v1/users/me';
+        const auth = { authType: 'oauth2', oauthPresetId: 'gmail', presetId: 'gmail' };
+        return [
+          {
+            name: 'gmail_list_messages', method: 'GET', url: `${base}/messages`,
+            description: '搜尋或列出 Gmail 信件，支援 Gmail 搜尋語法（如 from:、subject:、is:unread、newer_than:7d）',
+            parameters: [
+              { name: 'q',           description: 'Gmail 搜尋語法，例如 is:unread newer_than:3d',  type: 'string', location: 'query', required: false },
+              { name: 'maxResults',  description: '每頁筆數，建議 5-20',                            type: 'number', location: 'query', required: false },
+              { name: 'pageToken',   description: '下一頁 token',                                   type: 'string', location: 'query', required: false },
+              { name: 'labelIds',    description: '只列出含此 label 的信件（如 INBOX）',            type: 'string', location: 'query', required: false }
+            ],
+            ...auth, responseLimit: 4000, enabled: true
+          },
+          {
+            name: 'gmail_get_message', method: 'GET', url: `${base}/messages/{id}`,
+            description: '取得指定 Gmail 信件內容（標題、寄件人、摘要、收信時間）',
+            parameters: [
+              { name: 'id',     description: '信件 ID（從 gmail_list_messages 取得）',                       type: 'string', location: 'path',  required: true  },
+              { name: 'format', description: '回傳格式：metadata（預設，僅 header）、full（含內文）、raw',   type: 'string', location: 'query', required: false }
+            ],
+            ...auth, responseLimit: 6000, enabled: true
+          },
+          {
+            name: 'gmail_list_threads', method: 'GET', url: `${base}/threads`,
+            description: '搜尋或列出 Gmail 線串（threads）',
+            parameters: [
+              { name: 'q',          description: 'Gmail 搜尋語法',  type: 'string', location: 'query', required: false },
+              { name: 'maxResults', description: '每頁筆數',         type: 'number', location: 'query', required: false }
+            ],
+            ...auth, responseLimit: 4000, enabled: true
+          },
+          {
+            name: 'gmail_get_thread', method: 'GET', url: `${base}/threads/{id}`,
+            description: '取得指定線串內所有信件',
+            parameters: [
+              { name: 'id', description: '線串 ID', type: 'string', location: 'path', required: true }
+            ],
+            ...auth, responseLimit: 6000, enabled: true
+          },
+          {
+            name: 'gmail_list_labels', method: 'GET', url: `${base}/labels`,
+            description: '取得 Gmail 標籤列表（INBOX、SENT 等系統與自訂 label）',
+            parameters: [],
+            ...auth, responseLimit: 2000, enabled: true
+          }
+        ];
+      }
+    },
+    {
+      id: 'gcal',
+      kind: 'oauth2',
+      name: 'Google 日曆',
+      description: '讓 AI 查詢、建立、更新與刪除 Google Calendar 事件',
+      icon: CALENDAR_ICON_SVG,
+      toolPrefix: 'gcal_',
+      oauthProvider: 'google',
+      scopeNote: 'calendar（讀寫）',
+      consoleUrl: 'https://console.cloud.google.com/apis/credentials',
+      generate: () => {
+        const base = 'https://www.googleapis.com/calendar/v3';
+        const auth = { authType: 'oauth2', oauthPresetId: 'gcal', presetId: 'gcal' };
+        return [
+          {
+            name: 'gcal_list_calendars', method: 'GET', url: `${base}/users/me/calendarList`,
+            description: '列出使用者所有 Google 日曆',
+            parameters: [],
+            ...auth, responseLimit: 3000, enabled: true
+          },
+          {
+            name: 'gcal_list_events', method: 'GET', url: `${base}/calendars/{calendarId}/events`,
+            description: '列出指定日曆的事件，可依時間範圍與關鍵字篩選',
+            parameters: [
+              { name: 'calendarId',   description: '日曆 ID，主日曆請填 primary',                              type: 'string',  location: 'path',  required: true  },
+              { name: 'timeMin',      description: 'RFC3339 起始時間，例如 2026-05-01T00:00:00+08:00',          type: 'string',  location: 'query', required: false },
+              { name: 'timeMax',      description: 'RFC3339 結束時間',                                          type: 'string',  location: 'query', required: false },
+              { name: 'q',            description: '關鍵字搜尋',                                                type: 'string',  location: 'query', required: false },
+              { name: 'maxResults',   description: '每頁筆數，建議 10-50',                                      type: 'number',  location: 'query', required: false },
+              { name: 'singleEvents', description: '是否展開週期事件（建議 true）',                             type: 'boolean', location: 'query', required: false },
+              { name: 'orderBy',      description: '排序：startTime 或 updated',                                type: 'string',  location: 'query', required: false }
+            ],
+            ...auth, responseLimit: 6000, enabled: true
+          },
+          {
+            name: 'gcal_get_event', method: 'GET', url: `${base}/calendars/{calendarId}/events/{eventId}`,
+            description: '取得指定事件的完整內容',
+            parameters: [
+              { name: 'calendarId', description: '日曆 ID（如 primary）', type: 'string', location: 'path', required: true },
+              { name: 'eventId',    description: '事件 ID',               type: 'string', location: 'path', required: true }
+            ],
+            ...auth, responseLimit: 3000, enabled: true
+          },
+          {
+            name: 'gcal_create_event', method: 'POST', url: `${base}/calendars/{calendarId}/events`,
+            description: '在指定日曆建立新事件',
+            parameters: [
+              { name: 'calendarId',  description: '日曆 ID（如 primary）',                                                                  type: 'string', location: 'path', required: true  },
+              { name: 'summary',     description: '事件標題',                                                                                type: 'string', location: 'body', required: true  },
+              { name: 'description', description: '事件描述',                                                                                type: 'string', location: 'body', required: false },
+              { name: 'location',    description: '地點',                                                                                    type: 'string', location: 'body', required: false },
+              { name: 'start',       description: '開始時間，物件格式 { "dateTime": "2026-05-10T10:00:00+08:00", "timeZone": "Asia/Taipei" }', type: 'object', location: 'body', required: true  },
+              { name: 'end',         description: '結束時間，物件格式同 start',                                                              type: 'object', location: 'body', required: true  },
+              { name: 'attendees',   description: '出席者陣列，例如 [{"email":"a@b.com"}]',                                                  type: 'array',  items: { type: 'object' }, location: 'body', required: false }
+            ],
+            ...auth, responseLimit: 2000, enabled: true
+          },
+          {
+            name: 'gcal_update_event', method: 'PATCH', url: `${base}/calendars/{calendarId}/events/{eventId}`,
+            description: '更新指定事件，只需傳送要修改的欄位',
+            parameters: [
+              { name: 'calendarId',  description: '日曆 ID',         type: 'string', location: 'path', required: true  },
+              { name: 'eventId',     description: '事件 ID',         type: 'string', location: 'path', required: true  },
+              { name: 'summary',     description: '新標題',          type: 'string', location: 'body', required: false },
+              { name: 'description', description: '新描述',          type: 'string', location: 'body', required: false },
+              { name: 'location',    description: '新地點',          type: 'string', location: 'body', required: false },
+              { name: 'start',       description: '新開始時間物件',  type: 'object', location: 'body', required: false },
+              { name: 'end',         description: '新結束時間物件',  type: 'object', location: 'body', required: false }
+            ],
+            ...auth, responseLimit: 2000, enabled: true
+          },
+          {
+            name: 'gcal_delete_event', method: 'DELETE', url: `${base}/calendars/{calendarId}/events/{eventId}`,
+            description: '刪除指定事件',
+            parameters: [
+              { name: 'calendarId', description: '日曆 ID', type: 'string', location: 'path', required: true },
+              { name: 'eventId',    description: '事件 ID', type: 'string', location: 'path', required: true }
+            ],
+            ...auth, responseLimit: 500, enabled: true
+          }
+        ];
+      }
+    },
+    {
+      id: 'notion',
+      kind: 'oauth2',
+      name: 'Notion',
+      description: '讓 AI 搜尋 Notion、讀取/建立/更新頁面、查詢資料庫',
+      icon: NOTION_ICON_SVG,
+      toolPrefix: 'notion_',
+      oauthProvider: 'notion',
+      scopeNote: '依 Notion integration 設定授權範圍',
+      consoleUrl: 'https://www.notion.so/my-integrations',
+      generate: () => {
+        const base = 'https://api.notion.com/v1';
+        const auth = { authType: 'oauth2', oauthPresetId: 'notion', presetId: 'notion' };
+        return [
+          {
+            name: 'notion_search', method: 'POST', url: `${base}/search`,
+            description: '搜尋 Notion workspace 內可被 integration 存取的頁面與資料庫',
+            parameters: [
+              { name: 'query',     description: '搜尋關鍵字',                                                              type: 'string', location: 'body', required: false },
+              { name: 'filter',    description: '篩選物件，例如 { "value": "page", "property": "object" }',                  type: 'object', location: 'body', required: false },
+              { name: 'sort',      description: '排序物件，例如 { "direction": "descending", "timestamp": "last_edited_time" }', type: 'object', location: 'body', required: false },
+              { name: 'page_size', description: '每頁筆數，建議 5-20',                                                       type: 'number', location: 'body', required: false }
+            ],
+            ...auth, responseLimit: 4000, enabled: true
+          },
+          {
+            name: 'notion_get_page', method: 'GET', url: `${base}/pages/{page_id}`,
+            description: '取得指定 Notion 頁面屬性（不含內容區塊，需另呼叫 notion_get_block_children）',
+            parameters: [
+              { name: 'page_id', description: '頁面 ID', type: 'string', location: 'path', required: true }
+            ],
+            ...auth, responseLimit: 3000, enabled: true
+          },
+          {
+            name: 'notion_get_block_children', method: 'GET', url: `${base}/blocks/{block_id}/children`,
+            description: '取得頁面或區塊內的子區塊內容',
+            parameters: [
+              { name: 'block_id',  description: '區塊或頁面 ID',  type: 'string', location: 'path',  required: true  },
+              { name: 'page_size', description: '每頁筆數',        type: 'number', location: 'query', required: false }
+            ],
+            ...auth, responseLimit: 5000, enabled: true
+          },
+          {
+            name: 'notion_create_page', method: 'POST', url: `${base}/pages`,
+            description: '建立新 Notion 頁面（在指定 parent 頁面或資料庫底下）',
+            parameters: [
+              { name: 'parent',     description: 'parent 物件，例如 { "page_id": "..." } 或 { "database_id": "..." }', type: 'object', location: 'body', required: true  },
+              { name: 'properties', description: 'properties 物件（必須符合資料庫 schema）',                            type: 'object', location: 'body', required: true  },
+              { name: 'children',   description: '子區塊陣列，例如 paragraph、heading_1 等',                              type: 'array',  items: { type: 'object' }, location: 'body', required: false }
+            ],
+            ...auth, responseLimit: 2000, enabled: true
+          },
+          {
+            name: 'notion_update_page', method: 'PATCH', url: `${base}/pages/{page_id}`,
+            description: '更新頁面屬性或封存頁面',
+            parameters: [
+              { name: 'page_id',    description: '頁面 ID',          type: 'string',  location: 'path', required: true  },
+              { name: 'properties', description: '要更新的 properties 物件', type: 'object',  location: 'body', required: false },
+              { name: 'archived',   description: '是否封存（true）或還原（false）', type: 'boolean', location: 'body', required: false }
+            ],
+            ...auth, responseLimit: 2000, enabled: true
+          },
+          {
+            name: 'notion_query_database', method: 'POST', url: `${base}/databases/{database_id}/query`,
+            description: '查詢資料庫內容，支援過濾條件與排序',
+            parameters: [
+              { name: 'database_id', description: '資料庫 ID',                                                                              type: 'string', location: 'path', required: true  },
+              { name: 'filter',      description: '過濾物件，遵循 Notion filter 規格',                                                       type: 'object', location: 'body', required: false },
+              { name: 'sorts',       description: '排序陣列，例如 [{ "property": "Name", "direction": "ascending" }]',                       type: 'array',  items: { type: 'object' }, location: 'body', required: false },
+              { name: 'page_size',   description: '每頁筆數',                                                                                type: 'number', location: 'body', required: false }
+            ],
+            ...auth, responseLimit: 6000, enabled: true
+          }
+        ];
+      }
+    },
+    {
+      id: 'ga4',
+      kind: 'oauth2',
+      name: 'Google Analytics 4',
+      description: '讓 AI 查詢 GA4 報表（流量、來源、頁面等）',
+      icon: ANALYTICS_ICON_SVG,
+      toolPrefix: 'ga_',
+      oauthProvider: 'google',
+      scopeNote: 'analytics.readonly',
+      consoleUrl: 'https://console.cloud.google.com/apis/credentials',
+      generate: () => {
+        const auth = { authType: 'oauth2', oauthPresetId: 'ga4', presetId: 'ga4' };
+        return [
+          {
+            name: 'ga_list_account_summaries', method: 'GET',
+            url: 'https://analyticsadmin.googleapis.com/v1beta/accountSummaries',
+            description: '列出可存取的 GA4 帳戶與 property 摘要（取得 propertyId）',
+            parameters: [],
+            ...auth, responseLimit: 4000, enabled: true
+          },
+          {
+            name: 'ga_run_report', method: 'POST',
+            url: 'https://analyticsdata.googleapis.com/v1beta/properties/{propertyId}:runReport',
+            description: '對指定 GA4 property 執行報表查詢',
+            parameters: [
+              { name: 'propertyId', description: 'GA4 property ID（純數字，從 ga_list_account_summaries 取得）',                            type: 'string', location: 'path', required: true  },
+              { name: 'dateRanges', description: '日期範圍陣列，例如 [{"startDate":"7daysAgo","endDate":"today"}]',                          type: 'array',  items: { type: 'object' }, location: 'body', required: true  },
+              { name: 'dimensions', description: '維度陣列，例如 [{"name":"pagePath"},{"name":"country"}]',                                  type: 'array',  items: { type: 'object' }, location: 'body', required: false },
+              { name: 'metrics',    description: '指標陣列，例如 [{"name":"activeUsers"},{"name":"screenPageViews"}]',                       type: 'array',  items: { type: 'object' }, location: 'body', required: true  },
+              { name: 'limit',      description: '回傳列數上限',                                                                              type: 'number', location: 'body', required: false },
+              { name: 'orderBys',   description: '排序陣列，例如 [{"metric":{"metricName":"activeUsers"},"desc":true}]',                     type: 'array',  items: { type: 'object' }, location: 'body', required: false }
+            ],
+            ...auth, responseLimit: 6000, enabled: true
+          }
+        ];
+      }
     }
   ];
 
@@ -1232,6 +1492,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     container.innerHTML = '';
 
     for (const preset of API_PRESETS) {
+      if (preset.kind === 'oauth2') {
+        container.appendChild(buildOAuthPresetCard(preset));
+        continue;
+      }
       const imported = apiToolRegistry.filter(t => t.name.startsWith(preset.toolPrefix));
       const isImported = imported.length > 0;
       const enabledCount = imported.filter(t => t.enabled).length;
@@ -1508,6 +1772,401 @@ document.addEventListener('DOMContentLoaded', async () => {
 
       container.appendChild(card);
     }
+  }
+
+  // ── OAuth2 預設工具卡片 ────────────────────────────────────
+  function sendOAuthMessage(type, data) {
+    return new Promise((resolve) => {
+      chrome.runtime.sendMessage({ type, data }, (resp) => {
+        if (chrome.runtime.lastError) {
+          resolve({ success: false, error: chrome.runtime.lastError.message });
+          return;
+        }
+        resolve(resp || { success: false, error: 'EMPTY_RESPONSE' });
+      });
+    });
+  }
+
+  function buildOAuthPresetCard(preset) {
+    const card = document.createElement('div');
+    card.className = 'api-preset-card api-preset-oauth';
+    card.dataset.presetId = preset.id;
+
+    const totalCount = preset.generate().length;
+    const imported = apiToolRegistry.filter(t => t.presetId === preset.id || t.name.startsWith(preset.toolPrefix));
+    const isImported = imported.length > 0;
+    const enabledCount = imported.filter(t => t.enabled).length;
+
+    const eyeSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>`;
+
+    card.innerHTML = `
+      <div class="api-preset-card-header">
+        <span class="api-preset-icon">${preset.icon}</span>
+        <div class="api-preset-info">
+          <div class="api-preset-name">${escapeVal(preset.name)}</div>
+          <div class="api-preset-desc">${escapeVal(preset.description)}</div>
+        </div>
+        <span class="api-preset-badge oauth-status-badge" data-role="oauth-badge">未授權</span>
+        <span class="api-preset-badge" data-role="enabled-count" style="${isImported ? '' : 'display:none'}">已啟用 ${enabledCount} / ${totalCount} 個工具</span>
+        <button type="button" class="api-preset-toggle-btn">設定 ▾</button>
+      </div>
+      <div class="api-preset-body" style="display:none">
+        <div class="oauth-setup-info">
+          <div class="oauth-setup-row">
+            <span class="oauth-setup-label">OAuth 服務商：</span>
+            <span>${preset.oauthProvider === 'google' ? 'Google Cloud Console' : 'Notion Developers'}</span>
+            <a href="${preset.consoleUrl}" target="_blank" rel="noopener noreferrer" class="oauth-setup-link">前往建立 →</a>
+          </div>
+          <div class="oauth-setup-row">
+            <span class="oauth-setup-label">授權範圍：</span>
+            <span>${escapeVal(preset.scopeNote || '')}</span>
+          </div>
+          <div class="oauth-setup-row">
+            <span class="oauth-setup-label">Redirect URI（請複製到 OAuth 設定）：</span>
+            <code class="oauth-redirect-uri" data-role="redirect-uri">載入中…</code>
+            <button type="button" class="btn-secondary oauth-copy-redirect" data-role="copy-redirect">複製</button>
+          </div>
+        </div>
+
+        <div class="api-preset-step">
+          <span class="api-preset-step-index">1</span>
+          <span>輸入 OAuth Client 資訊</span>
+        </div>
+        <div class="form-group">
+          <label>Client ID</label>
+          <input type="text" class="oauth-client-id" data-role="client-id" placeholder="OAuth Client ID" />
+        </div>
+        <div class="form-group">
+          <label>Client Secret</label>
+          <div class="input-wrapper">
+            <input type="password" class="oauth-client-secret" data-role="client-secret" placeholder="OAuth Client Secret" />
+            <button type="button" class="btn-icon oauth-secret-toggle">${eyeSvg}</button>
+          </div>
+          <p class="hint">Client Secret 僅儲存於本機，不會傳送給 AI 模型。</p>
+        </div>
+
+        <div class="api-preset-step">
+          <span class="api-preset-step-index">2</span>
+          <span>授權帳號</span>
+        </div>
+        <div class="oauth-auth-row">
+          <button type="button" class="btn-primary oauth-authorize-btn" data-role="authorize-btn">點此授權</button>
+          <button type="button" class="btn-secondary oauth-revoke-btn" data-role="revoke-btn" style="display:none">取消授權</button>
+          <span class="oauth-account-text" data-role="account-text"></span>
+        </div>
+
+        <div class="api-preset-step api-preset-endpoints-title" data-role="endpoints-title" style="display:none">
+          <span class="api-preset-step-index">3</span>
+          <span>設定要啟用的預設端點</span>
+        </div>
+        <div class="api-preset-endpoints" data-role="endpoints" style="display:none"></div>
+
+        <div class="api-preset-actions" data-role="actions" style="display:none">
+          <button type="button" class="btn-primary api-preset-save-btn" data-role="save-btn">儲存端點設定</button>
+          <button type="button" class="btn-secondary danger api-preset-remove-btn" data-role="remove-btn" style="${isImported ? '' : 'display:none'}">移除所有工具</button>
+        </div>
+      </div>`;
+
+    const $ = (sel) => card.querySelector(sel);
+    const badgeEl       = $('[data-role="oauth-badge"]');
+    const countBadgeEl  = $('[data-role="enabled-count"]');
+    const redirectUriEl = $('[data-role="redirect-uri"]');
+    const copyBtn       = $('[data-role="copy-redirect"]');
+    const clientIdInput = $('[data-role="client-id"]');
+    const clientSecInput= $('[data-role="client-secret"]');
+    const authorizeBtn  = $('[data-role="authorize-btn"]');
+    const revokeBtn     = $('[data-role="revoke-btn"]');
+    const accountTextEl = $('[data-role="account-text"]');
+    const endpointsTitle= $('[data-role="endpoints-title"]');
+    const endpointsEl   = $('[data-role="endpoints"]');
+    const actionsRow    = $('[data-role="actions"]');
+    const saveBtn       = $('[data-role="save-btn"]');
+    const removeBtn     = $('[data-role="remove-btn"]');
+
+    function refreshCountBadge() {
+      const tools = apiToolRegistry.filter(t => t.presetId === preset.id || t.name.startsWith(preset.toolPrefix));
+      if (!tools.length) {
+        countBadgeEl.style.display = 'none';
+        return;
+      }
+      const total = preset.generate().length;
+      const active = tools.filter(t => t.enabled).length;
+      countBadgeEl.style.display = '';
+      countBadgeEl.textContent = `已啟用 ${active} / ${total} 個工具`;
+    }
+
+    let cachedClient = { clientId: '', clientSecret: '' };
+    let cachedToken = null;
+
+    function setBadge(authorized, accountLabel) {
+      if (authorized) {
+        badgeEl.classList.add('authorized');
+        badgeEl.textContent = accountLabel ? `已授權：${accountLabel}` : '已授權';
+      } else {
+        badgeEl.classList.remove('authorized');
+        badgeEl.textContent = '未授權';
+      }
+    }
+
+    function setEndpointsVisible(visible) {
+      endpointsTitle.style.display = visible ? '' : 'none';
+      endpointsEl.style.display = visible ? '' : 'none';
+      actionsRow.style.display = visible ? '' : 'none';
+    }
+
+    const renderPresetParamRow = (param = {}) => `
+      <div class="api-preset-param-row">
+        <input type="text" class="api-preset-param-name" placeholder="名稱" value="${escapeVal(param.name || '')}" />
+        <input type="text" class="api-preset-param-desc" placeholder="說明" value="${escapeVal(param.description || '')}" />
+        <select class="api-preset-param-type">
+          ${['string', 'number', 'boolean', 'object', 'array'].map(type => `<option value="${type}" ${param.type === type || (!param.type && type === 'string') ? 'selected' : ''}>${type}</option>`).join('')}
+        </select>
+        <select class="api-preset-param-location">
+          ${['query', 'path', 'body', 'header'].map(location => `<option value="${location}" ${param.location === location || (!param.location && location === 'query') ? 'selected' : ''}>${location}</option>`).join('')}
+        </select>
+        <label class="api-preset-param-required">
+          <input type="checkbox" ${param.required ? 'checked' : ''} /> 必填
+        </label>
+        <button type="button" class="btn-mode-delete api-preset-param-delete" title="刪除">
+          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6L6 18M6 6l12 12"/></svg>
+        </button>
+      </div>`;
+
+    const buildEndpointRows = () => {
+      const generated = preset.generate();
+      endpointsEl.innerHTML = generated.map(tool => {
+        const existing = apiToolRegistry.find(t => t.name === tool.name);
+        const viewTool = { ...tool, ...(existing || {}) };
+        const checked = existing ? existing.enabled !== false : true;
+        return `
+          <div class="api-preset-endpoint-row" data-tool-name="${escapeVal(tool.name)}">
+            <label class="api-preset-endpoint-check">
+              <input type="checkbox" class="api-preset-endpoint-enabled" ${checked ? 'checked' : ''} />
+            </label>
+            <span class="api-method-badge api-method-${viewTool.method}">${escapeVal(viewTool.method)}</span>
+            <div class="api-preset-endpoint-main">
+              <span class="api-preset-endpoint-name">${escapeVal(viewTool.name)}</span>
+              <span class="api-preset-endpoint-desc">${escapeVal(viewTool.description)}</span>
+              <span class="api-preset-endpoint-auth">連線方式：OAuth 2.0</span>
+              <span class="api-preset-endpoint-url">${escapeVal(viewTool.url || '')}</span>
+            </div>
+            <button type="button" class="btn-secondary api-preset-endpoint-edit">編輯</button>
+            <div class="api-preset-endpoint-settings" style="display:none">
+              <div class="form-group">
+                <label>說明</label>
+                <textarea class="api-preset-tool-description" rows="2">${escapeVal(viewTool.description)}</textarea>
+              </div>
+              <div class="form-group">
+                <label>URL</label>
+                <input type="text" class="api-preset-tool-endpoint" value="${escapeVal(viewTool.url || '')}" />
+              </div>
+              <div class="api-preset-settings-row">
+                <div class="form-group">
+                  <label>HTTP 方法</label>
+                  <select class="api-preset-tool-method">
+                    ${['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].map(m => `<option value="${m}" ${viewTool.method === m ? 'selected' : ''}>${m}</option>`).join('')}
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label>回傳上限</label>
+                  <input type="number" class="api-preset-tool-response-limit" value="${viewTool.responseLimit || 2000}" min="100" max="20000" />
+                </div>
+              </div>
+              <div class="form-group">
+                <label>參數</label>
+                <div class="api-preset-params-list">
+                  ${(viewTool.parameters || []).map(renderPresetParamRow).join('')}
+                </div>
+                <button type="button" class="btn-secondary api-preset-add-param">+ 新增參數</button>
+              </div>
+            </div>
+          </div>`;
+      }).join('');
+      endpointsEl.querySelectorAll('.api-preset-endpoint-edit').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const row = btn.closest('.api-preset-endpoint-row');
+          const settings = row.querySelector('.api-preset-endpoint-settings');
+          const open = settings.style.display !== 'none';
+          settings.style.display = open ? 'none' : 'block';
+          btn.textContent = open ? '編輯' : '收起';
+        });
+      });
+      endpointsEl.querySelectorAll('.api-preset-param-delete').forEach(btn => {
+        btn.addEventListener('click', () => btn.closest('.api-preset-param-row')?.remove());
+      });
+      endpointsEl.querySelectorAll('.api-preset-add-param').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const list = btn.previousElementSibling;
+          list.insertAdjacentHTML('beforeend', renderPresetParamRow());
+          list.lastElementChild.querySelector('.api-preset-param-delete').addEventListener('click', (e) => {
+            e.currentTarget.closest('.api-preset-param-row')?.remove();
+          });
+        });
+      });
+    };
+
+    async function refreshOAuthStatus() {
+      const resp = await sendOAuthMessage('OAUTH_GET_STATUS', { presetId: preset.id });
+      if (!resp.success) return;
+      const { clientId = '', token, redirectUri } = resp.data || {};
+      cachedClient = { clientId, clientSecret: clientSecInput.value };
+      clientIdInput.value = clientId;
+      redirectUriEl.textContent = redirectUri || '';
+      cachedToken = token;
+      const hasTools = apiToolRegistry.some(t => t.presetId === preset.id || t.name.startsWith(preset.toolPrefix));
+      if (token?.hasAccessToken) {
+        const accountLabel = token.account?.email || token.account?.name || token.workspaceName || '';
+        setBadge(true, accountLabel);
+        accountTextEl.textContent = accountLabel ? `已授權：${accountLabel}` : '已授權';
+        authorizeBtn.textContent = '重新授權';
+        revokeBtn.style.display = '';
+        buildEndpointRows();
+        setEndpointsVisible(true);
+        removeBtn.style.display = hasTools ? '' : 'none';
+      } else {
+        setBadge(false);
+        accountTextEl.textContent = '';
+        authorizeBtn.textContent = '點此授權';
+        revokeBtn.style.display = 'none';
+        setEndpointsVisible(false);
+        removeBtn.style.display = 'none';
+      }
+      refreshCountBadge();
+    }
+
+    // 展開 / 收合
+    card.querySelector('.api-preset-toggle-btn').addEventListener('click', () => {
+      const body = card.querySelector('.api-preset-body');
+      const open = body.style.display !== 'none';
+      body.style.display = open ? 'none' : 'block';
+      card.querySelector('.api-preset-toggle-btn').textContent = open ? '設定 ▾' : '收起 ▴';
+      if (!open) refreshOAuthStatus();
+    });
+
+    // 顯示/隱藏密碼
+    card.querySelector('.oauth-secret-toggle').addEventListener('click', () => {
+      clientSecInput.type = clientSecInput.type === 'password' ? 'text' : 'password';
+    });
+
+    // 複製 redirect URI
+    copyBtn.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(redirectUriEl.textContent);
+        showMessage('已複製 Redirect URI', 'success');
+      } catch {
+        showMessage('複製失敗，請手動選取', 'error');
+      }
+    });
+
+    // 授權
+    authorizeBtn.addEventListener('click', async () => {
+      const clientId = clientIdInput.value.trim();
+      const clientSecret = clientSecInput.value.trim();
+      if (!clientId) { showMessage('請輸入 Client ID', 'error'); return; }
+      if (!clientSecret) { showMessage('請輸入 Client Secret', 'error'); return; }
+      authorizeBtn.disabled = true;
+      authorizeBtn.textContent = '授權中…';
+      const saveResp = await sendOAuthMessage('OAUTH_SAVE_CLIENT', { presetId: preset.id, clientId, clientSecret });
+      if (!saveResp.success) {
+        authorizeBtn.disabled = false; authorizeBtn.textContent = '點此授權';
+        showMessage(`儲存 Client 失敗：${saveResp.error}`, 'error'); return;
+      }
+      const authResp = await sendOAuthMessage('OAUTH_AUTHORIZE', { presetId: preset.id });
+      authorizeBtn.disabled = false;
+      if (!authResp.success) {
+        showMessage(`授權失敗：${authResp.error}`, 'error');
+        await refreshOAuthStatus();
+        return;
+      }
+      showMessage(`${preset.name} 授權成功`, 'success');
+      // 自動寫入預設工具到 registry（保留現有 enabled 狀態）
+      const generated = preset.generate();
+      const newTools = generated.map(t => {
+        const existing = apiToolRegistry.find(r => r.name === t.name);
+        return {
+          ...t,
+          ...(existing ? { enabled: existing.enabled, responseLimit: existing.responseLimit, parameters: existing.parameters || t.parameters, url: existing.url || t.url, method: existing.method || t.method, description: existing.description || t.description } : {}),
+          id: existing?.id || generateToolId(),
+          presetId: preset.id
+        };
+      });
+      apiToolRegistry = [
+        ...apiToolRegistry.filter(t => !(t.presetId === preset.id || t.name.startsWith(preset.toolPrefix))),
+        ...newTools
+      ];
+      await chrome.storage.local.set({ apiToolRegistry });
+      renderApiToolRegistry();
+      refreshCountBadge();
+      await refreshOAuthStatus();
+    });
+
+    // 取消授權
+    revokeBtn.addEventListener('click', async () => {
+      if (!confirm(`確定要取消 ${preset.name} 授權嗎？`)) return;
+      const resp = await sendOAuthMessage('OAUTH_REVOKE', { presetId: preset.id });
+      if (!resp.success) { showMessage(`取消授權失敗：${resp.error}`, 'error'); return; }
+      showMessage(`${preset.name} 已取消授權`, 'success');
+      await refreshOAuthStatus();
+    });
+
+    // 儲存端點設定
+    saveBtn.addEventListener('click', async () => {
+      const enabledByName = new Map();
+      card.querySelectorAll('.api-preset-endpoint-enabled').forEach(inp => {
+        enabledByName.set(inp.closest('.api-preset-endpoint-row').dataset.toolName, inp.checked);
+      });
+      const overridesByName = new Map();
+      card.querySelectorAll('.api-preset-endpoint-row').forEach(row => {
+        const name = row.dataset.toolName;
+        const parameters = Array.from(row.querySelectorAll('.api-preset-param-row')).map(paramRow => ({
+          name: paramRow.querySelector('.api-preset-param-name').value.trim(),
+          description: paramRow.querySelector('.api-preset-param-desc').value.trim(),
+          type: paramRow.querySelector('.api-preset-param-type').value,
+          location: paramRow.querySelector('.api-preset-param-location').value,
+          required: paramRow.querySelector('.api-preset-param-required input').checked
+        })).filter(param => param.name);
+        overridesByName.set(name, {
+          method: row.querySelector('.api-preset-tool-method').value,
+          url: row.querySelector('.api-preset-tool-endpoint').value.trim(),
+          description: row.querySelector('.api-preset-tool-description').value.trim(),
+          responseLimit: parseInt(row.querySelector('.api-preset-tool-response-limit').value) || 2000,
+          parameters
+        });
+      });
+      const newTools = preset.generate().map(t => ({
+        ...t,
+        ...(overridesByName.get(t.name) || {}),
+        id: apiToolRegistry.find(r => r.name === t.name)?.id || generateToolId(),
+        presetId: preset.id,
+        enabled: enabledByName.get(t.name) !== false
+      }));
+      apiToolRegistry = [
+        ...apiToolRegistry.filter(t => !(t.presetId === preset.id || t.name.startsWith(preset.toolPrefix))),
+        ...newTools
+      ];
+      await chrome.storage.local.set({ apiToolRegistry });
+      renderApiToolRegistry();
+      refreshCountBadge();
+      showMessage(`${preset.name} 端點設定已儲存`, 'success');
+    });
+
+    // 移除所有工具
+    removeBtn.addEventListener('click', async () => {
+      if (!confirm(`確定要移除所有 ${preset.name} 工具嗎？（不會取消授權）`)) return;
+      apiToolRegistry = apiToolRegistry.filter(t => !(t.presetId === preset.id || t.name.startsWith(preset.toolPrefix)));
+      await chrome.storage.local.set({ apiToolRegistry });
+      renderApiToolRegistry();
+      refreshCountBadge();
+      removeBtn.style.display = 'none';
+      showMessage(`已移除 ${preset.name} 工具`, 'success');
+    });
+
+    // 初次載入時抓取 redirect URI
+    sendOAuthMessage('OAUTH_GET_REDIRECT_URI', { presetId: preset.id }).then(resp => {
+      if (resp.success) redirectUriEl.textContent = resp.data || '';
+    });
+
+    return card;
   }
 
   // ── API Tool Registry ──────────────────────────────────────
