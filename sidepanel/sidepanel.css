@@ -2893,43 +2893,33 @@ mark {
 
 /* ── Memory Modal ────────────────────────────────────── */
 .memory-modal {
-  position: fixed;
+  position: absolute;
   inset: 0;
-  z-index: 200;
+  z-index: 10;
+  background: var(--bg-dark);
   display: flex;
-  align-items: center;
-  justify-content: center;
+  flex-direction: column;
+  overflow: hidden;
 }
-
 .memory-modal.hidden {
   display: none;
 }
 
-.memory-modal-overlay {
-  position: absolute;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.6);
-}
-
 .memory-modal-content {
-  position: relative;
-  background: var(--bg-dark);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 16px;
-  width: calc(100% - 32px);
-  max-height: 85vh;
   display: flex;
   flex-direction: column;
+  flex: 1;
+  min-height: 0;
   overflow: hidden;
-  z-index: 1;
 }
 
 .memory-modal-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 14px 16px 8px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  padding: 12px 12px 10px;
+  border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
 }
 
 .memory-modal-header h3 {
@@ -2937,6 +2927,7 @@ mark {
   font-weight: 600;
   color: var(--text-primary);
   margin: 0;
+  padding-left: 4px;
 }
 
 .memory-modal-hint {

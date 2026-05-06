@@ -934,18 +934,16 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   // Memory Modal
-  openMemoryBtn.addEventListener('click', openMemoryModal);
+  openMemoryBtn.addEventListener('click', () => { closeAllPanels(); openMemoryModal(); });
   memoryModalClose.addEventListener('click', closeMemoryModal);
-  memoryModalOverlay.addEventListener('click', closeMemoryModal);
   memorySearchInput.addEventListener('input', () => {
     memorySearchQuery = memorySearchInput.value.trim();
     renderMemoryList();
   });
 
   // Vocabulary Modal
-  openVocabularyBtn.addEventListener('click', openVocabularyModal);
+  openVocabularyBtn.addEventListener('click', () => { closeAllPanels(); openVocabularyModal(); });
   vocabularyModalClose.addEventListener('click', closeVocabularyModal);
-  vocabularyModalOverlay.addEventListener('click', closeVocabularyModal);
   memoryClearAllBtn.addEventListener('click', async () => {
     if (confirm('確定要清除所有長期記憶？')) {
       memories = [];
@@ -962,9 +960,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   // Knowledge Modal
-  openKnowledgeBtn.addEventListener('click', openKnowledgeModal);
+  openKnowledgeBtn.addEventListener('click', () => { closeAllPanels(); openKnowledgeModal(); });
   knowledgeModalClose.addEventListener('click', closeKnowledgeModal);
-  knowledgeModalOverlay.addEventListener('click', closeKnowledgeModal);
   knowledgeSearchInput.addEventListener('input', () => {
     knowledgeSearchQuery = knowledgeSearchInput.value.trim();
     renderKnowledgeList();
@@ -1400,7 +1397,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   // ── 歷史面板 ───────────────────────────────────────────
   newSessionBtn.addEventListener('click', async () => {
     await startNewSessionWithPageContext();
-    historyPanel.classList.add('hidden');
+    historyPanel.classList.add('hidden'); toggleHistoryBtn.classList.remove('active');
   });
 
   renameCurrentSessionBtn?.addEventListener('click', async () => {
@@ -1447,7 +1444,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
       startNewSession();
       renderHistory();
-      historyPanel.classList.add('hidden');
+      historyPanel.classList.add('hidden'); toggleHistoryBtn.classList.remove('active');
       setStatus('已刪除當前對話', false, 1600);
     } catch (error) {
       setStatus(`刪除失敗：${error.message}`, true, 2500);
@@ -1455,7 +1452,17 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   toggleHistoryBtn.addEventListener('click', () => {
-    historyPanel.classList.toggle('hidden');
+    const isOpen = !historyPanel.classList.contains('hidden');
+    closeAllPanels();
+    if (!isOpen) {
+      historyPanel.classList.remove('hidden');
+      toggleHistoryBtn.classList.add('active');
+    }
+  });
+
+  document.getElementById('historyPanelClose').addEventListener('click', () => {
+    historyPanel.classList.add('hidden'); toggleHistoryBtn.classList.remove('active');
+    toggleHistoryBtn.classList.remove('active');
   });
 
   clearHistoryBtn.addEventListener('click', async () => {
@@ -1522,7 +1529,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   historyPanel.addEventListener('click', (e) => {
     if (e.target === historyPanel) {
-      historyPanel.classList.add('hidden');
+      historyPanel.classList.add('hidden'); toggleHistoryBtn.classList.remove('active');
     }
   });
 
@@ -2316,7 +2323,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
 
     emptyState.classList.add('hidden');
-    historyPanel.classList.add('hidden');
+    historyPanel.classList.add('hidden'); toggleHistoryBtn.classList.remove('active');
     scrollToBottom();
   }
 
@@ -3744,7 +3751,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         break;
       case '/new':
         startNewSessionWithPageContext();
-        historyPanel.classList.add('hidden');
+        historyPanel.classList.add('hidden'); toggleHistoryBtn.classList.remove('active');
         break;
       case '/clear':
         chatMessages.innerHTML = '';
@@ -4021,6 +4028,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   async function openMemoryModal() {
     memoryModal.classList.remove('hidden');
+    openMemoryBtn.classList.add('active');
     await populateCategoryFilter('memory', memoryCategoryFilterEl);
     memorySearchInput.value = memorySearchQuery;
     renderMemoryList();
@@ -4028,6 +4036,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   function closeMemoryModal() {
     memoryModal.classList.add('hidden');
+    openMemoryBtn.classList.remove('active');
     memoryCatManager.classList.add('hidden');
     manageMemoryCatBtn.classList.remove('active');
   }
@@ -4418,6 +4427,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Knowledge Modal
   async function openKnowledgeModal() {
     knowledgeModal.classList.remove('hidden');
+    openKnowledgeBtn.classList.add('active');
     await populateCategoryFilter('knowledge', knowledgeCategoryFilterEl);
     knowledgeSearchInput.value = knowledgeSearchQuery;
     renderKnowledgeTagFilters();
@@ -4428,6 +4438,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   function closeKnowledgeModal() {
     knowledgeModal.classList.add('hidden');
+    openKnowledgeBtn.classList.remove('active');
     knowledgeCatManager.classList.add('hidden');
     knowledgeTagManager.classList.add('hidden');
     manageKnowledgeCatBtn.classList.remove('active');
@@ -5120,6 +5131,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   async function openVocabularyModal() {
     vocabularyModal.classList.remove('hidden');
+    openVocabularyBtn.classList.add('active');
     await populateCategoryFilter('vocabulary', vocabularyCategoryFilterEl);
     const { vocabulary = [] } = await chrome.storage.local.get(['vocabulary']);
     populateVocabularyLangFilter(vocabulary);
@@ -5128,6 +5140,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   function closeVocabularyModal() {
     vocabularyModal.classList.add('hidden');
+    openVocabularyBtn.classList.remove('active');
     vocabularyCatManager.classList.add('hidden');
     manageVocabularyCatBtn.classList.remove('active');
   }
@@ -5718,6 +5731,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     closeSettingsDrawer();
   }
 
+  function closeAllPanels() {
+    historyPanel.classList.add('hidden'); toggleHistoryBtn.classList.remove('active');
+    toggleHistoryBtn.classList.remove('active');
+    closeSpacesPanel();
+    closeMemoryModal();
+    closeVocabularyModal();
+    closeKnowledgeModal();
+  }
+
   function showSpacesListView() {
     spacesListView.classList.remove('hidden');
     spaceDetailView.classList.add('hidden');
@@ -6081,6 +6103,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   // ── Spaces Event Listeners ────────────────────────────────
 
   openSpacesBtn.addEventListener('click', async () => {
+    closeAllPanels();
     await loadSpaces();
     openSpacesPanel();
   });
