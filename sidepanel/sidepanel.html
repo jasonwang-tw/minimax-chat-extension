@@ -441,6 +441,105 @@
       </div>
     </div>
 
+    <!-- Memory Modal -->
+    <div id="memoryModal" class="memory-modal hidden">
+      <div class="memory-modal-content">
+        <div class="memory-modal-header">
+          <h3>長期記憶</h3>
+          <button id="memoryModalClose" class="btn-icon" title="關閉">
+            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+        <p class="memory-modal-hint">AI 在每次對話時都會記住這些資訊。使用 <code>/remember 內容</code> 新增。</p>
+        <div class="modal-search-bar">
+          <input type="text" id="memorySearchInput" class="modal-search-input" placeholder="搜尋記憶內容...">
+        </div>
+        <div class="modal-filter-bar">
+          <select id="memoryCategoryFilter" class="modal-filter-select"></select>
+          <button id="manageMemoryCatBtn" class="btn-manage-cat">管理分類</button>
+        </div>
+        <div id="memoryCatManager" class="category-manager hidden">
+          <div class="cat-add-row">
+            <input type="text" id="memoryNewCatInput" class="cat-add-input" placeholder="新增分類名稱...">
+            <button id="memoryAddCatBtn" class="btn-cat-add">+</button>
+          </div>
+          <div id="memoryCatList" class="cat-tag-list"></div>
+        </div>
+        <div id="memoryList" class="memory-list"></div>
+        <div class="memory-modal-actions">
+          <button id="memoryClearAllBtn" class="btn-secondary-sm">清空全部</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Vocabulary Modal -->
+    <div id="vocabularyModal" class="memory-modal hidden">
+      <div class="memory-modal-content">
+        <div class="memory-modal-header">
+          <h3>單字簿</h3>
+          <button id="vocabularyModalClose" class="btn-icon" title="關閉">
+            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+        <p class="memory-modal-hint">在任意網頁反白文字後點右鍵「加入單字簿」即可新增。</p>
+        <div class="modal-filter-bar modal-filter-bar-vocab">
+          <select id="vocabularyLangFilter" class="modal-filter-select"></select>
+          <select id="vocabularyCategoryFilter" class="modal-filter-select"></select>
+          <button id="manageVocabularyCatBtn" class="btn-manage-cat">管理分類</button>
+        </div>
+        <div id="vocabularyCatManager" class="category-manager hidden">
+          <div class="cat-add-row">
+            <input type="text" id="vocabularyNewCatInput" class="cat-add-input" placeholder="新增分類名稱...">
+            <button id="vocabularyAddCatBtn" class="btn-cat-add">+</button>
+          </div>
+          <div id="vocabularyCatList" class="cat-tag-list"></div>
+        </div>
+        <div id="vocabularyList" class="memory-list"></div>
+        <div class="memory-modal-actions">
+          <button id="vocabularyClearAllBtn" class="btn-secondary-sm">清空全部</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Knowledge Modal -->
+    <div id="knowledgeModal" class="memory-modal hidden">
+      <div class="memory-modal-content">
+        <div class="memory-modal-header">
+          <h3>知識庫</h3>
+          <button id="knowledgeModalClose" class="btn-icon" title="關閉">
+            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+        <p class="memory-modal-hint">在任意頁面右鍵「加入知識庫」，或選取文字後加入。輸入 <code>@</code> 呼叫知識庫內容注入對話。</p>
+        <div class="modal-search-bar">
+          <input type="text" id="knowledgeSearchInput" class="modal-search-input" placeholder="搜尋標題、摘要、標籤...">
+        </div>
+        <div class="modal-filter-bar">
+          <select id="knowledgeCategoryFilter" class="modal-filter-select"></select>
+          <button id="manageKnowledgeCatBtn" class="btn-manage-cat">管理分類</button>
+          <button id="manageKnowledgeTagBtn" class="btn-manage-cat">管理標籤</button>
+        </div>
+        <div id="knowledgeCatManager" class="category-manager hidden">
+          <div class="cat-add-row">
+            <input type="text" id="knowledgeNewCatInput" class="cat-add-input" placeholder="新增分類名稱...">
+            <button id="knowledgeAddCatBtn" class="btn-cat-add">+</button>
+          </div>
+          <div id="knowledgeCatList" class="cat-tag-list"></div>
+        </div>
+        <div id="knowledgeTagManager" class="category-manager hidden">
+          <div class="cat-add-row">
+            <span class="cat-empty-hint">移除標籤會從所有知識項目一併移除</span>
+          </div>
+          <div id="knowledgeTagList" class="cat-tag-list"></div>
+        </div>
+        <div id="knowledgeTagFilters" class="kb-tag-filters hidden"></div>
+        <div id="knowledgeList" class="memory-list"></div>
+        <div class="memory-modal-actions">
+          <button id="knowledgeClearAllBtn" class="btn-secondary-sm">清空全部</button>
+        </div>
+      </div>
+    </div>
+
     </div><!-- /.main-area -->
   </div><!-- /.container -->
 
@@ -532,105 +631,6 @@
       <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
     </button>
     <span id="lightboxCounter" class="lightbox-counter"></span>
-  </div>
-
-  <!-- Memory Modal -->
-  <div id="memoryModal" class="memory-modal hidden">
-    <div class="memory-modal-content">
-      <div class="memory-modal-header">
-        <h3>長期記憶</h3>
-        <button id="memoryModalClose" class="btn-icon" title="關閉">
-          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-        </button>
-      </div>
-      <p class="memory-modal-hint">AI 在每次對話時都會記住這些資訊。使用 <code>/remember 內容</code> 新增。</p>
-      <div class="modal-search-bar">
-        <input type="text" id="memorySearchInput" class="modal-search-input" placeholder="搜尋記憶內容...">
-      </div>
-      <div class="modal-filter-bar">
-        <select id="memoryCategoryFilter" class="modal-filter-select"></select>
-        <button id="manageMemoryCatBtn" class="btn-manage-cat">管理分類</button>
-      </div>
-      <div id="memoryCatManager" class="category-manager hidden">
-        <div class="cat-add-row">
-          <input type="text" id="memoryNewCatInput" class="cat-add-input" placeholder="新增分類名稱...">
-          <button id="memoryAddCatBtn" class="btn-cat-add">+</button>
-        </div>
-        <div id="memoryCatList" class="cat-tag-list"></div>
-      </div>
-      <div id="memoryList" class="memory-list"></div>
-      <div class="memory-modal-actions">
-        <button id="memoryClearAllBtn" class="btn-secondary-sm">清空全部</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Vocabulary Modal -->
-  <div id="vocabularyModal" class="memory-modal hidden">
-    <div class="memory-modal-content">
-      <div class="memory-modal-header">
-        <h3>單字簿</h3>
-        <button id="vocabularyModalClose" class="btn-icon" title="關閉">
-          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-        </button>
-      </div>
-      <p class="memory-modal-hint">在任意網頁反白文字後點右鍵「加入單字簿」即可新增。</p>
-      <div class="modal-filter-bar modal-filter-bar-vocab">
-        <select id="vocabularyLangFilter" class="modal-filter-select"></select>
-        <select id="vocabularyCategoryFilter" class="modal-filter-select"></select>
-        <button id="manageVocabularyCatBtn" class="btn-manage-cat">管理分類</button>
-      </div>
-      <div id="vocabularyCatManager" class="category-manager hidden">
-        <div class="cat-add-row">
-          <input type="text" id="vocabularyNewCatInput" class="cat-add-input" placeholder="新增分類名稱...">
-          <button id="vocabularyAddCatBtn" class="btn-cat-add">+</button>
-        </div>
-        <div id="vocabularyCatList" class="cat-tag-list"></div>
-      </div>
-      <div id="vocabularyList" class="memory-list"></div>
-      <div class="memory-modal-actions">
-        <button id="vocabularyClearAllBtn" class="btn-secondary-sm">清空全部</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Knowledge Modal -->
-  <div id="knowledgeModal" class="memory-modal hidden">
-    <div class="memory-modal-content">
-      <div class="memory-modal-header">
-        <h3>知識庫</h3>
-        <button id="knowledgeModalClose" class="btn-icon" title="關閉">
-          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-        </button>
-      </div>
-      <p class="memory-modal-hint">在任意頁面右鍵「加入知識庫」，或選取文字後加入。輸入 <code>@</code> 呼叫知識庫內容注入對話。</p>
-      <div class="modal-search-bar">
-        <input type="text" id="knowledgeSearchInput" class="modal-search-input" placeholder="搜尋標題、摘要、標籤...">
-      </div>
-      <div class="modal-filter-bar">
-        <select id="knowledgeCategoryFilter" class="modal-filter-select"></select>
-        <button id="manageKnowledgeCatBtn" class="btn-manage-cat">管理分類</button>
-        <button id="manageKnowledgeTagBtn" class="btn-manage-cat">管理標籤</button>
-      </div>
-      <div id="knowledgeCatManager" class="category-manager hidden">
-        <div class="cat-add-row">
-          <input type="text" id="knowledgeNewCatInput" class="cat-add-input" placeholder="新增分類名稱...">
-          <button id="knowledgeAddCatBtn" class="btn-cat-add">+</button>
-        </div>
-        <div id="knowledgeCatList" class="cat-tag-list"></div>
-      </div>
-      <div id="knowledgeTagManager" class="category-manager hidden">
-        <div class="cat-add-row">
-          <span class="cat-empty-hint">移除標籤會從所有知識項目一併移除</span>
-        </div>
-        <div id="knowledgeTagList" class="cat-tag-list"></div>
-      </div>
-      <div id="knowledgeTagFilters" class="kb-tag-filters hidden"></div>
-      <div id="knowledgeList" class="memory-list"></div>
-      <div class="memory-modal-actions">
-        <button id="knowledgeClearAllBtn" class="btn-secondary-sm">清空全部</button>
-      </div>
-    </div>
   </div>
 
   <!-- Summary Modal -->
