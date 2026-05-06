@@ -6,7 +6,7 @@ Open Chat Hub 是一個多模型 AI 側邊欄工作台，讓你在瀏覽器內�
 
 ## 版本
 
-**v1.28.1** (2026-05-06)
+**v1.28.2** (2026-05-06)
 
 ## 功能特色
 
@@ -105,6 +105,12 @@ npm run build:css
 - **TailwindCSS + SCSS**：樣式設計
 
 ## Changelog
+
+## [1.28.2] - 2026-05-06
+### Fixed
+- 知識庫/單字簿/長期記憶 panel 移入 `.main-area`，修正 `position: absolute; inset: 0` 覆蓋 header 的問題
+- `.history-header` padding/font-size 與空間、知識庫等 panel header 統一
+- 移除 `.history-panel` 多餘的 `border-right`
 
 ## [1.28.1] - 2026-05-06
 ### Fixed
