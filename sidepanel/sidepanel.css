@@ -171,7 +171,6 @@ body {
   right: 0;
   bottom: 0;
   background: var(--bg-dark);
-  border-right: 1px solid var(--border-color);
   display: flex;
   flex-direction: column;
   z-index: 10;
