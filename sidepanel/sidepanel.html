@@ -42,38 +42,9 @@
     <div class="main-area">
     <div class="below-header">
 
-    <!-- History Panel -->
-    <aside id="historyPanel" class="history-panel hidden">
-      <div class="history-header">
-        <h3>歷史紀錄</h3>
-        <div class="history-header-actions">
-          <button id="batchSelectBtn" class="btn-text" style="color:var(--text-secondary)">選取</button>
-          <button id="clearHistory" class="btn-text btn-danger">全部清除</button>
-          <button id="historyPanelClose" class="btn-icon" title="關閉">
-            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-          </button>
-        </div>
-      </div>
-      <!-- 搜尋欄 -->
-      <div class="history-search-wrapper">
-        <svg class="history-search-icon" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
-        <input type="text" id="historySearch" class="history-search" placeholder="搜尋歷史紀錄...">
-        <button id="historyClearSearch" class="btn-clear-search hidden">
-          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-        </button>
-      </div>
-      <div id="batchActionBar" class="batch-action-bar hidden">
-        <label class="batch-select-all">
-          <input type="checkbox" id="selectAllCheckbox"> 全選
-        </label>
-        <button id="batchDeleteBtn" class="btn-batch-delete" disabled>刪除所選 (0)</button>
-      </div>
-      <div id="historyList" class="history-list"></div>
-    </aside>
-
     <div class="current-session-bar">
       <div class="current-session-main">
-        <span class="current-session-label">當前對話</span>
+        <span id="currentSessionSpaceTag" class="current-session-space-tag" title="切換空間"></span>
         <span id="currentSessionName" class="current-session-name">新對話</span>
       </div>
       <button id="renameCurrentSessionBtn" class="btn-session-rename" title="重新命名當前對話">
@@ -328,6 +299,38 @@
         </div>
       </div>
     </footer>
+
+    <!-- History Panel：覆蓋 below-header + footer，header 保持可見 -->
+    <aside id="historyPanel" class="history-panel hidden">
+      <div class="history-header">
+        <h3>歷史紀錄</h3>
+        <div class="history-header-actions">
+          <button id="batchSelectBtn" class="btn-text" style="color:var(--text-secondary)">選取</button>
+          <button id="clearHistory" class="btn-text btn-danger">全部清除</button>
+          <button id="historyPanelClose" class="btn-icon" title="關閉">
+            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+      </div>
+      <!-- 搜尋欄 -->
+      <div class="history-search-wrapper">
+        <svg class="history-search-icon" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+        <input type="text" id="historySearch" class="history-search" placeholder="搜尋歷史紀錄...">
+        <button id="historyClearSearch" class="btn-clear-search hidden">
+          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+      <div id="batchActionBar" class="batch-action-bar hidden">
+        <label class="batch-select-all">
+          <input type="checkbox" id="selectAllCheckbox"> 全選
+        </label>
+        <button id="batchDeleteBtn" class="btn-batch-delete" disabled>刪除所選 (0)</button>
+      </div>
+      <div id="historyList" class="history-list"></div>
+    </aside>
+
+    <!-- 空間選擇 popover（共用） -->
+    <div id="spacePickerPopover" class="space-picker-popover hidden"></div>
 
     <!-- Spaces Panel：覆蓋 below-header + footer，header 保持可見 -->
     <div id="spacesPanel" class="spaces-panel hidden">

@@ -5215,6 +5215,115 @@ mark.search-keyword-current {
   vertical-align: middle;
 }
 
+.current-session-space-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  background: rgba(236, 41, 112, 0.15);
+  border: 1px solid rgba(236, 41, 112, 0.35);
+  border-radius: 10px;
+  font-size: 10px;
+  color: var(--primary);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s, border-color 0.15s;
+}
+.current-session-space-tag:hover {
+  background: rgba(236, 41, 112, 0.25);
+  border-color: rgba(236, 41, 112, 0.5);
+}
+.current-session-space-tag.is-default {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.12);
+  color: var(--text-secondary);
+}
+.current-session-space-tag.is-default:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.history-item-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.history-space-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  background: rgba(236, 41, 112, 0.15);
+  border: 1px solid rgba(236, 41, 112, 0.35);
+  border-radius: 8px;
+  font-size: 10px;
+  color: var(--primary);
+  cursor: pointer;
+  white-space: nowrap;
+  max-width: 130px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: background 0.15s, border-color 0.15s;
+}
+.history-space-tag:hover {
+  background: rgba(236, 41, 112, 0.25);
+  border-color: rgba(236, 41, 112, 0.5);
+}
+.history-space-tag.is-default {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.12);
+  color: var(--text-secondary);
+}
+.history-space-tag.is-default:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.space-picker-popover {
+  position: fixed;
+  z-index: 1000;
+  min-width: 140px;
+  max-width: 220px;
+  max-height: 280px;
+  overflow-y: auto;
+  padding: 4px;
+  background: var(--bg-dark);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+.space-picker-popover.hidden {
+  display: none;
+}
+
+.space-picker-item {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: 6px 10px;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.space-picker-item:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+.space-picker-item.active {
+  background: rgba(236, 41, 112, 0.18);
+  color: var(--primary);
+}
+.space-picker-item.is-default {
+  color: var(--text-secondary);
+}
+.space-picker-item.is-default.active {
+  color: var(--primary);
+}
+
 .create-space-body {
   padding: 14px 16px;
 }

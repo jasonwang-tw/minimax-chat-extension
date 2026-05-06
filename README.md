@@ -6,7 +6,7 @@ Open Chat Hub 是一個多模型 AI 側邊欄工作台，讓你在瀏覽器內�
 
 ## 版本
 
-**v1.28.2** (2026-05-06)
+**v1.29.0** (2026-05-06)
 
 ## 功能特色
 
@@ -105,6 +105,16 @@ npm run build:css
 - **TailwindCSS + SCSS**：樣式設計
 
 ## Changelog
+
+## [1.29.0] - 2026-05-06
+### Added
+- Session 空間管理：每筆歷史紀錄可指定所屬空間，點擊空間 tag 開啟 popover 切換
+- 當前對話 bar 顯示所屬空間 tag，點擊可直接切換
+- 預設空間概念：spaceId 為 null 的 session 顯示為「預設」，新對話自動歸入
+### Changed
+- 歷史紀錄 panel 移至 `.main-area` 直接子層，覆蓋範圍含 `.input-area`
+- 新對話按鈕改用 `closeAllPanels()`，確保關閉所有覆蓋頁
+- `loadSpaces()` 提前到 `loadHistory()` 之前執行，避免空間 tag 顯示時序問題
 
 ## [1.28.2] - 2026-05-06
 ### Fixed

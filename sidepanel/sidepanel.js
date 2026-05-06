@@ -624,6 +624,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   });
 
+  // 載入空間（要先於歷史記錄，讓 history item 能正確顯示空間 tag）
+  await loadSpaces();
   // 載入歷史記錄
   await loadHistory();
 
@@ -1396,8 +1398,24 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // ── 歷史面板 ───────────────────────────────────────────
   newSessionBtn.addEventListener('click', async () => {
+    closeAllPanels();
     await startNewSessionWithPageContext();
-    historyPanel.classList.add('hidden'); toggleHistoryBtn.classList.remove('active');
+  });
+
+  // 當前對話空間 tag 點擊 → 開啟 space picker
+  document.getElementById('currentSessionSpaceTag')?.addEventListener('click', (e) => {
+    if (!currentSession) return;
+    e.stopPropagation();
+    openSpacePicker(e.currentTarget, currentSession);
+  });
+
+  // 點擊空白處關閉 space picker
+  document.addEventListener('click', (e) => {
+    const pop = document.getElementById('spacePickerPopover');
+    if (!pop || pop.classList.contains('hidden')) return;
+    if (pop.contains(e.target)) return;
+    if (e.target.closest('.history-space-tag, #currentSessionSpaceTag')) return;
+    closeSpacePicker();
   });
 
   renameCurrentSessionBtn?.addEventListener('click', async () => {
@@ -2103,9 +2121,20 @@ document.addEventListener('DOMContentLoaded', async () => {
     return (session.name || getSessionDefaultName(session) || '新對話').trim() || '新對話';
   }
 
+  function getSpaceLabel(spaceId) {
+    if (!spaceId) return '預設';
+    return spaces.find(sp => String(sp.id) === String(spaceId))?.name || '預設';
+  }
+
   function updateCurrentSessionBar() {
     if (currentSessionNameEl) {
       currentSessionNameEl.textContent = getSessionDisplayName(currentSession);
+    }
+    const spaceTagEl = document.getElementById('currentSessionSpaceTag');
+    if (spaceTagEl) {
+      spaceTagEl.textContent = getSpaceLabel(currentSession?.spaceId);
+      spaceTagEl.dataset.spaceId = currentSession?.spaceId || '';
+      spaceTagEl.classList.toggle('is-default', !currentSession?.spaceId);
     }
     if (renameCurrentSessionBtn) {
       renameCurrentSessionBtn.disabled = !currentSession;
@@ -2116,6 +2145,73 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (sessionToVocabularyBtn) {
       sessionToVocabularyBtn.disabled = !currentSession;
     }
+  }
+
+  // ── 空間切換 popover ────────────────────────────────────
+  let _spacePickerSession = null;
+
+  function closeSpacePicker() {
+    const pop = document.getElementById('spacePickerPopover');
+    if (pop) {
+      pop.classList.add('hidden');
+      pop.innerHTML = '';
+    }
+    _spacePickerSession = null;
+  }
+
+  function openSpacePicker(anchorEl, session) {
+    const pop = document.getElementById('spacePickerPopover');
+    if (!pop) return;
+    if (_spacePickerSession?.id === session.id && !pop.classList.contains('hidden')) {
+      closeSpacePicker();
+      return;
+    }
+    _spacePickerSession = session;
+    const currentId = session.spaceId || '';
+    const items = [
+      { id: '', name: '預設', isDefault: true },
+      ...spaces.map(sp => ({ id: sp.id, name: sp.name }))
+    ];
+    pop.innerHTML = items.map(it => `
+      <button class="space-picker-item${String(it.id) === String(currentId) ? ' active' : ''}${it.isDefault ? ' is-default' : ''}" data-space-id="${escapeHtml(String(it.id))}">
+        <span>${escapeHtml(it.name)}</span>
+      </button>
+    `).join('');
+    pop.querySelectorAll('.space-picker-item').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const newSpaceId = btn.dataset.spaceId || null;
+        await assignSessionToSpace(session, newSpaceId);
+        closeSpacePicker();
+      });
+    });
+    // 定位
+    const rect = anchorEl.getBoundingClientRect();
+    pop.classList.remove('hidden');
+    const popRect = pop.getBoundingClientRect();
+    let top = rect.bottom + 4;
+    let left = rect.left;
+    if (left + popRect.width > window.innerWidth - 8) left = window.innerWidth - popRect.width - 8;
+    if (top + popRect.height > window.innerHeight - 8) top = rect.top - popRect.height - 4;
+    pop.style.top = `${top}px`;
+    pop.style.left = `${left}px`;
+  }
+
+  async function assignSessionToSpace(session, newSpaceId) {
+    const normalized = newSpaceId || null;
+    if ((session.spaceId || null) === normalized) return;
+    session.spaceId = normalized;
+    const idx = sessions.findIndex(s => s.id === session.id);
+    if (idx >= 0) sessions[idx].spaceId = normalized;
+    if (currentSession && currentSession.id === session.id) {
+      currentSession.spaceId = normalized;
+    }
+    await chrome.runtime.sendMessage({
+      type: 'SAVE_SESSION',
+      data: { session: sessions[idx] || session }
+    });
+    renderHistory();
+    updateCurrentSessionBar();
   }
 
   function renderHistory() {
@@ -2201,10 +2297,15 @@ document.addEventListener('DOMContentLoaded', async () => {
             cb.dispatchEvent(new Event('change'));
           });
         } else {
+          const spaceLabel = getSpaceLabel(session.spaceId);
+          const isDefaultSpace = !session.spaceId;
           div.innerHTML = `
             <div class="history-item-body">
               <p class="history-preview" title="${escapeHtml(session.name || defaultPreview)}">${displayName}</p>
-              <span class="history-time">${formatTime(session.timestamp)}</span>
+              <div class="history-item-meta">
+                <span class="history-time">${formatTime(session.timestamp)}</span>
+                <button class="history-space-tag${isDefaultSpace ? ' is-default' : ''}" title="切換空間" data-id="${session.id}">${escapeHtml(spaceLabel)}</button>
+              </div>
             </div>
             <div class="history-item-actions">
               <button class="btn-pin${session.pinned ? ' active' : ''}" title="${session.pinned ? '取消釘選' : '釘選'}" data-id="${session.id}">${PIN_SVG}</button>
@@ -2216,7 +2317,14 @@ document.addEventListener('DOMContentLoaded', async () => {
               </button>
             </div>
           `;
-          div.querySelector('.history-item-body').addEventListener('click', () => loadSession(originalIdx));
+          div.querySelector('.history-item-body').addEventListener('click', (e) => {
+            if (e.target.closest('.history-space-tag')) return;
+            loadSession(originalIdx);
+          });
+          div.querySelector('.history-space-tag').addEventListener('click', (e) => {
+            e.stopPropagation();
+            openSpacePicker(e.currentTarget, session);
+          });
           div.querySelector('.btn-pin').addEventListener('click', async (e) => {
             e.stopPropagation();
             const newPinned = !session.pinned;
@@ -5732,12 +5840,13 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   function closeAllPanels() {
-    historyPanel.classList.add('hidden'); toggleHistoryBtn.classList.remove('active');
+    historyPanel.classList.add('hidden');
     toggleHistoryBtn.classList.remove('active');
     closeSpacesPanel();
     closeMemoryModal();
     closeVocabularyModal();
     closeKnowledgeModal();
+    closeSpacePicker();
   }
 
   function showSpacesListView() {
