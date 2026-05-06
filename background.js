@@ -2261,17 +2261,81 @@ async function handleToolCall(name, args, sessionId) {
 }
 
 // ── API Tool Registry ────────────────────────────────────────
+// 將參數值強制 coerce 到宣告的型別。Minimax M2.7 透過 XML 呼叫工具時，
+// 所有參數值都是字串，object/array 必須在這裡 JSON.parse 還原；
+// 同時 OpenAI tool_calls 路線下，模型偶爾仍會把 object 序列化成字串，也一併處理。
+function coerceToolArgValue(rawValue, declaredType) {
+  if (rawValue === undefined || rawValue === null) return rawValue;
+  if (declaredType === 'object' || declaredType === 'array') {
+    if (typeof rawValue === 'string') {
+      const trimmed = rawValue.trim();
+      if (!trimmed) return declaredType === 'array' ? [] : {};
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (declaredType === 'array' && !Array.isArray(parsed)) {
+          throw new Error('expected array');
+        }
+        if (declaredType === 'object' && (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed))) {
+          throw new Error('expected object');
+        }
+        return parsed;
+      } catch (err) {
+        const want = declaredType === 'array' ? '陣列' : '物件';
+        throw new Error(
+          `參數型別錯誤：必須是 JSON ${want}，但收到字串「${trimmed.slice(0, 120)}${trimmed.length > 120 ? '…' : ''}」。請直接以 JSON ${want}格式傳入，不要先序列化成字串。`
+        );
+      }
+    }
+    return rawValue;
+  }
+  if (declaredType === 'number') {
+    if (typeof rawValue === 'number') return rawValue;
+    const n = Number(rawValue);
+    return Number.isFinite(n) ? n : rawValue;
+  }
+  if (declaredType === 'boolean') {
+    if (typeof rawValue === 'boolean') return rawValue;
+    const s = String(rawValue).toLowerCase().trim();
+    if (s === 'true') return true;
+    if (s === 'false') return false;
+    return rawValue;
+  }
+  return rawValue;
+}
+
+function coerceToolArgs(tool, args) {
+  const out = { ...(args || {}) };
+  for (const p of (tool.parameters || [])) {
+    if (out[p.name] === undefined) continue;
+    out[p.name] = coerceToolArgValue(out[p.name], p.type || 'string');
+  }
+  return out;
+}
+
 function buildRegistryTool(tool) {
   const props = {};
   const required = [];
   for (const p of (tool.parameters || [])) {
     const t = p.type || 'string';
-    const schema = { description: p.description || '' };
+    const baseDesc = p.description || '';
+    const schema = { description: baseDesc };
     if (t === 'array') {
       schema.type = 'array';
       schema.items = p.items || { type: 'string' };
+      // 強調必須直接傳陣列、不要序列化
+      if (!/JSON|陣列/.test(baseDesc)) {
+        schema.description = baseDesc
+          ? `${baseDesc}（必須以 JSON 陣列傳入，例如 [...]，不要包成字串）`
+          : '必須以 JSON 陣列傳入，例如 [...]';
+      }
     } else if (t === 'object') {
       schema.type = 'object';
+      schema.additionalProperties = true;
+      if (!/JSON|物件/.test(baseDesc)) {
+        schema.description = baseDesc
+          ? `${baseDesc}（必須以 JSON 物件傳入，例如 {...}，不要包成字串）`
+          : '必須以 JSON 物件傳入，例如 {...}';
+      }
     } else {
       schema.type = t;
     }
@@ -2507,7 +2571,12 @@ async function executeApiTool(tool, args) {
     let url = tool.url || '';
     const headers = {};
     const queryParams = new URLSearchParams();
-    const safeArgs = { ...(args || {}) };
+    let safeArgs;
+    try {
+      safeArgs = coerceToolArgs(tool, args);
+    } catch (err) {
+      return { error: `工具參數解析失敗：${err.message}`, hint: '請依參數定義以 JSON 物件 / 陣列傳入，不要把整段 JSON 包成字串。' };
+    }
 
     if (tool.name === 'wp_get_posts') {
       try {
@@ -2584,7 +2653,41 @@ async function executeApiTool(tool, args) {
       ? Math.max(tool.responseLimit || 0, 8000)
       : (tool.responseLimit || 2000);
 
-    if (!resp.ok) return { error: `HTTP ${resp.status}: ${text.slice(0, 500)}` };
+    if (!resp.ok) {
+      const errorBody = text.slice(0, 1500);
+      const result = { error: `HTTP ${resp.status}: ${errorBody}` };
+      // 為 Notion 失敗回應補上具體修正提示，避免模型卡住或謊報進度
+      if (tool.name && tool.name.startsWith('notion_')) {
+        let parsedErr = null;
+        try { parsedErr = JSON.parse(errorBody); } catch {}
+        const code = parsedErr?.code;
+        const msg = parsedErr?.message || '';
+        const hints = [];
+        if (resp.status === 401 || code === 'unauthorized') {
+          hints.push('Notion 授權失效，請至設定頁的 API 工具區塊重新授權。');
+        } else if (resp.status === 404 || code === 'object_not_found') {
+          hints.push('找不到該 page_id / database_id。請先用 notion_search 或上一步的回傳結果取得正確 ID，並確認該頁面已分享給此 integration。');
+        } else if (code === 'validation_error' || resp.status === 400) {
+          hints.push('Notion 認為請求結構錯誤。請逐欄重新檢查並依 Notion API 規格修正後重試（不要放棄、不要編造已完成）。');
+          if (/should be an object/i.test(msg) || /should be defined/i.test(msg)) {
+            hints.push('properties / parent / filter / children 等欄位必須是 JSON 物件或陣列，請直接以結構化資料傳入，不要序列化成字串。');
+          }
+          if (/database/i.test(msg) && tool.name === 'notion_create_database') {
+            hints.push('資料庫每個欄位都必須宣告型別，例如 { "Name": { "title": {} } }、{ "Date": { "date": {} } }、{ "Status": { "select": { "options": [...] } } }。');
+          }
+          if (tool.name === 'notion_append_block_children' && /children/i.test(msg)) {
+            hints.push('children 必須是 block 物件陣列，例如 [{ "object": "block", "type": "paragraph", "paragraph": { "rich_text": [{ "type": "text", "text": { "content": "..." } }] } }]。');
+          }
+        } else if (resp.status === 409 || code === 'conflict_error') {
+          hints.push('Notion 回報衝突，可能是同時編輯。請稍後重試或拆成更小的請求。');
+        } else if (resp.status === 429 || code === 'rate_limited') {
+          hints.push('Notion 速率限制，請等待 1-2 秒後重試，或拆批執行避免一次送出大量請求。');
+        }
+        if (hints.length) result.hint = hints.join(' ');
+        result.next_step = '修正後請重新呼叫該工具，直到任務完成；若 children 過大請拆批用 notion_append_block_children 多次寫入。';
+      }
+      return result;
+    }
 
     try {
       const parsed = JSON.parse(text);
@@ -2652,7 +2755,18 @@ async function streamAgentChat(message, history, translateConfig, model, systemP
   const dateStr = `${now.getFullYear()}年${now.getMonth() + 1}月${now.getDate()}日`;
   const dateContext = `當前日期：${dateStr}。搜尋資訊時，除非使用者明確指定時間範圍，否則一律以接近當前日期的資訊為準。回答中引用網路搜尋結果時，來源必須以 Markdown 超連結格式標注，例如：[標題](https://example.com)，不可只寫來源名稱而不附 URL。`;
 
-  const finalSystemPrompt = [dateContext, memoryContext, globalPrompt, modePrompt].filter(Boolean).join('\n\n');
+  // 工具使用守則：避免謊報進度、強制讀錯誤訊息修正後重試、結構化參數正確傳遞
+  const toolUsageContract = registryTools.length > 0
+    ? `[工具使用守則 — 必須嚴格遵守]
+1. 禁止謊報進度。不要寫「正在等待 API 回應」「請稍候」「已送出請求中」這類文字 — 你不是非同步行程，沒有「等待」的狀態。需要繼續做事就直接呼叫下一個工具，工具回傳前不要產出任何文字回覆。
+2. 工具回傳的 error / hint / next_step 欄位必須讀完，並依照提示修正後重新呼叫工具。看到 validation_error 不要放棄，要逐欄修正格式後重試。
+3. 結構化參數（type=object 或 type=array）必須直接以 JSON 物件 / 陣列傳遞，例如 properties 必須是 {"Name": {...}}，不要包成字串 "{\\"Name\\":...}"。
+4. Notion 工具的 properties / parent / filter / sorts / children 欄位都是物件或陣列，每個資料庫欄位都必須宣告型別，例如 {"Name":{"title":{}},"Date":{"date":{}},"Status":{"select":{"options":[{"name":"Todo"}]}}}。
+5. 若任務需要多步（例如建立資料庫 → 建立頁面 → 追加內容），請一步一步呼叫工具，每一步成功後再進行下一步。children 超過 100 筆要拆批呼叫 notion_append_block_children。
+6. 在使用者交付的所有任務都成功完成（或明確判定無法完成）之前，不要結束本輪輸出最終回答；只在每一步工具成功且任務已全部交付時才總結。`
+    : '';
+
+  const finalSystemPrompt = [dateContext, toolUsageContract, memoryContext, globalPrompt, modePrompt].filter(Boolean).join('\n\n');
   const effectiveContextChars = normalizeContextCharBudget(contextCharBudget);
   const fixedChars = (finalSystemPrompt?.length || 0) + message.length;
   const historyBudget = Math.max(0, effectiveContextChars - fixedChars);

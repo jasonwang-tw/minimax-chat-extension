@@ -6,7 +6,7 @@ Open Chat Hub 是一個多模型 AI 側邊欄工作台，讓你在瀏覽器內�
 
 ## 版本
 
-**v1.30.0** (2026-05-06)
+**v1.31.0** (2026-05-07)
 
 ## 功能特色
 
@@ -147,6 +147,22 @@ npm run build:css
 - **TailwindCSS + SCSS**：樣式設計
 
 ## Changelog
+
+## [1.31.0] - 2026-05-07
+### Fixed
+- 修復 MiniMax M2.7 透過 XML tool_call 呼叫 API 工具時，`object` / `array` 型別參數被當成字串送出，導致 Notion API 回 `should be an object, instead was "..."`、`validation_error` 等錯誤
+- 工具參數現在會依 schema 宣告自動 coerce：`object` / `array` 型別若收到字串 JSON 會被解析回原型別；解析失敗時直接回傳清楚的修正訊息給模型，不再讓錯誤的請求送到遠端
+- 擴大 API 工具錯誤訊息給模型的長度（500 → 1500 字），並在 Notion 失敗時自動附上 `hint` 與 `next_step`，提示驗證錯誤、ID 不存在、children 結構、速率限制等情況的修正方式
+
+### Added
+- Notion 工具預設新增四組端點，補齊資料庫 / 區塊操作能力：
+  - `notion_get_database`：讀取資料庫 schema（properties 定義）
+  - `notion_create_database`：在指定 parent page 底下建立資料庫，每個欄位必須宣告型別
+  - `notion_update_database`：更新資料庫標題、描述、欄位定義或圖示
+  - `notion_append_block_children`：在頁面或區塊底下追加 block 陣列（一次最多 100 筆）
+- API 工具設定頁載入時會自動補齊 OAuth2 預設新增的工具：已授權的 Notion / Gmail / Google 日曆 / GA4 不需重新「儲存端點設定」就能取得新工具
+- Registry 工具自動為 `object` 加上 `additionalProperties: true`，並在描述中提示「必須以 JSON 物件 / 陣列傳入，不要包成字串」，提升 Minimax 結構化參數正確率
+- Agent 對話新增「工具使用守則」system prompt，明文禁止謊報「正在等待 API 回應」「請稍候」等假進度，要求讀完工具回傳的 `error` / `hint` / `next_step` 後修正並重試，必要時拆批執行直到任務全部完成
 
 ## [1.30.0] - 2026-05-06
 ### Added

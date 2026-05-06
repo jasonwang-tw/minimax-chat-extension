@@ -1443,6 +1443,48 @@ document.addEventListener('DOMContentLoaded', async () => {
               { name: 'page_size',   description: '每頁筆數',                                                                                type: 'number', location: 'body', required: false }
             ],
             ...auth, responseLimit: 6000, enabled: true
+          },
+          {
+            name: 'notion_get_database', method: 'GET', url: `${base}/databases/{database_id}`,
+            description: '取得資料庫的 schema（properties 定義），用於確認欄位型別後再 create/update_page',
+            parameters: [
+              { name: 'database_id', description: '資料庫 ID', type: 'string', location: 'path', required: true }
+            ],
+            ...auth, responseLimit: 4000, enabled: true
+          },
+          {
+            name: 'notion_create_database', method: 'POST', url: `${base}/databases`,
+            description: '在指定 parent 頁面底下建立資料庫。每個 property 都必須宣告型別，例如 { "Name": { "title": {} }, "Status": { "select": { "options": [{ "name": "Todo" }] } }, "Date": { "date": {} } }',
+            parameters: [
+              { name: 'parent',      description: 'parent 物件，必須是 { "type": "page_id", "page_id": "..." }',                                                  type: 'object', location: 'body', required: true  },
+              { name: 'title',       description: '資料庫標題 rich_text 陣列，例如 [{ "type": "text", "text": { "content": "資料庫名" } }]',                       type: 'array',  items: { type: 'object' }, location: 'body', required: false },
+              { name: 'properties',  description: '欄位定義物件，每個 key 為欄位名，value 必須宣告型別（title/rich_text/number/select/multi_select/date/checkbox/url/email/phone_number/people/files/relation/formula/status 等）。例如 { "Name": { "title": {} }, "Status": { "select": { "options": [{ "name": "Todo" }, { "name": "Done" }] } } }', type: 'object', location: 'body', required: true  },
+              { name: 'icon',        description: '圖示物件，例如 { "type": "emoji", "emoji": "📁" }',                                                              type: 'object', location: 'body', required: false },
+              { name: 'is_inline',   description: '是否為 inline 資料庫（在頁面內顯示）',                                                                            type: 'boolean', location: 'body', required: false }
+            ],
+            ...auth, responseLimit: 4000, enabled: true
+          },
+          {
+            name: 'notion_update_database', method: 'PATCH', url: `${base}/databases/{database_id}`,
+            description: '更新資料庫的 title / description / properties / icon。修改既有 property 時 key 用原欄位名稱，刪除 property 時 value 設為 null',
+            parameters: [
+              { name: 'database_id', description: '資料庫 ID',                                                                                                       type: 'string', location: 'path', required: true  },
+              { name: 'title',       description: '新標題 rich_text 陣列（可選）',                                                                                    type: 'array',  items: { type: 'object' }, location: 'body', required: false },
+              { name: 'description', description: '新描述 rich_text 陣列（可選）',                                                                                    type: 'array',  items: { type: 'object' }, location: 'body', required: false },
+              { name: 'properties',  description: '要新增 / 修改 / 刪除的 property 物件。新增格式同 create_database，刪除時 value 為 null。',                          type: 'object', location: 'body', required: false },
+              { name: 'icon',        description: '圖示物件（可選）',                                                                                                 type: 'object', location: 'body', required: false }
+            ],
+            ...auth, responseLimit: 4000, enabled: true
+          },
+          {
+            name: 'notion_append_block_children', method: 'PATCH', url: `${base}/blocks/{block_id}/children`,
+            description: '在指定頁面或區塊底下追加子區塊（一次最多 100 筆）。children 必須是 block 物件陣列，例如 [{ "object": "block", "type": "paragraph", "paragraph": { "rich_text": [{ "type": "text", "text": { "content": "..." } }] } }]',
+            parameters: [
+              { name: 'block_id', description: '父頁面或父區塊 ID',                                                                                                  type: 'string', location: 'path', required: true  },
+              { name: 'children', description: 'block 物件陣列（最多 100 筆）。常見 type：paragraph / heading_1 / heading_2 / heading_3 / bulleted_list_item / numbered_list_item / to_do / toggle / code / quote / divider / callout', type: 'array', items: { type: 'object' }, location: 'body', required: true },
+              { name: 'after',    description: '插入位置（指定要附加到的兄弟 block ID 之後，省略則加到最末）',                                                       type: 'string', location: 'body', required: false }
+            ],
+            ...auth, responseLimit: 3000, enabled: true
           }
         ];
       }
@@ -2321,6 +2363,29 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
       return tool;
     });
+
+    // 自動 backfill：oauth2 預設新增的工具會自動補進已安裝的 preset，不必手動重新「儲存端點設定」
+    for (const preset of API_PRESETS) {
+      if (preset.kind !== 'oauth2' || typeof preset.generate !== 'function') continue;
+      const installedForPreset = apiToolRegistry.filter(
+        t => t.presetId === preset.id || (preset.toolPrefix && t.name && t.name.startsWith(preset.toolPrefix))
+      );
+      if (installedForPreset.length === 0) continue;
+      let presetGenerated;
+      try { presetGenerated = preset.generate(); } catch { continue; }
+      const knownNames = new Set(apiToolRegistry.map(t => t.name));
+      const missing = presetGenerated.filter(t => !knownNames.has(t.name));
+      if (missing.length === 0) continue;
+      const newTools = missing.map(t => ({
+        ...t,
+        id: generateToolId(),
+        presetId: preset.id,
+        enabled: true
+      }));
+      apiToolRegistry = [...apiToolRegistry, ...newTools];
+      migrated = true;
+    }
+
     if (migrated) await chrome.storage.local.set({ apiToolRegistry });
     renderApiPresets();
     renderApiToolRegistry();
