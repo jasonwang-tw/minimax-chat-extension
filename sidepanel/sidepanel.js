@@ -219,6 +219,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   let sessions = [];
   let currentSession = null;
   let isLoading = false;
+  let spaces = [];
+  let currentSpaceId = null;
   let planModeSetting = 'auto';
   let _currentPlanRecordIndex = -1;
   let pendingCommand = null; // { cmd, icon } — 選取但尚未送出的指令
@@ -327,6 +329,19 @@ document.addEventListener('DOMContentLoaded', async () => {
     return Array.isArray(values)
       ? values.map(v => String(v).trim().toLowerCase()).filter(Boolean)
       : String(values || '').split('+').map(v => v.trim().toLowerCase()).filter(Boolean);
+  }
+
+  function getInputModalities(model) {
+    const values = model?.architecture?.input_modalities || model?.input_modalities || model?.inputModalities || [];
+    return Array.isArray(values)
+      ? values.map(v => String(v).trim().toLowerCase()).filter(Boolean)
+      : String(values || '').split('+').map(v => v.trim().toLowerCase()).filter(Boolean);
+  }
+
+  async function currentModelSupportsOpenRouterImages(openrouterApiKey) {
+    if (!openrouterApiKey || currentModel === 'MiniMax-M2.7') return false;
+    const pricingMap = await getOpenRouterPricingMap(openrouterApiKey);
+    return getInputModalities(pricingMap[currentModel] || {}).includes('image');
   }
 
   async function getOpenRouterPricingMap(apiKey) {
@@ -529,6 +544,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           modelPickerBtn.classList.remove('open');
           modelPickerDropdown.querySelectorAll('.model-picker-item').forEach(el => el.classList.toggle('active', el === btn));
           updateCharCounter();
+          checkApiKey();
         });
         modelPickerDropdown.appendChild(btn);
       });
@@ -537,6 +553,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const active = allItems.find(m => m.modelId === currentModel);
     if (active) modelPickerLabel.textContent = active.label;
     updateCharCounter();
+    checkApiKey();
   }
 
   function escSp(str) {
@@ -564,7 +581,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   chrome.storage.onChanged.addListener((changes, area) => {
     // sync area：API Key、設定、長期記憶、分類（跨裝置同步的資料）
     if (area === 'sync') {
-      if (changes.geminiApiKey || changes.apiKey) {
+      if (changes.geminiApiKey || changes.apiKey || changes.openrouterApiKey || changes.customModels) {
         checkApiKey();
       }
       if (changes.settings) {
@@ -2016,10 +2033,15 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   async function checkApiKey() {
-    const { apiKey, geminiApiKey } = await chrome.storage.sync.get(['apiKey', 'geminiApiKey']);
+    const { apiKey, geminiApiKey, openrouterApiKey } =
+      await chrome.storage.sync.get(['apiKey', 'geminiApiKey', 'openrouterApiKey']);
+    const usingMiniMax = currentModel === 'MiniMax-M2.7';
+    const hasActiveChatKey = usingMiniMax ? !!apiKey : !!openrouterApiKey;
+    const canDirectImageInput = await currentModelSupportsOpenRouterImages(openrouterApiKey);
+    const canAnalyzeImages = !!geminiApiKey || canDirectImageInput;
 
-    if (!apiKey) {
-      setStatus('請先設定 MiniMax API Key', true);
+    if (!hasActiveChatKey) {
+      setStatus(usingMiniMax ? '請先設定 MiniMax API Key' : '請先設定 OpenRouter API Key', true);
       messageInput.disabled = true;
       sendBtn.disabled = true;
       screenshotBtn.disabled = true;
@@ -2031,16 +2053,16 @@ document.addEventListener('DOMContentLoaded', async () => {
       messageInput.disabled = false;
     }
 
-    if (!geminiApiKey) {
+    if (!canAnalyzeImages) {
       screenshotBtn.disabled = true;
       uploadBtn.disabled = true;
       regionScreenshotBtn.disabled = true;
       ocrBtn.disabled = true;
       if (currentImages.length > 0) {
-        setStatus('請先設定 Gemini API Key 才能分析圖片', true);
+        setStatus('目前模型不支援直接圖片輸入，請先設定 Gemini API Key 才能分析圖片', true);
       }
     } else {
-      if (apiKey) {
+      if (hasActiveChatKey) {
         screenshotBtn.disabled = false;
         uploadBtn.disabled = false;
         regionScreenshotBtn.disabled = false;
@@ -2272,11 +2294,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     currentSession.messages.forEach(msg => {
       // 計畫歷程卡
       if (msg.role === 'plan') {
-        const statusLabel = msg.status === 'approved' ? '✓ 已批准' : msg.status === 'cancelled' ? '✗ 已取消' : '⏳ 待處理';
+        const statusLabel = msg.status === 'approved' ? '已批准' : msg.status === 'cancelled' ? '已取消' : '待處理';
         const statusClass = msg.status === 'approved' ? 'approved' : msg.status === 'cancelled' ? 'cancelled' : 'pending';
         const div = document.createElement('div');
         div.className = `plan-history-record plan-history-${statusClass}`;
-        div.innerHTML = `<span class="plan-history-icon">☷</span><span class="plan-history-summary">${escapeHtml(msg.summary || msg.originalMessage || '計畫')}</span><span class="plan-history-status">${statusLabel}</span>`;
+        div.innerHTML = `<span class="plan-history-icon">${getToolIconSvg('plan')}</span><span class="plan-history-summary">${escapeHtml(msg.summary || msg.originalMessage || '計畫')}</span><span class="plan-history-status">${statusLabel}</span>`;
         chatMessages.appendChild(div);
         return;
       }
@@ -2327,9 +2349,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         preview = item.message.length > 55 ? item.message.slice(0, 55) + '…' : item.message;
       } else if (item.images.length > 0) {
         const first = item.images[0];
-        preview = first.fileName ? `📎 ${first.fileName}` : `📎 附件 ${item.images.length} 個`;
+        preview = first.fileName ? `附件 ${first.fileName}` : `附件 ${item.images.length} 個`;
       } else if (item.pageCtx) {
-        preview = `📄 ${(item.pageCtx.title || '頁面').slice(0, 35)}`;
+        preview = `頁面 ${(item.pageCtx.title || '頁面').slice(0, 35)}`;
       } else {
         preview = '（空）';
       }
@@ -2542,9 +2564,9 @@ document.addEventListener('DOMContentLoaded', async () => {
       : commandDisplayLabel
       ? commandDisplayLabel
       : isPageOnly
-        ? `📄 ${pageTitle?.slice(0, 40) || '讀取頁面'}`
+        ? `讀取頁面：${pageTitle?.slice(0, 40) || '目前頁面'}`
         : longInputFile
-          ? `📋 長輸入（${(message.length / 1000).toFixed(1)}k 字）`
+          ? `長輸入（${(message.length / 1000).toFixed(1)}k 字）`
           : message;
 
     const userMessage = { role: 'user', content: displayMessage };
@@ -2647,7 +2669,8 @@ document.addEventListener('DOMContentLoaded', async () => {
       memoryContext,
       sessionId: currentSession?.id,
       skipTools,
-      planMode: planModeForSend
+      planMode: planModeForSend,
+      spaceInstructions: currentSession?.spaceId ? (spaces.find(s => s.id === currentSession.spaceId)?.instructions || '') : ''
     };
 
     port.onMessage.addListener(async (msg) => {
@@ -2673,7 +2696,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (msg.type === 'agent_thinking') {
         _agentIter = msg.iter;
         if (!agentStatusEl) startAgentStatus();
-        updateAgentStatus(msg.maxIter ? `第 ${msg.iter}/${msg.maxIter} 輪，AI 分析中...` : `第 ${msg.iter} 輪，AI 分析中...`);
+        updateAgentStatus(msg.maxIter ? `第 ${msg.iter}/${msg.maxIter} 輪，思考中...` : `第 ${msg.iter} 輪，思考中...`);
         return;
       }
       if (msg.type === 'tool_start') {
@@ -2683,7 +2706,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         return;
       }
       if (msg.type === 'tool_done') {
-        updateAgentStatus(msg.error ? `第 ${_agentIter} 輪，工具失敗，改用補救流程...` : `第 ${_agentIter} 輪，AI 分析結果中...`);
+        updateAgentStatus(msg.error ? `第 ${_agentIter} 輪，工具失敗，改用補救流程...` : `第 ${_agentIter} 輪，分析結果中...`);
         if (_agentSearchLog.length > 0) {
           _agentSearchLog[_agentSearchLog.length - 1].count = msg.count;
           _agentSearchLog[_agentSearchLog.length - 1].error = msg.error || null;
@@ -2935,7 +2958,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     statusNoticeEl.textContent = text;
     chatMessages.appendChild(statusNoticeEl);
     scrollToBottom();
-    if (duration > 0) setTimeout(() => { if (statusNoticeEl) { statusNoticeEl.remove(); statusNoticeEl = null; } }, duration);
+    const currentNotice = statusNoticeEl;
+    if (duration > 0) {
+      setTimeout(() => {
+        if (statusNoticeEl === currentNotice) {
+          statusNoticeEl.remove();
+          statusNoticeEl = null;
+        }
+      }, duration);
+    }
   }
   function clearStatus() { setStatus(''); }
 
@@ -2946,7 +2977,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     agentStatusEl.className = 'agent-status-bar';
     agentStatusEl.innerHTML =
       '<span class="agent-status-dot"></span>' +
-      '<span class="agent-status-text">AI 分析中...</span>' +
+      '<span class="agent-status-text">思考中...</span>' +
       '<span class="agent-status-timer">0s</span>';
     chatMessages.appendChild(agentStatusEl);
     scrollToBottom();
@@ -2976,13 +3007,22 @@ document.addEventListener('DOMContentLoaded', async () => {
     _agentIter = 0;
   }
 
-  function getBrowserToolIcon(tool) {
+  function getToolIconSvg(kind) {
     const map = {
-      browser_click: '🖱', browser_fill: '✏️', browser_select: '🔽',
-      browser_get_text: '📄', browser_get_html: '🧩',
-      browser_scroll: '↕️', browser_wait_for: '⏳', browser_navigate: '🌐'
+      search: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>',
+      deep_search: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/><path d="M11 8v6"/><path d="M8 11h6"/></svg>',
+      api: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v4"/><path d="M12 17v4"/><path d="M4.2 7.5l3.5 2"/><path d="M16.3 14.5l3.5 2"/><path d="M19.8 7.5l-3.5 2"/><path d="M7.7 14.5l-3.5 2"/><circle cx="12" cy="12" r="5"/></svg>',
+      plan: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6h13"/><path d="M8 12h13"/><path d="M8 18h13"/><path d="M3 6h.01"/><path d="M3 12h.01"/><path d="M3 18h.01"/></svg>',
+      browser_click: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3l10 10-5 1.2L9.8 20 7 3Z"/></svg>',
+      browser_fill: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>',
+      browser_select: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg>',
+      browser_get_text: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h9l3 3v15H6z"/><path d="M9 10h6"/><path d="M9 14h6"/><path d="M9 18h4"/></svg>',
+      browser_get_html: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 9-4 3 4 3"/><path d="m16 9 4 3-4 3"/><path d="m14 5-4 14"/></svg>',
+      browser_scroll: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14"/><path d="m8 9 4-4 4 4"/><path d="m8 15 4 4 4-4"/></svg>',
+      browser_wait_for: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>',
+      browser_navigate: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a14 14 0 0 1 0 18"/><path d="M12 3a14 14 0 0 0 0 18"/></svg>'
     };
-    return map[tool] || '🔧';
+    return map[kind] || map.api;
   }
 
   function getBrowserToolLabel(tool) {
@@ -2995,10 +3035,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   function getAgentToolLabel(tool) {
-    if (tool === 'deep_search') return '🔎 深度搜尋';
-    if (tool === 'web_search') return '🔍 搜尋網路';
-    if (tool?.startsWith('browser_')) return `${getBrowserToolIcon(tool)} ${getBrowserToolLabel(tool)}`;
-    return `🔌 ${tool}`;
+    if (tool === 'deep_search') return '深度搜尋';
+    if (tool === 'web_search') return '搜尋網路';
+    if (tool?.startsWith('browser_')) return getBrowserToolLabel(tool);
+    return tool;
   }
 
   function buildSearchHistoryEl(log) {
@@ -3008,15 +3048,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     const summaryText = (hasBrowser || hasApi) ? `已執行 ${total} 次操作` : `已執行 ${total} 次搜尋`;
     const items = log.map(e => {
       let icon, label;
-      if (e.tool === 'deep_search') { icon = '🔎'; label = '深度搜尋'; }
-      else if (e.tool === 'web_search') { icon = '🔍'; label = '搜尋'; }
-      else if (e.tool?.startsWith('browser_')) { icon = getBrowserToolIcon(e.tool); label = getBrowserToolLabel(e.tool); }
-      else { icon = '🔌'; label = e.tool; }
+      if (e.tool === 'deep_search') { icon = getToolIconSvg('deep_search'); label = '深度搜尋'; }
+      else if (e.tool === 'web_search') { icon = getToolIconSvg('search'); label = '搜尋'; }
+      else if (e.tool?.startsWith('browser_')) { icon = getToolIconSvg(e.tool); label = getBrowserToolLabel(e.tool); }
+      else { icon = getToolIconSvg('api'); label = e.tool; }
       const countStr = e.error
         ? `<span class="agent-sh-count error">失敗</span>`
         : (e.count != null ? `<span class="agent-sh-count">${e.count} 筆</span>` : '');
       const errorText = e.error ? `<div class="agent-sh-error">${escapeHtml(e.error)}</div>` : '';
-      return `<li><span class="agent-sh-icon">${icon}</span><span class="agent-sh-label">${label}</span><span class="agent-sh-query">「${escapeHtml(e.query)}」</span>${countStr}${errorText}</li>`;
+      const queryText = e.query ? `<span class="agent-sh-query">「${escapeHtml(e.query)}」</span>` : '';
+      return `<li><span class="agent-sh-icon">${icon}</span><span class="agent-sh-label">${escapeHtml(label)}</span>${queryText}${countStr}${errorText}</li>`;
     }).join('');
     const div = document.createElement('div');
     div.className = 'agent-search-history';
@@ -3065,12 +3106,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     const riskText = plan?.risk || '';
     const riskLevel = /高/.test(riskText) ? 'high' : /中/.test(riskText) ? 'medium' : 'low';
     const riskLabel = { high: '高風險', medium: '中風險', low: '低風險' }[riskLevel];
+    const riskReason = riskText.replace(/^(低|中|高)\s*[—\-–]\s*/u, '').trim();
 
     const card = document.createElement('div');
     card.className = 'agent-plan-card';
     card.innerHTML = `
       <div class="agent-plan-header">
-        <span class="agent-plan-icon">☷</span>
+        <span class="agent-plan-icon">${getToolIconSvg('plan')}</span>
         <span>計畫模式</span>
       </div>
       <div class="agent-plan-body">
@@ -3078,7 +3120,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         <div class="agent-plan-section"><span>可用工具</span><strong>${tools.map(escapeHtml).join('、')}</strong></div>
         <div class="agent-plan-section">
           <span>風險等級</span>
-          <strong class="plan-risk-badge plan-risk-${riskLevel}">${riskLabel}${riskText && riskText !== riskLabel ? ` — ${escapeHtml(riskText)}` : ''}</strong>
+          <strong class="plan-risk-badge plan-risk-${riskLevel}">${riskLabel}${riskReason ? ` — ${escapeHtml(riskReason)}` : ''}</strong>
         </div>
         <div class="agent-plan-section">
           <span>執行步驟</span>
@@ -3086,8 +3128,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         </div>
       </div>
       <div class="agent-plan-actions">
-        <button type="button" class="agent-plan-approve">Approve plan</button>
-        <button type="button" class="agent-plan-cancel">Make changes</button>
+        <button type="button" class="agent-plan-approve">批准計畫</button>
+        <button type="button" class="agent-plan-cancel">修改計畫</button>
       </div>
       <div class="agent-plan-footnote">批准後才會執行工具。高風險 API / SSH 工具未啟用。</div>
     `;
@@ -3161,7 +3203,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (msg.type === 'agent_thinking') {
         _agentIter = msg.iter;
         if (!agentStatusEl) startAgentStatus();
-        updateAgentStatus(msg.maxIter ? `第 ${msg.iter}/${msg.maxIter} 輪，AI 分析中...` : `第 ${msg.iter} 輪，AI 分析中...`);
+        updateAgentStatus(msg.maxIter ? `第 ${msg.iter}/${msg.maxIter} 輪，思考中...` : `第 ${msg.iter} 輪，思考中...`);
         return;
       }
       if (msg.type === 'tool_start') {
@@ -3171,7 +3213,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         return;
       }
       if (msg.type === 'tool_done') {
-        updateAgentStatus(msg.error ? `第 ${_agentIter} 輪，工具失敗，改用補救流程...` : `第 ${_agentIter} 輪，AI 分析結果中...`);
+        updateAgentStatus(msg.error ? `第 ${_agentIter} 輪，工具失敗，改用補救流程...` : `第 ${_agentIter} 輪，分析結果中...`);
         if (_agentSearchLog.length > 0) {
           _agentSearchLog[_agentSearchLog.length - 1].count = msg.count;
           _agentSearchLog[_agentSearchLog.length - 1].error = msg.error || null;
@@ -3567,14 +3609,14 @@ document.addEventListener('DOMContentLoaded', async () => {
   // ── Commands ─────────────────────────────────────────────
 
   const BUILTIN_COMMANDS = [
-    { trigger: '/page',      name: '讀取當前頁面',       type: 'action', icon: '📄' },
-    { trigger: '/page-code', name: '分析頁面原始碼/樣式', type: 'action', icon: '🔬', argHint: '/page-code <問題（可選）>' },
-    { trigger: '/plan',      name: '計畫模式',    type: 'action', icon: '☷', argHint: '/plan <任務>' },
-    { trigger: '/clear',    name: '清空對話',    type: 'action', icon: '🗑️' },
-    { trigger: '/new',      name: '新對話',      type: 'action', icon: '➕' },
-    { trigger: '/remember', name: '記住某件事',  type: 'action', icon: '🧠', argHint: '/remember <內容>' },
-    { trigger: '/search',      name: '一般搜尋（Brave）', type: 'action', icon: '🔍', argHint: '/search <關鍵字>' },
-    { trigger: '/deep-search', name: '深度搜尋（Exa）',   type: 'action', icon: '🔎', argHint: '/deep-search <關鍵字>' },
+    { trigger: '/page',      name: '讀取當前頁面',       type: 'action' },
+    { trigger: '/page-code', name: '分析頁面原始碼/樣式', type: 'action', argHint: '/page-code <問題（可選）>' },
+    { trigger: '/plan',      name: '計畫模式',    type: 'action', argHint: '/plan <任務>' },
+    { trigger: '/clear',    name: '清空對話',    type: 'action' },
+    { trigger: '/new',      name: '新對話',      type: 'action' },
+    { trigger: '/remember', name: '記住某件事',  type: 'action', argHint: '/remember <內容>' },
+    { trigger: '/search',      name: '一般搜尋（Brave）', type: 'action', argHint: '/search <關鍵字>' },
+    { trigger: '/deep-search', name: '深度搜尋（Exa）',   type: 'action', argHint: '/deep-search <關鍵字>' },
   ];
 
   async function loadCustomCommands() {
@@ -3810,7 +3852,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   async function handleWebSearch(query, searchType = 'WEB_SEARCH') {
     const isDeep = searchType === 'DEEP_SEARCH';
     const label = isDeep ? '深度搜尋' : '搜尋';
-    const icon = isDeep ? '🔎' : '🔍';
     if (!currentSession) startNewSession();
     isLoading = true;
     setStreamingMode(true);
@@ -3819,9 +3860,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     emptyState.classList.add('hidden');
     setStatus(`${label}中：${query}`);
 
-    const userMsg = { role: 'user', content: `${icon} /${isDeep ? 'deep-search' : 'search'} ${query}` };
+    const userMsg = { role: 'user', content: `/${isDeep ? 'deep-search' : 'search'} ${query}` };
     currentSession.messages.push(userMsg);
-    addMessage(`${icon} ${label}：${query}`, 'user');
+    addMessage(`${label}：${query}`, 'user');
 
     const result = await chrome.runtime.sendMessage({ type: searchType, data: { query } });
 
@@ -3835,14 +3876,14 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (result.error === 'NO_KEY') {
         setStatus(`請先至設定頁填入 ${isDeep ? 'Exa' : 'Brave'} Search API Key`, true, 4000);
       } else {
-        setStatus(`🔍 ${result.error}`, true, 5000);
+        setStatus(result.error, true, 5000);
       }
       messageInput.focus();
       return;
     }
 
     // 組成 context 交給 AI 分析
-    setStatus(`🔍 ${result.provider} 找到 ${result.results.length} 筆結果，分析中...`);
+    setStatus(`${result.provider} 找到 ${result.results.length} 筆結果，分析中...`);
     const snippets = result.results.map((r, i) =>
       `[${i + 1}] ${r.title}\n${r.snippet}\n來源：${r.url}`
     ).join('\n\n');
@@ -3975,7 +4016,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     // 上限 30 筆（sync 容量限制）
     if (memories.length > 30) memories.shift();
     await saveMemories();
-    setStatus(`✓ 已記住：${trimmed.slice(0, 30)}${trimmed.length > 30 ? '...' : ''}`, false, 3000);
+    setStatus(`已記住：${trimmed.slice(0, 30)}${trimmed.length > 30 ? '...' : ''}`, false, 3000);
   }
 
   async function openMemoryModal() {
@@ -4679,10 +4720,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     const actionBtns = (item) => `
       <div class="summary-item-footer">
         <button class="btn-summary-action btn-add-to-memory${item.addedToMemory ? ' disabled' : ''}" data-id="${item.id}"${item.addedToMemory ? ' disabled' : ''}>
-          ${item.addedToMemory ? '✓ 已加入長期記憶' : '+ 加入長期記憶'}
+          ${item.addedToMemory ? '已加入長期記憶' : '+ 加入長期記憶'}
         </button>
         <button class="btn-summary-action btn-add-to-kb${item.addedToKb ? ' disabled' : ''}" data-id="${item.id}"${item.addedToKb ? ' disabled' : ''}>
-          ${item.addedToKb ? '✓ 已加入知識庫' : '+ 加入知識庫'}
+          ${item.addedToKb ? '已加入知識庫' : '+ 加入知識庫'}
         </button>
       </div>`;
 
@@ -5555,4 +5596,646 @@ document.addEventListener('DOMContentLoaded', async () => {
       minute: '2-digit'
     });
   }
+
+  // ── Spaces ────────────────────────────────────────────────────
+
+  const SPACE_ICONS = [
+    { id: 'folder',       path: '<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>' },
+    { id: 'briefcase',    path: '<rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/><line x1="12" y1="12" x2="12" y2="12"/><path d="M2 12h20"/>' },
+    { id: 'trending-up',  path: '<polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/>' },
+    { id: 'code',         path: '<polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/>' },
+    { id: 'book-open',    path: '<path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>' },
+    { id: 'pen',          path: '<path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>' },
+    { id: 'heart',        path: '<path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>' },
+    { id: 'globe',        path: '<circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>' },
+    { id: 'home',         path: '<path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/>' },
+    { id: 'rocket',       path: '<path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="M12 15l-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"/><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/>' },
+    { id: 'star',         path: '<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>' },
+    { id: 'music',        path: '<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>' },
+    { id: 'target',       path: '<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>' },
+    { id: 'zap',          path: '<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>' },
+    { id: 'coffee',       path: '<path d="M18 8h1a4 4 0 0 1 0 8h-1"/><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"/><line x1="6" y1="1" x2="6" y2="4"/><line x1="10" y1="1" x2="10" y2="4"/><line x1="14" y1="1" x2="14" y2="4"/>' },
+    { id: 'graduation',   path: '<path d="M22 10v6M2 10l10-5 10 5-10 5z"/><path d="M6 12v5c3 3 9 3 12 0v-5"/>' },
+    { id: 'layers',       path: '<polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/>' },
+    { id: 'cpu',          path: '<rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><line x1="9" y1="1" x2="9" y2="4"/><line x1="15" y1="1" x2="15" y2="4"/><line x1="9" y1="20" x2="9" y2="23"/><line x1="15" y1="20" x2="15" y2="23"/><line x1="20" y1="9" x2="23" y2="9"/><line x1="20" y1="14" x2="23" y2="14"/><line x1="1" y1="9" x2="4" y2="9"/><line x1="1" y1="14" x2="4" y2="14"/>' },
+    { id: 'message',      path: '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>' },
+    { id: 'search',       path: '<circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>' },
+    { id: 'bar-chart',    path: '<line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/>' },
+    { id: 'dollar',       path: '<line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>' },
+    { id: 'airplane',     path: '<path d="M17.8 19.2 16 11l3.5-3.5C21 6 21 4 19 4c-1 0-2 .5-2.8 1.3L13 9 4.8 6.2c-.5-.2-1.1 0-1.4.5l-.5.9c-.2.4-.1.9.3 1.2L9 12H5l-1-1H2l2 4 2 2h4l-1-1v-1l3.6 3.6c.3.3.8.5 1.2.3l.9-.5c.5-.3.7-.9.5-1.4z"/>' },
+    { id: 'flask',        path: '<path d="M9 3h6v11l3.5 6H5.5L9 14V3z"/><line x1="9" y1="3" x2="15" y2="3"/><path d="M6 14h12"/>' },
+    { id: 'sun',          path: '<circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>' },
+    { id: 'gamepad',      path: '<line x1="6" y1="12" x2="10" y2="12"/><line x1="8" y1="10" x2="8" y2="14"/><line x1="15" y1="13" x2="15.01" y2="13"/><line x1="18" y1="11" x2="18.01" y2="11"/><rect x="2" y="6" width="20" height="12" rx="2"/>' },
+    { id: 'shopping',     path: '<circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/>' },
+    { id: 'camera',       path: '<path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/>' },
+    { id: 'tool',         path: '<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>' },
+    { id: 'users',        path: '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>' },
+    { id: 'leaf',         path: '<path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10z"/><path d="M2 21c0-3 1.85-5.36 5.08-6C9.5 14.52 12 13 13 12"/>' },
+  ];
+
+  function getSpaceIconSvg(iconId, size = 18) {
+    const icon = SPACE_ICONS.find(i => i.id === iconId) || SPACE_ICONS[0];
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${icon.path}</svg>`;
+  }
+
+  function getSpaceDisplayIcon(space, size = 18) {
+    if (space.icon) return getSpaceIconSvg(space.icon, size);
+    if (space.emoji) return `<span style="font-size:${size}px;line-height:1">${space.emoji}</span>`;
+    return getSpaceIconSvg('folder', size);
+  }
+
+  const openSpacesBtn     = document.getElementById('openSpacesBtn');
+  const spacesPanel       = document.getElementById('spacesPanel');
+  const spacesListView    = document.getElementById('spacesListView');
+  const spaceDetailView   = document.getElementById('spaceDetailView');
+  const spacesPanelClose  = document.getElementById('spacesPanelClose');
+  const spaceDetailClose  = document.getElementById('spaceDetailClose');
+  const spacesSearchToggleBtn = document.getElementById('spacesSearchToggleBtn');
+  const spacesSearchBar   = document.getElementById('spacesSearchBar');
+  const spacesSearchInput = document.getElementById('spacesSearchInput');
+  const spacesClearSearch = document.getElementById('spacesClearSearch');
+  const spacesList        = document.getElementById('spacesList');
+  const createSpaceBtn    = document.getElementById('createSpaceBtn');
+  const spaceBackBtn      = document.getElementById('spaceBackBtn');
+  const spaceDetailEmoji  = document.getElementById('spaceDetailEmoji');
+  const spaceDetailName   = document.getElementById('spaceDetailName');
+  const spaceSettingsBtn  = document.getElementById('spaceSettingsBtn');
+  const spaceInfoBar      = document.getElementById('spaceInfoBar');
+  const spaceSessionsList = document.getElementById('spaceSessionsList');
+  const spaceMessageInput = document.getElementById('spaceMessageInput');
+  const spaceStartSessionBtn   = document.getElementById('spaceStartSessionBtn');
+  const spaceAddSessionDrawer  = document.getElementById('spaceAddSessionDrawer');
+  const spaceAddSessionClose   = document.getElementById('spaceAddSessionClose');
+  const spaceAddSessionList    = document.getElementById('spaceAddSessionList');
+  const spaceSettingsDrawer  = document.getElementById('spaceSettingsDrawer');
+  const spaceSettingsClose   = document.getElementById('spaceSettingsClose');
+  const spaceIconBtn         = document.getElementById('spaceIconBtn');
+  const spaceIconPicker      = document.getElementById('spaceIconPicker');
+  const spaceNameInput       = document.getElementById('spaceNameInput');
+  const spaceInstructionsInput = document.getElementById('spaceInstructionsInput');
+  const spaceLinkInput       = document.getElementById('spaceLinkInput');
+  const spaceAddLinkBtn      = document.getElementById('spaceAddLinkBtn');
+  const spaceLinksList       = document.getElementById('spaceLinksList');
+  const spaceDeleteBtn       = document.getElementById('spaceDeleteBtn');
+  const spaceSettingsSave    = document.getElementById('spaceSettingsSave');
+  const createSpaceModal     = document.getElementById('createSpaceModal');
+  const createSpaceModalOverlay = document.getElementById('createSpaceModalOverlay');
+  const createSpaceModalClose   = document.getElementById('createSpaceModalClose');
+  const createSpaceIconBtn      = document.getElementById('createSpaceIconBtn');
+  const createSpaceIconPicker   = document.getElementById('createSpaceIconPicker');
+  const createSpaceNameInput    = document.getElementById('createSpaceNameInput');
+  const createSpaceConfirmBtn   = document.getElementById('createSpaceConfirmBtn');
+
+  let editingSpaceId = null;
+  let settingsDrawerIcon = 'folder';
+  let createModalIcon = 'folder';
+
+  async function loadSpaces() {
+    const res = await chrome.runtime.sendMessage({ type: 'GET_SPACES' });
+    spaces = res?.data || [];
+  }
+
+  async function saveSpaceData(space) {
+    await chrome.runtime.sendMessage({ type: 'SAVE_SPACE', data: { space } });
+    await loadSpaces();
+  }
+
+  async function deleteSpaceData(spaceId) {
+    await chrome.runtime.sendMessage({ type: 'DELETE_SPACE', data: { spaceId } });
+    await loadSpaces();
+  }
+
+  function openSpacesPanel() {
+    spacesPanel.classList.remove('hidden');
+    openSpacesBtn.classList.add('active');
+    showSpacesListView();
+    renderSpacesList();
+  }
+
+  function closeSpacesPanel() {
+    spacesPanel.classList.add('hidden');
+    openSpacesBtn.classList.remove('active');
+    closeSettingsDrawer();
+  }
+
+  function showSpacesListView() {
+    spacesListView.classList.remove('hidden');
+    spaceDetailView.classList.add('hidden');
+    currentSpaceId = null;
+  }
+
+  function showSpaceDetailView(spaceId) {
+    currentSpaceId = spaceId;
+    const space = spaces.find(s => s.id === spaceId);
+    if (!space) return;
+    spaceDetailEmoji.innerHTML = getSpaceDisplayIcon(space, 20);
+    spaceDetailName.textContent = space.name;
+    spacesListView.classList.add('hidden');
+    spaceDetailView.classList.remove('hidden');
+    renderSpaceInfoBar(space);
+    renderSpaceSessionsList();
+  }
+
+  function renderSpaceInfoBar(space) {
+    const parts = [];
+    const hasInstructions = space.instructions?.trim();
+    const hasLinks = Array.isArray(space.links) && space.links.length > 0;
+
+    if (hasInstructions) {
+      const id = 'sib_' + space.id;
+      parts.push(`<div class="space-info-instructions">
+        <div class="space-info-instructions-text clamped" id="${id}">${escapeHtml(space.instructions.trim())}</div>
+        <button class="space-info-expand-btn" data-target="${id}">
+          <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+          展開說明
+        </button>
+      </div>`);
+    }
+
+    if (hasLinks) {
+      const chips = space.links.map(link => {
+        const host = (() => { try { return new URL(link.url).hostname; } catch { return ''; } })();
+        const label = host || link.url;
+        return `<a class="space-info-link-chip" href="${escapeHtml(link.url)}" target="_blank" rel="noopener">
+          <img src="https://www.google.com/s2/favicons?domain=${host}&sz=16" alt="" onerror="this.style.display='none'">
+          ${escapeHtml(label)}
+        </a>`;
+      }).join('');
+      parts.push(`<div class="space-info-links">${chips}</div>`);
+    }
+
+    if (!hasInstructions && !hasLinks) {
+      parts.push(`<div class="space-info-setup-hint" id="spaceSetupHintBtn">
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+        設定空間指示、連結，讓 AI 更了解此空間的用途
+      </div>`);
+    }
+
+    spaceInfoBar.innerHTML = parts.join('');
+
+    // 展開/收合說明
+    spaceInfoBar.querySelectorAll('.space-info-expand-btn').forEach(btn => {
+      const target = document.getElementById(btn.dataset.target);
+      if (!target) return;
+      btn.addEventListener('click', () => {
+        const collapsed = target.classList.toggle('clamped');
+        btn.innerHTML = collapsed
+          ? `<svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg> 展開說明`
+          : `<svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="18 15 12 9 6 15"/></svg> 收合說明`;
+      });
+    });
+
+    // 設定提示按鈕點擊直接開設定
+    document.getElementById('spaceSetupHintBtn')?.addEventListener('click', () => {
+      if (currentSpaceId) openSettingsDrawer(currentSpaceId);
+    });
+  }
+
+  const SPACE_EXAMPLES = [
+    { icon: 'briefcase', name: '工作專案' },
+    { icon: 'trending-up', name: '美股分析' },
+    { icon: 'code', name: '程式開發' },
+    { icon: 'book-open', name: '學習筆記' },
+    { icon: 'pen', name: '寫作創作' },
+    { icon: 'leaf', name: '健康管理' },
+  ];
+
+  function renderSpacesList(query = '') {
+    const q = query.toLowerCase().trim();
+    const filtered = q ? spaces.filter(s => s.name.toLowerCase().includes(q)) : spaces;
+
+    if (filtered.length === 0 && !q) {
+      spacesList.innerHTML = `
+        <div class="spaces-onboarding">
+          <div class="spaces-onboarding-hero">
+            <svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
+            <h4>什麼是空間？</h4>
+            <p>空間是獨立的工作區，讓不同主題的對話彼此隔離。每個空間可以設定專屬的 AI 指示、參考連結，讓 AI 更了解你在這個空間的工作情境。</p>
+          </div>
+          <div class="spaces-onboarding-tips">
+            <div class="spaces-tip-item">
+              <span class="spaces-tip-icon">🗂️</span>
+              <div>
+                <strong>對話隔離</strong>
+                <span>每個空間有獨立的對話記錄，不同任務互不干擾</span>
+              </div>
+            </div>
+            <div class="spaces-tip-item">
+              <span class="spaces-tip-icon">🧠</span>
+              <div>
+                <strong>空間指示</strong>
+                <span>設定 AI 在此空間的角色與行為，每次對話自動套用</span>
+              </div>
+            </div>
+            <div class="spaces-tip-item">
+              <span class="spaces-tip-icon">🔗</span>
+              <div>
+                <strong>參考連結</strong>
+                <span>加入常用網址，讓 AI 知道此空間優先參考的資源</span>
+              </div>
+            </div>
+          </div>
+          <div class="spaces-onboarding-examples">
+            <p class="spaces-examples-label">快速新增範例空間</p>
+            <div class="spaces-examples-chips">
+              ${SPACE_EXAMPLES.map(ex =>
+                `<button class="spaces-example-chip" data-icon="${ex.icon}" data-name="${ex.name}">
+                  ${getSpaceIconSvg(ex.icon, 13)} ${ex.name}
+                </button>`
+              ).join('')}
+            </div>
+          </div>
+        </div>`;
+
+      spacesList.querySelectorAll('.spaces-example-chip').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const name = btn.dataset.name;
+          const icon = btn.dataset.icon;
+          const newSpace = {
+            id: 'space_' + Date.now(),
+            name, icon,
+            instructions: '', files: [], links: [],
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+          };
+          await saveSpaceData(newSpace);
+          showSpaceDetailView(newSpace.id);
+        });
+      });
+      return;
+    }
+
+    if (filtered.length === 0 && q) {
+      spacesList.innerHTML = `<div class="space-sessions-empty">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+        <span>找不到「${escapeHtml(q)}」相關空間</span>
+      </div>`;
+      return;
+    }
+
+    spacesList.innerHTML = filtered.map(space => {
+      const sessionCount = sessions.filter(s => s.spaceId === space.id).length;
+      const meta = sessionCount > 0 ? `${sessionCount} 個對話` : '尚無對話';
+      return `<div class="space-item" data-id="${space.id}">
+        <div class="space-item-emoji">${getSpaceDisplayIcon(space, 20)}</div>
+        <div class="space-item-info">
+          <div class="space-item-name">${escapeHtml(space.name)}</div>
+          <div class="space-item-meta">${meta}</div>
+        </div>
+        <div class="space-item-chevron">
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+        </div>
+      </div>`;
+    }).join('');
+
+    spacesList.querySelectorAll('.space-item').forEach(el => {
+      el.addEventListener('click', () => showSpaceDetailView(el.dataset.id));
+    });
+  }
+
+  function renderSpaceSessionsList() {
+    const spaceSessions = sessions
+      .filter(s => String(s.spaceId) === String(currentSpaceId))
+      .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+
+    const addBtn = `<div class="space-add-session-row">
+      <button id="spaceAddExistingBtn" class="btn-add-existing-session">
+        <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+        加入現有對話
+      </button>
+    </div>`;
+
+    if (spaceSessions.length === 0) {
+      spaceSessionsList.innerHTML = `<div class="space-sessions-empty">
+        <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        <span>尚無對話，在下方輸入開始第一個</span>
+      </div>${addBtn}`;
+      document.getElementById('spaceAddExistingBtn')?.addEventListener('click', openAddSessionDrawer);
+      return;
+    }
+
+    spaceSessionsList.innerHTML = spaceSessions.map(session => {
+      const firstMsg = session.messages.find(m => m.role === 'user');
+      const preview = session.name || (firstMsg ? firstMsg.content.substring(0, 50) : '新對話');
+      return `<div class="space-session-item" data-id="${session.id}">
+        <div class="space-session-icon">
+          <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        </div>
+        <div class="space-session-info">
+          <div class="space-session-preview">${escapeHtml(preview)}</div>
+          <div class="space-session-time">${formatTime(session.timestamp)}</div>
+        </div>
+      </div>`;
+    }).join('');
+
+    spaceSessionsList.querySelectorAll('.space-session-item').forEach(el => {
+      el.addEventListener('click', () => {
+        const idx = sessions.findIndex(s => String(s.id) === el.dataset.id);
+        if (idx >= 0) {
+          loadSession(idx);
+          closeSpacesPanel();
+        }
+      });
+    });
+
+    // 「加入現有對話」按鈕（有對話時也顯示）
+    const addRowHtml = `<div class="space-add-session-row">
+      <button id="spaceAddExistingBtn" class="btn-add-existing-session">
+        <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+        加入現有對話
+      </button>
+    </div>`;
+    spaceSessionsList.insertAdjacentHTML('beforeend', addRowHtml);
+    document.getElementById('spaceAddExistingBtn')?.addEventListener('click', openAddSessionDrawer);
+  }
+
+  function openAddSessionDrawer() {
+    // 列出不屬於目前空間的 sessions
+    const others = sessions
+      .filter(s => String(s.spaceId) !== String(currentSpaceId))
+      .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+
+    if (others.length === 0) {
+      spaceAddSessionList.innerHTML = `<div class="space-sessions-empty"><span>沒有可加入的對話</span></div>`;
+    } else {
+      spaceAddSessionList.innerHTML = others.map(session => {
+        const firstMsg = session.messages.find(m => m.role === 'user');
+        const preview = session.name || (firstMsg ? firstMsg.content.substring(0, 50) : '新對話');
+        const tag = session.spaceId
+          ? `<span class="session-space-tag">${escapeHtml(spaces.find(sp => String(sp.id) === String(session.spaceId))?.name || '其他空間')}</span>`
+          : '';
+        return `<div class="space-session-item space-session-pick" data-id="${session.id}">
+          <div class="space-session-icon">
+            <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+          </div>
+          <div class="space-session-info">
+            <div class="space-session-preview">${escapeHtml(preview)}${tag}</div>
+            <div class="space-session-time">${formatTime(session.timestamp)}</div>
+          </div>
+        </div>`;
+      }).join('');
+
+      spaceAddSessionList.querySelectorAll('.space-session-pick').forEach(el => {
+        el.addEventListener('click', async () => {
+          const s = sessions.find(s => String(s.id) === el.dataset.id);
+          if (!s) return;
+          s.spaceId = currentSpaceId;
+          await chrome.runtime.sendMessage({ type: 'SAVE_SESSION', data: { session: s } });
+          closeAddSessionDrawer();
+          renderSpaceSessionsList();
+        });
+      });
+    }
+
+    spaceAddSessionDrawer.classList.remove('hidden');
+    requestAnimationFrame(() => spaceAddSessionDrawer.classList.add('visible'));
+  }
+
+  function closeAddSessionDrawer() {
+    spaceAddSessionDrawer.classList.remove('visible');
+    setTimeout(() => spaceAddSessionDrawer.classList.add('hidden'), 230);
+  }
+
+  function openSettingsDrawer(spaceId) {
+    editingSpaceId = spaceId;
+    const space = spaces.find(s => s.id === spaceId);
+    if (!space) return;
+
+    settingsDrawerIcon = space.icon || 'folder';
+    spaceIconBtn.innerHTML = getSpaceIconSvg(settingsDrawerIcon, 18);
+    spaceNameInput.value = space.name || '';
+    spaceInstructionsInput.value = space.instructions || '';
+    renderSettingsLinks(space.links || []);
+    renderIconPicker(spaceIconPicker, settingsDrawerIcon, (iconId) => {
+      settingsDrawerIcon = iconId;
+      spaceIconBtn.innerHTML = getSpaceIconSvg(iconId, 18);
+      spaceIconPicker.classList.add('hidden');
+    });
+
+    spaceSettingsDrawer.classList.remove('hidden');
+    requestAnimationFrame(() => spaceSettingsDrawer.classList.add('visible'));
+  }
+
+  function closeSettingsDrawer() {
+    spaceSettingsDrawer.classList.remove('visible');
+    spaceIconPicker.classList.add('hidden');
+    setTimeout(() => spaceSettingsDrawer.classList.add('hidden'), 230);
+  }
+
+  function renderSettingsLinks(links) {
+    if (!links.length) { spaceLinksList.innerHTML = ''; return; }
+    spaceLinksList.innerHTML = links.map((link, i) => {
+      const host = (() => { try { return new URL(link.url).hostname; } catch { return ''; } })();
+      return `<div class="space-link-item" data-idx="${i}">
+        <img class="space-link-favicon" src="https://www.google.com/s2/favicons?domain=${host}&sz=16" alt="" onerror="this.classList.add('fallback')">
+        <span class="space-link-url" title="${escapeHtml(link.url)}">${escapeHtml(link.url)}</span>
+        <button class="space-link-delete" data-idx="${i}" title="移除">
+          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>`;
+    }).join('');
+
+    spaceLinksList.querySelectorAll('.space-link-delete').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const space = spaces.find(s => s.id === editingSpaceId);
+        if (!space) return;
+        space.links.splice(Number(btn.dataset.idx), 1);
+        renderSettingsLinks(space.links);
+      });
+    });
+  }
+
+  function renderIconPicker(container, selectedId, onSelect) {
+    container.innerHTML = SPACE_ICONS.map(icon =>
+      `<button class="space-icon-option${icon.id === selectedId ? ' active' : ''}" data-id="${icon.id}" title="${icon.id}">
+        ${getSpaceIconSvg(icon.id, 17)}
+      </button>`
+    ).join('');
+    container.querySelectorAll('.space-icon-option').forEach(el => {
+      el.addEventListener('click', () => {
+        container.querySelectorAll('.space-icon-option').forEach(b => b.classList.remove('active'));
+        el.classList.add('active');
+        onSelect(el.dataset.id);
+      });
+    });
+  }
+
+  function openCreateSpaceModal() {
+    createModalIcon = 'folder';
+    createSpaceIconBtn.innerHTML = getSpaceIconSvg(createModalIcon, 18);
+    createSpaceNameInput.value = '';
+    createSpaceIconPicker.classList.add('hidden');
+    renderIconPicker(createSpaceIconPicker, createModalIcon, (iconId) => {
+      createModalIcon = iconId;
+      createSpaceIconBtn.innerHTML = getSpaceIconSvg(iconId, 18);
+      createSpaceIconPicker.classList.add('hidden');
+    });
+    createSpaceModal.classList.remove('hidden');
+    setTimeout(() => createSpaceNameInput.focus(), 50);
+  }
+
+  function closeCreateSpaceModal() {
+    createSpaceModal.classList.add('hidden');
+  }
+
+  // ── Spaces Event Listeners ────────────────────────────────
+
+  openSpacesBtn.addEventListener('click', async () => {
+    await loadSpaces();
+    openSpacesPanel();
+  });
+
+  spacesPanelClose.addEventListener('click', closeSpacesPanel);
+  spaceDetailClose.addEventListener('click', closeSpacesPanel);
+
+  spaceBackBtn.addEventListener('click', () => {
+    closeSettingsDrawer();
+    showSpacesListView();
+    renderSpacesList();
+  });
+
+  spacesSearchToggleBtn.addEventListener('click', () => {
+    const hidden = spacesSearchBar.classList.toggle('hidden');
+    if (!hidden) spacesSearchInput.focus();
+    else { spacesSearchInput.value = ''; renderSpacesList(); }
+  });
+
+  spacesSearchInput.addEventListener('input', () => {
+    const q = spacesSearchInput.value;
+    spacesClearSearch.classList.toggle('hidden', !q);
+    renderSpacesList(q);
+  });
+
+  spacesClearSearch.addEventListener('click', () => {
+    spacesSearchInput.value = '';
+    spacesClearSearch.classList.add('hidden');
+    renderSpacesList();
+    spacesSearchInput.focus();
+  });
+
+  createSpaceBtn.addEventListener('click', openCreateSpaceModal);
+
+  spaceSettingsBtn.addEventListener('click', () => {
+    if (currentSpaceId) openSettingsDrawer(currentSpaceId);
+  });
+
+  spaceSettingsClose.addEventListener('click', closeSettingsDrawer);
+  spaceAddSessionClose.addEventListener('click', closeAddSessionDrawer);
+
+  spaceIconBtn.addEventListener('click', () => {
+    spaceIconPicker.classList.toggle('hidden');
+  });
+
+  spaceAddLinkBtn.addEventListener('click', () => {
+    const url = spaceLinkInput.value.trim();
+    if (!url) return;
+    let normalized = url;
+    if (!/^https?:\/\//i.test(normalized)) normalized = 'https://' + normalized;
+    const space = spaces.find(s => s.id === editingSpaceId);
+    if (!space) return;
+    if (!Array.isArray(space.links)) space.links = [];
+    space.links.push({ url: normalized });
+    renderSettingsLinks(space.links);
+    spaceLinkInput.value = '';
+  });
+
+  spaceLinkInput.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); spaceAddLinkBtn.click(); }
+  });
+
+  spaceSettingsSave.addEventListener('click', async () => {
+    const space = spaces.find(s => s.id === editingSpaceId);
+    if (!space) return;
+    const name = spaceNameInput.value.trim();
+    if (!name) { spaceNameInput.focus(); return; }
+    space.name = name;
+    space.icon = settingsDrawerIcon;
+    space.instructions = spaceInstructionsInput.value.trim();
+    space.updatedAt = new Date().toISOString();
+    await saveSpaceData(space);
+    spaceDetailEmoji.innerHTML = getSpaceDisplayIcon(space, 20);
+    spaceDetailName.textContent = space.name;
+    renderSpaceInfoBar(space);
+    closeSettingsDrawer();
+  });
+
+  spaceDeleteBtn.addEventListener('click', async () => {
+    const space = spaces.find(s => s.id === editingSpaceId);
+    if (!space) return;
+    if (!confirm(`確定要刪除「${space.name}」空間？空間內的對話將回歸一般歷史紀錄。`)) return;
+    await deleteSpaceData(editingSpaceId);
+    closeSettingsDrawer();
+    showSpacesListView();
+    renderSpacesList();
+  });
+
+  // 空間輸入框：自動高度
+  spaceMessageInput.addEventListener('input', () => {
+    spaceMessageInput.style.height = 'auto';
+    spaceMessageInput.style.height = Math.min(spaceMessageInput.scrollHeight, 120) + 'px';
+  });
+
+  spaceMessageInput.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      startSessionFromSpace();
+    }
+  });
+
+  spaceStartSessionBtn.addEventListener('click', startSessionFromSpace);
+
+  async function startSessionFromSpace() {
+    const text = spaceMessageInput.value.trim();
+    if (!text || !currentSpaceId) return;
+    // 建立新 session，帶入 spaceId
+    currentSession = {
+      id: Date.now(),
+      timestamp: new Date().toISOString(),
+      messages: [],
+      model: currentModel,
+      spaceId: currentSpaceId
+    };
+    sessions.push(currentSession);
+    spaceMessageInput.value = '';
+    spaceMessageInput.style.height = 'auto';
+    closeSpacesPanel();
+    chatMessages.innerHTML = '';
+    emptyState.classList.add('hidden');
+    updateCurrentSessionBar();
+    // 發送第一則訊息
+    messageInput.value = text;
+    await handleSend();
+  }
+
+  // Create Space Modal
+  createSpaceIconBtn.addEventListener('click', () => {
+    createSpaceIconPicker.classList.toggle('hidden');
+  });
+
+  createSpaceModalClose.addEventListener('click', closeCreateSpaceModal);
+  createSpaceModalOverlay.addEventListener('click', closeCreateSpaceModal);
+
+  createSpaceConfirmBtn.addEventListener('click', async () => {
+    const name = createSpaceNameInput.value.trim();
+    if (!name) { createSpaceNameInput.focus(); return; }
+    const newSpace = {
+      id: 'space_' + Date.now(),
+      name,
+      icon: createModalIcon,
+      instructions: '',
+      files: [],
+      links: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+    await saveSpaceData(newSpace);
+    closeCreateSpaceModal();
+    showSpaceDetailView(newSpace.id);
+  });
+
+  createSpaceNameInput.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); createSpaceConfirmBtn.click(); }
+  });
+
+  await loadSpaces();
 });

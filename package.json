@@ -1,15 +1,12 @@
 {
   "name": "open-chat-hub",
-  "version": "1.25.0",
+  "version": "1.28.0",
   "description": "Open Chat Hub - 多模型 AI 側邊欄工作台",
   "scripts": {
     "build:css": "npx sass src/styles/sidepanel.scss sidepanel/sidepanel.css && npx sass src/styles/options.scss options/options.css",
     "build": "npm run build:css"
   },
   "devDependencies": {
-    "autoprefixer": "^10.4.18",
-    "postcss": "^8.4.35",
-    "sass": "^1.71.1",
-    "tailwindcss": "^3.4.1"
+    "sass": "^1.71.1"
   }
 }

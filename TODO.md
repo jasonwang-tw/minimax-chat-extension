@@ -166,6 +166,7 @@
 | ✅ Done | Plan Approval / 計畫模式 | 完成於 v1.25.0（含 off/auto/always 設定、風險分級、持久化、Make changes 回填） |
 | ✅ Done | 瀏覽器自動化 Phase 1 | 完成於 v1.24.x |
 | ✅ Done | API Tool Registry | 完成於 v1.26.0 |
+| ✅ Done | WordPress REST API 預設工具庫 | 完成於 v1.27.0（連線設定、端點勾選、端點內編輯、列表查詢防截斷） |
 | 🟠 P1 | SSH / Server Tool | Native Messaging 或後端 proxy，強制 Plan Approval |
 | 🔵 P4 | MiniMax TTS 升級 | 需 Plus 方案（$20/月）；升級方案後再實作 |
 | 🟠 P1 | System Prompt 壓縮 | M2.7 200k token 充分利用 |
@@ -173,7 +174,7 @@
 | 🟡 P2 | 任務腳本（Task Script） | 長任務腳本化，搭配 Agent |
 | 🟡 P2 | 筆記工具（MD Notes） | write/read/list note |
 | 🟡 P2 | 多模型並排比較 | 同一 prompt 同時送到 2-3 個模型，並排比較回覆品質、速度與成本 |
-| 🟡 P2 | Spaces 多空間 | tab-based 切換，搭配多窗口策略 |
+| ✅ Done | Spaces 多空間 Phase 1 | 完成於 v1.28.0（空間列表、設定、Sessions、指示注入） |
 | 🟡 P2 | 部落格助手 | jasonsbase-blog 實裝 |
 | 🟢 P3 | 瀏覽器自動化 Phase 3 | Native Messaging + Playwright（完整多 tab 自動化） |
 | 🟢 P3 | MiniMax 影片生成 | 需 Max 方案（$50/月）；非同步任務，複雜度高 |
@@ -267,6 +268,22 @@
 - 可以新增一個 API tool 並讓 AI 調用。
 - secret 不會暴露給模型。
 - API 寫入類操作一定需要使用者批准。
+
+### ✅ Done — WordPress REST API 預設工具庫（v1.27.0）
+
+將 WordPress REST API 從「匯入成自訂工具」改為獨立的預設工具庫設定流程，讓預設端點留在預設卡片內管理。
+
+主要工作：
+- 先設定站台網址、帳號與 Application Password，再勾選要啟用的預設端點。
+- 預設端點可在卡片內編輯說明、相對端點、HTTP 方法、回傳上限與參數。
+- 預設工具與自訂工具分流，自訂工具清單不再顯示 WordPress 預設端點。
+- `wp_get_posts` 使用精簡欄位與 WordPress total headers，避免文章內容過長造成列表被截斷。
+- 清理受限 `status=any/all` 查詢，避免公開文章查詢被 WordPress 權限拒絕。
+
+完成標準：
+- 使用者可完成 WordPress REST API 連線並直接啟用預設端點。
+- 文章列表查詢能正確顯示多篇文章與總筆數。
+- GET / POST 等預設端點不需重複顯示站台基本網址。
 
 ### 🟠 P1 — SSH / Server Tool
 
@@ -362,7 +379,7 @@
 主要工作：
 - 新增 `/blog` 入口。
 - 支援多種文章模式。
-- 接 WordPress REST API 建立/讀取/更新文章。
+- WordPress REST API 端點基礎已完成於 v1.27.0，後續需串接 `/blog` 入口與發布前確認流程。
 - 產生 Markdown 或 HTML 預覽。
 - 發布前使用者確認。
 
@@ -692,7 +709,20 @@ MVP：
 
 > 來源：MiniMax 最佳實踐 — 多窗口策略（第一窗口建框架、第二窗口迭代）
 
-- [ ] **Phase 1**：tab-based space 切換（獨立對話 context）
+### ⚠️ 架構決策（動工前須定案）— Session 並行能力
+
+**背景**：background.js 的 `onConnect` 每次建立獨立 port handler，背景層原生支援多串流並行。但 sidepanel.js 只有單一 `currentPort` / `currentLiveDiv`，切換 session 會中斷正在串流的回覆。
+
+| 實作方式 | 並行？ | 說明 |
+|---------|-------|------|
+| **Tab-based 切換**（同一 sidepanel 內） | ❌ | 切換 Space 會強制中斷當前串流，與現在行為相同 |
+| **多視窗**（每個 Space 獨立視窗） | ✅ | `chrome.windows.create` 建立新視窗，各自有獨立 sidepanel 實例與 port |
+| **Tab-based + 暫停/恢復串流** | ✅（UX 最佳） | 切換前保存串流狀態，切回時繼續；技術難度最高 |
+
+- [x] **決策**：採用面板內導航切換（非新視窗），Session 以 spaceId 歸屬
+- [x] **Phase 1**：空間列表 + 詳情 + 設定 Drawer + Sessions 隔離（v1.28.0）
+- [x] **空間指示**：自動注入 AI system prompt（v1.28.0）
+- [x] **SVG Icon 選取器**：30 個圖示，取代 Emoji（v1.28.0）
 - [ ] **Space 用途標示**：規劃 Space / 執行 Space / 筆記 Space
 - [ ] **跨 Space 共享記憶**：長期記憶在所有 Space 共用
 
