@@ -233,14 +233,14 @@ body {
 
 .history-item {
   display: flex;
-  align-items: center;
+  align-items: self-start;
   justify-content: space-between;
   padding: 8px 10px;
   border-radius: 8px;
   cursor: pointer;
   margin-bottom: 4px;
   transition: background 0.2s;
-  gap: 6px;
+  gap: 10px;
 }
 
 .history-item:hover {
@@ -255,6 +255,14 @@ body {
   flex: 1;
   min-width: 0;
   cursor: pointer;
+}
+
+.history-item-content {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
 }
 
 .history-item-actions {
@@ -365,11 +373,13 @@ body {
   align-self: flex-start;
   align-items: flex-start;
   max-width: 100%;
+  width: 100%;
 }
 
 .message.message-assistant .message-content {
   background: transparent;
   border-radius: 24px 24px 24px 6px;
+  width: 100%;
 }
 
 .message.message-assistant .btn-tts {
@@ -4995,8 +5005,10 @@ mark.search-keyword-current {
 
 .space-icon-picker {
   display: grid;
-  grid-template-columns: repeat(6, 1fr);
-  gap: 4px;
+  grid-template-columns: repeat(6, 36px);
+  justify-content: space-between;
+  row-gap: 16px;
+  column-gap: 10px;
   padding: 10px 0 4px;
 }
 .space-icon-picker.hidden {
@@ -5004,8 +5016,8 @@ mark.search-keyword-current {
 }
 
 .space-icon-option {
-  width: 100%;
-  aspect-ratio: 1;
+  width: 36px;
+  height: 36px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -5252,6 +5264,7 @@ mark.search-keyword-current {
 .history-space-tag {
   display: inline-flex;
   align-items: center;
+  flex-shrink: 0;
   padding: 1px 7px;
   background: rgba(236, 41, 112, 0.15);
   border: 1px solid rgba(236, 41, 112, 0.35);
@@ -5264,6 +5277,10 @@ mark.search-keyword-current {
   overflow: hidden;
   text-overflow: ellipsis;
   transition: background 0.15s, border-color 0.15s;
+}
+.history-item > .history-space-tag {
+  order: -1;
+  max-width: 88px;
 }
 .history-space-tag:hover {
   background: rgba(236, 41, 112, 0.25);

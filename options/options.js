@@ -2161,10 +2161,8 @@ document.addEventListener('DOMContentLoaded', async () => {
       showMessage(`已移除 ${preset.name} 工具`, 'success');
     });
 
-    // 初次載入時抓取 redirect URI
-    sendOAuthMessage('OAUTH_GET_REDIRECT_URI', { presetId: preset.id }).then(resp => {
-      if (resp.success) redirectUriEl.textContent = resp.data || '';
-    });
+    // 初次載入時同步已儲存的 OAuth 狀態與 redirect URI。
+    refreshOAuthStatus().catch(err => console.warn('[OAuth] refresh status failed:', err?.message || err));
 
     return card;
   }

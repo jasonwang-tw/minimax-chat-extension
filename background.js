@@ -2757,12 +2757,16 @@ ${toolContext}
       text: `最終整理逾時，已改用已取得的工具結果直接整理回覆。${errorMessage ? `原因：${errorMessage}` : ''}`,
       level: 'warning'
     });
+    const fallbackSystemPrompt = [
+      systemPrompt,
+      '你正在整理已取得的工具結果。請直接回答使用者問題，不要呼叫工具，不要輸出 XML、HTML 或任何工具呼叫標籤，例如 <search>、<query>、<minimax:tool_call>。'
+    ].filter(Boolean).join('\n\n');
     await streamMiniMaxChat(
       buildFinalFallbackPrompt(reason, errorMessage),
       [],
       null,
       model,
-      systemPrompt,
+      fallbackSystemPrompt,
       memoryContext,
       port,
       sessionId,
@@ -2780,6 +2784,10 @@ ${toolContext}
         body: JSON.stringify({ model: useModel, messages, tools })
       });
     } catch (err) {
+      if (toolsExecuted || toolObservations.length > 0) {
+        await streamFinalFallback('Agent 分析請求失敗，改用已取得的工具結果整理回覆。', err.message);
+        return;
+      }
       port.postMessage({
         type: 'agent_notice',
         text: `Agent 分析請求失敗：${err.message} 已改用一般串流回覆。`,
