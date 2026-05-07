@@ -148,6 +148,11 @@ npm run build:css
 
 ## Changelog
 
+## [1.31.2] - 2026-05-08
+### Fixed
+- 修正圖片型 / 掃描型 PDF 被 raw stream 內容誤判為文字型 PDF，避免錯誤優先走 OpenRouter PDF Inputs
+- 修正上傳 PDF 的對話 session 標題顯示為 `[圖]` 的問題，依附件類型顯示 `[PDF]`、`[圖]`、`[文字]` 或 `[檔]`
+
 ## [1.31.1] - 2026-05-07
 ### Fixed
 - 補強 Agent tool schema 的 object / array JSON 傳參提示，降低模型把結構化參數包成字串的機率

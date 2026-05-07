@@ -2109,11 +2109,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   function getSessionDefaultName(session) {
     if (!session) return '新對話';
     const firstUserMsg = (session.messages || []).find(m => m.role === 'user');
-    const hasImage = (session.messages || []).some(messageHasImage);
+    const fileSuffix = getSessionFileSuffix(session);
     const base = firstUserMsg
       ? firstUserMsg.content.substring(0, 40) + (firstUserMsg.content.length > 40 ? '...' : '')
       : '新對話';
-    return base + (hasImage ? ' [圖]' : '');
+    return base + fileSuffix;
   }
 
   function getSessionDisplayName(session) {
@@ -2260,11 +2260,11 @@ document.addEventListener('DOMContentLoaded', async () => {
           (session.pinned ? ' pinned' : '');
 
         const firstUserMsg = session.messages.find(m => m.role === 'user');
-        const hasImage = session.messages.some(messageHasImage);
+        const fileSuffix = getSessionFileSuffix(session);
         const defaultPreview = firstUserMsg
           ? firstUserMsg.content.substring(0, 40) + (firstUserMsg.content.length > 40 ? '...' : '')
           : '新對話';
-        let displayName = session.name || (defaultPreview + (hasImage ? ' [圖]' : ''));
+        let displayName = session.name || (defaultPreview + fileSuffix);
 
         // 關鍵字高亮
         if (query) {
@@ -3491,6 +3491,42 @@ document.addEventListener('DOMContentLoaded', async () => {
       const mimeType = String(att?.mimeType || att?.mime_type || '').toLowerCase();
       return type === 'image' || mimeType.startsWith('image/');
     });
+  }
+
+  function messageAttachmentTypes(msg) {
+    if (!msg) return [];
+    const types = [];
+    const addType = (type, mimeType = '') => {
+      const normalizedType = String(type || '').toLowerCase();
+      const normalizedMime = String(mimeType || '').toLowerCase();
+      if (normalizedType === 'pdf' || normalizedMime === 'application/pdf') types.push('pdf');
+      else if (normalizedType === 'text' || normalizedMime.startsWith('text/')) types.push('text');
+      else if (normalizedType === 'image' || normalizedMime.startsWith('image/')) types.push('image');
+      else if (normalizedType === 'file') types.push('file');
+    };
+
+    if (msg.image) addType('image');
+    if (Array.isArray(msg.images)) {
+      const fileInfos = Array.isArray(msg.fileInfos) ? msg.fileInfos : [];
+      msg.images.forEach((url, i) => {
+        const info = fileInfos[i] || {};
+        const mimeType = info.mimeType || info.mime_type || String(url || '').match(/^data:([^;]+);/)?.[1] || '';
+        addType(info.fileType || (mimeType === 'application/pdf' ? 'pdf' : 'image'), mimeType);
+      });
+    }
+    (msg.attachments || []).forEach(att => {
+      addType(att?.fileType || att?.type, att?.mimeType || att?.mime_type);
+    });
+    return [...new Set(types)];
+  }
+
+  function getSessionFileSuffix(session) {
+    const types = new Set((session.messages || []).flatMap(messageAttachmentTypes));
+    if (types.has('pdf')) return ' [PDF]';
+    if (types.has('image')) return ' [圖]';
+    if (types.has('text')) return ' [文字]';
+    if (types.has('file')) return ' [檔]';
+    return '';
   }
 
   function legacyMessageAttachments(msg) {

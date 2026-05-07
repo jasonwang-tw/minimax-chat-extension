@@ -1327,7 +1327,7 @@ function getDataUrlBase64(dataUrl) {
   return idx >= 0 ? String(dataUrl).slice(idx + 1) : '';
 }
 
-function samplePdfBinary(dataUrl, maxBase64Chars = 1200000) {
+function samplePdfBinary(dataUrl, maxBase64Chars = 6000000) {
   const base64 = getDataUrlBase64(dataUrl).slice(0, maxBase64Chars);
   try {
     return atob(base64);
@@ -1340,21 +1340,50 @@ function countPdfMarker(sample, marker) {
   return (sample.match(new RegExp(marker, 'g')) || []).length;
 }
 
-function isLikelyScannedPdf(file) {
+function stripPdfStreams(sample) {
+  // Text-like bytes inside compressed image/content streams produce false positives
+  // such as random "Tf" / "Tj" sequences. Route detection should only inspect
+  // readable PDF object dictionaries and uncompressed structural text.
+  return String(sample || '').replace(/\bstream\r?\n[\s\S]*?\r?\nendstream\b/g, ' stream\nendstream ');
+}
+
+function getPdfRouteSignals(file) {
   const sample = samplePdfBinary(file.dataUrl);
-  if (!sample) return false;
+  if (!sample) return {
+    imageCount: 0,
+    textBlocks: 0,
+    textOps: 0,
+    fontCount: 0,
+    toUnicodeCount: 0,
+    cleanTextScore: 0
+  };
 
   const imageCount = countPdfMarker(sample, '/Subtype\\s*/Image');
-  const textBlocks = countPdfMarker(sample, '\\bBT\\b') + countPdfMarker(sample, '\\bET\\b');
-  const textOps = countPdfMarker(sample, '\\bTj\\b') + countPdfMarker(sample, '\\bTJ\\b') + countPdfMarker(sample, '\\bTf\\b');
-  const fontCount = countPdfMarker(sample, '/Font\\b');
+  const structuralSample = stripPdfStreams(sample);
+  const textBlocks = countPdfMarker(structuralSample, '\\bBT\\b') + countPdfMarker(structuralSample, '\\bET\\b');
+  const textOps = countPdfMarker(structuralSample, '\\bTj\\b') + countPdfMarker(structuralSample, '\\bTJ\\b') + countPdfMarker(structuralSample, '\\bTf\\b');
+  const fontCount = countPdfMarker(structuralSample, '/Font\\b');
+  const toUnicodeCount = countPdfMarker(structuralSample, '/ToUnicode\\b');
+  const cleanTextScore = textBlocks + textOps;
 
-  return imageCount > 0 && textBlocks === 0 && textOps === 0 && fontCount === 0;
+  return { imageCount, textBlocks, textOps, fontCount, toUnicodeCount, cleanTextScore };
+}
+
+function isLikelyScannedPdf(file) {
+  const signals = getPdfRouteSignals(file);
+  return signals.imageCount > 0 && signals.cleanTextScore === 0;
+}
+
+function hasReliablePdfTextLayer(file) {
+  const signals = getPdfRouteSignals(file);
+  if (signals.cleanTextScore >= 4) return true;
+  return signals.cleanTextScore > 0 && signals.imageCount === 0 && (signals.fontCount > 0 || signals.toUnicodeCount > 0);
 }
 
 function classifyPdfRoute(pdfFiles) {
   if (!pdfFiles || pdfFiles.length === 0) return null;
-  return pdfFiles.some(isLikelyScannedPdf) ? 'gemini' : 'openrouter-pdf';
+  if (pdfFiles.some(isLikelyScannedPdf)) return 'gemini';
+  return pdfFiles.every(hasReliablePdfTextLayer) ? 'openrouter-pdf' : 'gemini';
 }
 
 function formatFileNames(files) {

@@ -153,6 +153,11 @@
 - 設定頁載入時會對所有 OAuth2 preset 自動補齊新增端點，舊 registry 不需手動重存設定
 - background Agent 載入舊 Notion registry 時會自動補齊 database schema 讀取 / 更新工具
 
+## Done (v1.31.2)
+
+- 修正圖片型 / 掃描型 PDF 的路由判斷，避免壓縮 stream 內的假文字 operator 造成誤走 OpenRouter PDF Inputs
+- 對話 session 標題依附件類型顯示 `[PDF]`、`[圖]`、`[文字]` 或 `[檔]`
+
 ## Done (v1.24.x)
 
 - 瀏覽器自動化 Phase 1：8 個 browser_* Agent Tools（click / fill / select / get_text / get_html / scroll / wait_for / navigate）
