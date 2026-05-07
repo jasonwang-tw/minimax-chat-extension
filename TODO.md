@@ -146,6 +146,13 @@
 - 設定頁 OAuth 卡片：Redirect URI 顯示與複製、Client ID/Secret 輸入、授權 / 取消授權、端點啟用切換
 - README 新增「API 工具 OAuth 設定」章節（Google Cloud Console 與 Notion Developers 步驟）
 
+## Done (v1.31.1)
+
+- Notion 預設工具新增 `notion_get_database` / `notion_update_database`，支援讀取與更新 database schema
+- Agent tool schema 補強 object / array JSON 傳參提示，降低結構化參數被包成字串的機率
+- 設定頁載入時會對所有 OAuth2 preset 自動補齊新增端點，舊 registry 不需手動重存設定
+- background Agent 載入舊 Notion registry 時會自動補齊 database schema 讀取 / 更新工具
+
 ## Done (v1.24.x)
 
 - 瀏覽器自動化 Phase 1：8 個 browser_* Agent Tools（click / fill / select / get_text / get_html / scroll / wait_for / navigate）

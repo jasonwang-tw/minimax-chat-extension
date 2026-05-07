@@ -1464,6 +1464,26 @@ document.addEventListener('DOMContentLoaded', async () => {
               { name: 'page_size',   description: '每頁筆數',                                                                                type: 'number', location: 'body', required: false }
             ],
             ...auth, responseLimit: 6000, enabled: true
+          },
+          {
+            name: 'notion_get_database', method: 'GET', url: `${base}/databases/{database_id}`,
+            description: '讀取 Notion database 的 schema（properties 定義與設定）。在寫入資料列前，先呼叫此工具確認欄位名稱與型別，避免 properties 結構錯誤',
+            parameters: [
+              { name: 'database_id', description: '資料庫 ID，不是 page ID', type: 'string', location: 'path', required: true }
+            ],
+            ...auth, responseLimit: 4000, enabled: true
+          },
+          {
+            name: 'notion_update_database', method: 'PATCH', url: `${base}/databases/{database_id}`,
+            description: '更新 Notion database 的 title / description / properties / icon。新增 / 修改 property 時 key 為欄位名稱，刪除 property 時 value 設為 null',
+            parameters: [
+              { name: 'database_id', description: '資料庫 ID',                                                                                                       type: 'string', location: 'path', required: true  },
+              { name: 'title',       description: '新標題 rich text 陣列（可選），例如 [{ "type": "text", "text": { "content": "新名稱" } }]',                        type: 'array',  items: { type: 'object' }, location: 'body', required: false },
+              { name: 'description', description: '新描述 rich text 陣列（可選）',                                                                                     type: 'array',  items: { type: 'object' }, location: 'body', required: false },
+              { name: 'properties',  description: '要新增 / 修改 / 刪除的 properties 物件。新增格式同 notion_create_database（支援簡寫如 "date"），刪除時 value 設為 null', type: 'object', location: 'body', required: false },
+              { name: 'icon',        description: '圖示物件（可選），例如 { "type": "emoji", "emoji": "📁" }',                                                          type: 'object', location: 'body', required: false }
+            ],
+            ...auth, responseLimit: 4000, enabled: true
           }
         ];
       }
@@ -2346,16 +2366,17 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
       return tool;
     });
-    const hasNotionPreset = apiToolRegistry.some(tool => tool.presetId === 'notion' || tool.name?.startsWith('notion_'));
-    if (hasNotionPreset) {
-      const generatedNotionTools = API_PRESETS.find(preset => preset.id === 'notion')?.generate() || [];
-      for (const toolName of ['notion_append_block_children', 'notion_create_database']) {
-        const hasTool = apiToolRegistry.some(tool => tool.name === toolName);
-        const generatedTool = generatedNotionTools.find(tool => tool.name === toolName);
-        if (!hasTool && generatedTool) {
-          apiToolRegistry.push(generatedTool);
-          migrated = true;
-        }
+    for (const preset of API_PRESETS.filter(preset => preset.kind === 'oauth2')) {
+      const hasPresetTools = apiToolRegistry.some(tool => tool.presetId === preset.id || tool.name?.startsWith(preset.toolPrefix));
+      if (!hasPresetTools) continue;
+      for (const generatedTool of preset.generate()) {
+        if (apiToolRegistry.some(tool => tool.name === generatedTool.name)) continue;
+        apiToolRegistry.push({
+          ...generatedTool,
+          id: generateToolId(),
+          presetId: preset.id
+        });
+        migrated = true;
       }
     }
     if (migrated) await chrome.storage.local.set({ apiToolRegistry });

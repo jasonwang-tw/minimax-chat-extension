@@ -148,6 +148,13 @@ npm run build:css
 
 ## Changelog
 
+## [1.31.1] - 2026-05-07
+### Fixed
+- 補強 Agent tool schema 的 object / array JSON 傳參提示，降低模型把結構化參數包成字串的機率
+- Notion 預設工具新增 `notion_get_database` / `notion_update_database`，支援讀取與更新 database schema
+- 設定頁載入時會對所有 OAuth2 預設工具庫自動補齊新增端點，避免舊 registry 看不到新工具
+- background Agent 載入舊 Notion registry 時會自動補齊 database schema 讀取 / 更新工具
+
 ## [1.31.0] - 2026-05-07
 ### Added
 - Notion 工具庫新增 `notion_append_block_children`（追加內容區塊）與 `notion_create_database`（建立資料庫）兩項工具
@@ -181,7 +188,7 @@ npm run build:css
 ### 預設端點
 - **Gmail**：`gmail_list_messages`、`gmail_get_message`、`gmail_list_threads`、`gmail_get_thread`、`gmail_list_labels`
 - **Google 日曆**：`gcal_list_calendars`、`gcal_list_events`、`gcal_get_event`、`gcal_create_event`、`gcal_update_event`、`gcal_delete_event`
-- **Notion**：`notion_search`、`notion_get_page`、`notion_get_block_children`、`notion_append_block_children`、`notion_create_page`、`notion_create_database`、`notion_update_page`、`notion_query_database`
+- **Notion**：`notion_search`、`notion_get_page`、`notion_get_block_children`、`notion_append_block_children`、`notion_create_page`、`notion_create_database`、`notion_get_database`、`notion_update_database`、`notion_update_page`、`notion_query_database`
 - **Google Analytics 4**：`ga_list_account_summaries`、`ga_run_report`
 
 ## [1.29.0] - 2026-05-06

@@ -2318,6 +2318,36 @@ function getBackgroundNotionPresetTool(name) {
       responseLimit: 3000,
       enabled: true,
       presetId: 'notion'
+    },
+    notion_get_database: {
+      name: 'notion_get_database',
+      method: 'GET',
+      url: `${base}/databases/{database_id}`,
+      description: '讀取 Notion database 的 schema（properties 定義與設定）。在寫入資料列前，先呼叫此工具確認欄位名稱與型別，避免 properties 結構錯誤',
+      parameters: [
+        { name: 'database_id', description: '資料庫 ID，不是 page ID', type: 'string', location: 'path', required: true }
+      ],
+      ...auth,
+      responseLimit: 4000,
+      enabled: true,
+      presetId: 'notion'
+    },
+    notion_update_database: {
+      name: 'notion_update_database',
+      method: 'PATCH',
+      url: `${base}/databases/{database_id}`,
+      description: '更新 Notion database 的 title / description / properties / icon。新增 / 修改 property 時 key 為欄位名稱，刪除 property 時 value 設為 null',
+      parameters: [
+        { name: 'database_id', description: '資料庫 ID', type: 'string', location: 'path', required: true },
+        { name: 'title', description: '新標題 rich text 陣列（可選），例如 [{ "type": "text", "text": { "content": "新名稱" } }]', type: 'array', items: { type: 'object' }, location: 'body', required: false },
+        { name: 'description', description: '新描述 rich text 陣列（可選）', type: 'array', items: { type: 'object' }, location: 'body', required: false },
+        { name: 'properties', description: '要新增 / 修改 / 刪除的 properties 物件。新增格式同 notion_create_database（支援簡寫如 "date"），刪除時 value 設為 null', type: 'object', location: 'body', required: false },
+        { name: 'icon', description: '圖示物件（可選），例如 { "type": "emoji", "emoji": "📁" }', type: 'object', location: 'body', required: false }
+      ],
+      ...auth,
+      responseLimit: 4000,
+      enabled: true,
+      presetId: 'notion'
     }
   };
   return tools[name] || null;
@@ -2329,7 +2359,7 @@ async function loadApiToolRegistryForAgent() {
   const hasNotionPreset = registry.some(tool => tool.presetId === 'notion' || tool.name?.startsWith('notion_'));
   let migrated = false;
   if (hasNotionPreset) {
-    for (const toolName of ['notion_append_block_children', 'notion_create_database']) {
+    for (const toolName of ['notion_append_block_children', 'notion_create_database', 'notion_get_database', 'notion_update_database']) {
       const existing = registry.find(tool => tool.name === toolName);
       if (!existing) {
         const generated = getBackgroundNotionPresetTool(toolName);
@@ -2353,12 +2383,24 @@ function buildRegistryTool(tool) {
   const required = [];
   for (const p of (tool.parameters || [])) {
     const t = p.type || 'string';
-    const schema = { description: p.description || '' };
+    const baseDesc = p.description || '';
+    const schema = { description: baseDesc };
     if (t === 'array') {
       schema.type = 'array';
       schema.items = p.items || { type: 'string' };
+      if (!/JSON|陣列/.test(baseDesc)) {
+        schema.description = baseDesc
+          ? `${baseDesc}（必須以 JSON 陣列傳入，例如 [...]，不要包成字串）`
+          : '必須以 JSON 陣列傳入，例如 [...]';
+      }
     } else if (t === 'object') {
       schema.type = 'object';
+      schema.additionalProperties = true;
+      if (!/JSON|物件/.test(baseDesc)) {
+        schema.description = baseDesc
+          ? `${baseDesc}（必須以 JSON 物件傳入，例如 {...}，不要包成字串）`
+          : '必須以 JSON 物件傳入，例如 {...}';
+      }
     } else {
       schema.type = t;
     }
@@ -2625,8 +2667,9 @@ function coerceApiToolParamValue(param, value) {
   return value;
 }
 
-function normalizeNotionDatabaseProperties(properties) {
+function normalizeNotionDatabaseProperties(properties, options = {}) {
   if (!properties || typeof properties !== 'object' || Array.isArray(properties)) return properties;
+  const { ensureTitle = true, preserveNull = false } = options;
   const aliases = {
     text: 'rich_text',
     string: 'rich_text',
@@ -2719,6 +2762,10 @@ function normalizeNotionDatabaseProperties(properties) {
 
   const normalized = {};
   for (const [name, rawSchema] of Object.entries(properties)) {
+    if (rawSchema === null && preserveNull) {
+      normalized[name] = null;
+      continue;
+    }
     if (typeof rawSchema === 'string') {
       const type = aliases[rawSchema.trim().toLowerCase()] || rawSchema.trim();
       normalized[name] = { [type]: normalizeSchemaConfig(type) };
@@ -2747,7 +2794,7 @@ function normalizeNotionDatabaseProperties(properties) {
     }
     normalized[name] = rawSchema;
   }
-  if (!Object.values(normalized).some(schema => schema?.title !== undefined)) {
+  if (ensureTitle && !Object.values(normalized).some(schema => schema?.title !== undefined)) {
     const titleName = normalized.Name ? 'Title' : 'Name';
     normalized[titleName] = { title: {} };
   }
@@ -2864,6 +2911,8 @@ async function executeApiTool(tool, args) {
     }
     if (tool.name === 'notion_create_database' && bodyObj.properties) {
       bodyObj.properties = normalizeNotionDatabaseProperties(bodyObj.properties);
+    } else if (tool.name === 'notion_update_database' && bodyObj.properties) {
+      bodyObj.properties = normalizeNotionDatabaseProperties(bodyObj.properties, { ensureTitle: false, preserveNull: true });
     }
     if (tool.name === 'notion_append_block_children' && bodyObj.children) {
       bodyObj.children = normalizeNotionAppendChildren(bodyObj.children);
