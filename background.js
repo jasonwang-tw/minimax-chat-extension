@@ -13,8 +13,9 @@ const MODEL_PRICING_CACHE_KEY = 'openrouterModelPricingCache';
 const MODEL_USAGE_LEDGER_KEY = 'modelUsageLedger';
 const MODEL_USAGE_LEDGER_LIMIT = 1000;
 const AGENT_REQUEST_TIMEOUT_MS = 120000;
-const AGENT_REQUEST_RETRY_COUNT = 1;
+const AGENT_REQUEST_RETRY_COUNT = 2;
 const AGENT_SYNTHESIS_TIMEOUT_MS = 90000;
+const AGENT_COMPLETION_REVIEW_TIMEOUT_MS = 60000;
 const STREAM_IDLE_TIMEOUT_MS = 60000;
 const PORT_KEEPALIVE_INTERVAL_MS = 20000;
 const AGENT_TOOL_RESULT_LIMIT = 1600;
@@ -3063,6 +3064,7 @@ async function streamAgentChat(message, history, translateConfig, model, systemP
   const maxIter = normalizeAgentIterations(maxAgentIterations);
   const enabledToolNames = enabledRegistryTools.map(t => t.name);
   const requiresConnectedToolTask = messageRequiresConnectedTool();
+  const requiresMutatingConnectedToolTask = messageRequiresMutatingConnectedTool();
   const autoContinueMax = requiresConnectedToolTask ? AGENT_AUTO_CONTINUE_SEGMENTS : 0;
   const effectiveMaxIter = maxIter * (autoContinueMax + 1);
   let autoContinueCount = 0;
@@ -3098,6 +3100,11 @@ async function streamAgentChat(message, history, translateConfig, model, systemP
     return mentionsService && toolAction;
   }
 
+  function messageRequiresMutatingConnectedTool() {
+    if (!messageRequiresConnectedTool()) return false;
+    return /(建立|新增|寫入|追加|更新|修改|刪除|移除|封存|發布|寄出|送出|建立資料庫|create|post|append|patch|put|update|delete|archive|send|publish)/i.test(message || '');
+  }
+
   function replyLooksLikeFakeToolProgress(reply) {
     return /(等待\s*api|api\s*回應|正在執行|執行中|建立頁面中|寫入.*內容|取得.*連結|post\s+\/?v?1\/|patch\s+\/?v?1\/|https:\/\/api\.notion\.com)/i.test(reply || '');
   }
@@ -3126,6 +3133,49 @@ async function streamAgentChat(message, history, translateConfig, model, systemP
     }
     const reply = cleanAgentReply(getMessageText(data.choices?.[0]?.message));
     if (!reply) throw new Error('模型完成工具搜尋後未返回文字內容，請稍後重試或切換模型。');
+    return reply;
+  }
+
+  async function requestCompactRecoverySynthesis(reason = '') {
+    const toolContext = truncateAgentText(toolObservations.join('\n\n---\n\n'), AGENT_FINAL_CONTEXT_LIMIT);
+    const recoveryPrompt = `上一輪 Agent 分析請求失敗，請改用精簡上下文整理目前狀態。
+
+原始任務：
+${message || '未提供'}
+
+失敗原因：
+${reason || '模型分析請求失敗。'}
+
+已取得的工具結果摘要：
+${toolContext || '沒有可用工具結果'}
+
+請用繁體中文輸出：
+- 已實際完成哪些 API/Notion 操作，必須只根據工具結果描述。
+- 若任務已完成，給出完成狀態與可用連結/ID。
+- 若任務尚未完成，明確列出下一個最小批次要做什麼，不要宣稱已完成。`;
+
+    const resp = await fetchWithTimeout(agentUrl, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${agentKey}`, 'Content-Type': 'application/json', ...agentExtraHeaders },
+      body: JSON.stringify({
+        model: useModel,
+        messages: [
+          { role: 'system', content: '你是穩定的 Agent 恢復整理器，只根據工具結果整理，不編造進度。' },
+          { role: 'user', content: recoveryPrompt }
+        ]
+      })
+    }, AGENT_SYNTHESIS_TIMEOUT_MS);
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(extractApiErrorMessage(err, resp.status));
+    }
+    const data = await resp.json();
+    if (useOpenRouter && data.usage) {
+      recordOpenRouterUsage({ modelId: useModel, usage: data.usage, apiKey: openrouterApiKey, sessionId, source: 'agent_recovery_synthesis' })
+        .catch(err => console.warn('[Usage] 紀錄失敗:', err?.message || err));
+    }
+    const reply = cleanAgentReply(getMessageText(data.choices?.[0]?.message));
+    if (!reply) throw new Error('恢復整理未返回文字內容。');
     return reply;
   }
 
@@ -3174,7 +3224,7 @@ ${toolContext}
     return prompt ? { prompt, label: '繼續深入搜尋' } : null;
   }
 
-  function enqueueAutoContinuation(reason = '') {
+  function enqueueAutoContinuation(reason = '', nextInstruction = '') {
     if (!requiresConnectedToolTask || autoContinueCount >= autoContinueMax) return false;
     autoContinueCount += 1;
     const toolContext = truncateAgentText(toolObservations.join('\n\n---\n\n'), AGENT_FINAL_CONTEXT_LIMIT);
@@ -3196,6 +3246,8 @@ ${reason || '上一段尚未完成。'}
 目前工具結果摘要：
 ${toolContext || '尚無工具結果'}
 
+${nextInstruction ? `驗收後建議的下一步：\n${nextInstruction}\n` : ''}
+
 要求：
 - 若是 Notion/database 寫入任務，請分段建立 schema、資料庫、資料列或 blocks。
 - 每次只處理下一個明確批次，成功後再繼續下一批。
@@ -3203,6 +3255,110 @@ ${toolContext || '尚無工具結果'}
 - 如果任務已完全完成，才輸出完成狀態與可用連結；否則必須繼續呼叫工具。`
     });
     return true;
+  }
+
+  function parseCompletionReview(raw) {
+    const text = String(raw || '').trim();
+    if (!text) return null;
+    const jsonText = text.match(/\{[\s\S]*\}/)?.[0] || text;
+    try {
+      const parsed = JSON.parse(jsonText);
+      if (!parsed || typeof parsed !== 'object') return null;
+      return {
+        complete: parsed.complete === true,
+        reason: String(parsed.reason || '').trim(),
+        nextPrompt: String(parsed.next_prompt || parsed.nextPrompt || '').trim()
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  async function requestCompletionReview(finalReply) {
+    if (!requiresConnectedToolTask) return { complete: true, reason: '非已連接工具任務，不需 API 完成度驗收。' };
+    const toolContext = truncateAgentText(toolObservations.join('\n\n---\n\n'), AGENT_FINAL_CONTEXT_LIMIT);
+    const reviewPrompt = `你是 Agent 任務驗收器。請只根據「原始任務」、「實際工具結果」、「候選最終回答」判斷任務是否真的完成。
+
+判斷規則：
+- 必須以實際工具結果為證據；候選回答自己的宣稱不能當成證據。
+- 如果原始任務要求 Notion/Gmail/Calendar/GA4/WordPress/API 寫入、建立、更新、刪除、發布或寄出，必須看到對應成功的寫入類工具結果，才可判定 complete=true。
+- 如果只是查詢/讀取任務，必須看到足夠的讀取或搜尋結果，且候選回答已回答原始問題，才可判定 complete=true。
+- 如果工具結果有錯誤、只完成第一批、只做 schema/驗證、內容明顯少於任務要求，或候選回答把部分結果包裝成已完成，必須判定 complete=false。
+- 不要要求重複已成功完成的工具步驟；next_prompt 只寫下一個最小可執行批次。
+
+請只輸出 JSON，不要 Markdown：
+{"complete":true|false,"reason":"一句話原因","next_prompt":"若未完成，給 Agent 的下一步指令；若完成則空字串"}
+
+原始任務：
+${message || '未提供'}
+
+實際工具結果：
+${toolContext || '沒有工具結果'}
+
+候選最終回答：
+${truncateAgentText(finalReply, 3000)}`;
+
+    const resp = await fetchWithTimeout(agentUrl, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${agentKey}`, 'Content-Type': 'application/json', ...agentExtraHeaders },
+      body: JSON.stringify({
+        model: useModel,
+        messages: [
+          { role: 'system', content: '你是嚴格的任務完成度驗收器，只輸出有效 JSON。' },
+          { role: 'user', content: reviewPrompt }
+        ]
+      })
+    }, AGENT_COMPLETION_REVIEW_TIMEOUT_MS);
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(extractApiErrorMessage(err, resp.status));
+    }
+    const data = await resp.json();
+    if (useOpenRouter && data.usage) {
+      recordOpenRouterUsage({ modelId: useModel, usage: data.usage, apiKey: openrouterApiKey, sessionId, source: 'agent_completion_review' })
+        .catch(err => console.warn('[Usage] 紀錄失敗:', err?.message || err));
+    }
+    const review = parseCompletionReview(getMessageText(data.choices?.[0]?.message));
+    if (!review) throw new Error('驗收器未返回有效 JSON。');
+    return review;
+  }
+
+  async function ensureFinalReplyComplete(finalReply) {
+    if (!requiresConnectedToolTask) return { complete: true };
+    port.postMessage({
+      type: 'agent_notice',
+      text: '正在自我檢查任務是否真的完成。',
+      level: 'info'
+    });
+    let review;
+    try {
+      review = await requestCompletionReview(finalReply);
+    } catch (err) {
+      port.postMessage({
+        type: 'agent_notice',
+        text: `自我檢查失敗：${err.message}。將依現有防呆規則判斷是否可完成。`,
+        level: 'warning'
+      });
+      return { complete: true, reviewFailed: true };
+    }
+    if (review.complete) {
+      port.postMessage({
+        type: 'agent_notice',
+        text: review.reason ? `自我檢查通過：${review.reason}` : '自我檢查通過。',
+        level: 'info'
+      });
+      return { complete: true, review };
+    }
+    port.postMessage({
+      type: 'agent_notice',
+      text: review.reason ? `自我檢查未通過：${review.reason}` : '自我檢查未通過，正在續跑下一段。',
+      level: 'warning'
+    });
+    if (enqueueAutoContinuation(review.reason || '自我檢查判定任務尚未完成。', review.nextPrompt)) {
+      return { complete: false, review };
+    }
+    sendFinalFallback('自我檢查判定任務尚未完成，但自動續跑已達上限。', review.reason || '任務可能尚未完整完成，未產生簡略最終版。');
+    return { complete: false, stopped: true, review };
   }
 
   function sendFinalFallback(reason = '', errorMessage = '') {
@@ -3234,11 +3390,11 @@ ${toolContext || '尚無工具結果'}
       try {
         return await fetchWithTimeout(agentUrl, fetchOptions);
       } catch (err) {
-        const canRetry = attempt < AGENT_REQUEST_RETRY_COUNT && isRetryableAgentError(err) && !mutatingToolExecuted;
+        const canRetry = attempt < AGENT_REQUEST_RETRY_COUNT && isRetryableAgentError(err);
         if (!canRetry) throw err;
         port.postMessage({
           type: 'agent_notice',
-          text: `Agent 分析請求失敗：${err.message} 正在自動重試 1 次。`,
+          text: `Agent 分析請求失敗：${err.message} 正在自動重試（${attempt + 1}/${AGENT_REQUEST_RETRY_COUNT}）。`,
           level: 'warning'
         });
       }
@@ -3300,7 +3456,25 @@ ${toolContext || '尚無工具結果'}
       resp = await requestAgentAnalysis();
     } catch (err) {
       if (toolsExecuted || toolObservations.length > 0) {
-        sendFinalFallback('Agent 分析請求失敗，已回傳目前工具結果。', err.message);
+        port.postMessage({
+          type: 'agent_notice',
+          text: `Agent 分析請求失敗：${err.message}。正在改用精簡工具結果做恢復整理。`,
+          level: 'warning'
+        });
+        if (requiresConnectedToolTask && enqueueAutoContinuation(`Agent 分析請求失敗：${err.message}。請根據既有工具結果繼續下一個最小批次，不要重複已成功的寫入。`)) {
+          continue;
+        }
+        try {
+          const recoveryReply = await requestCompactRecoverySynthesis(err.message);
+          const completion = await ensureFinalReplyComplete(recoveryReply);
+          if (!completion.complete) {
+            if (completion.stopped) return;
+            continue;
+          }
+          port.postMessage({ type: 'done', reply: recoveryReply });
+        } catch (recoveryErr) {
+          sendFinalFallback('Agent 分析請求與恢復整理都失敗，已回傳目前工具結果。', recoveryErr.message || err.message);
+        }
         return;
       }
       if (requiresConnectedToolTask) {
@@ -3460,7 +3634,7 @@ ${toolContext || '尚無工具結果'}
       sendFinalFallback('模型輸出假進度但未呼叫下一個工具。', '任務可能尚未完整完成，未產生簡略最終版。');
       return;
     }
-    if (finalReply && requiresConnectedToolTask && !mutatingToolExecuted) {
+    if (finalReply && requiresMutatingConnectedToolTask && !mutatingToolExecuted) {
       if (enqueueAutoContinuation('目前只完成讀取/驗證，尚未偵測到成功的寫入類 API。請繼續呼叫寫入工具完成下一段。')) {
         continue;
       }
@@ -3486,6 +3660,11 @@ ${toolContext || '尚無工具結果'}
         sendFinalFallback('上一輪模型未產生 final answer。', err.message);
         return;
       }
+    }
+    const completion = await ensureFinalReplyComplete(finalReply);
+    if (!completion.complete) {
+      if (completion.stopped) return;
+      continue;
     }
     port.postMessage({ type: 'done', reply: finalReply });
     return;
