@@ -597,9 +597,24 @@
               <button id="lessonStopBtn" class="btn-secondary-sm" type="button" disabled>停止並保存</button>
               <button id="lessonOrganizeBtn" class="btn-secondary-sm" type="button" disabled>整理最新課程</button>
             </div>
+            <div id="lessonPermissionHelp" class="lesson-permission-help hidden">
+              <strong>麥克風尚未授權</strong>
+              <ol>
+                <li>如果看到權限視窗，請按「允許」，不要直接關閉視窗。</li>
+                <li>若沒有跳出視窗，請重新載入 extension，接受新增的錄音權限。</li>
+                <li>到 macOS「系統設定 → 隱私權與安全性 → 麥克風」確認 Chrome 已允許。</li>
+                <li>到 Chrome 網址列輸入 <code>chrome://settings/content/microphone</code>，確認預設行為允許網站要求使用麥克風。</li>
+              </ol>
+            </div>
             <textarea id="lessonTranscriptDraft" class="lesson-transcript-draft" placeholder="錄音時會盡量即時轉寫英文內容；也可以在課後手動貼上逐字稿再整理。"></textarea>
           </div>
-          <div id="lessonRecordsList" class="lesson-records-list"></div>
+          <section class="lesson-records-section">
+            <div class="lesson-records-section-header">
+              <h4>已保存課程</h4>
+              <span>本機音檔與整理紀錄</span>
+            </div>
+            <div id="lessonRecordsList" class="lesson-records-list"></div>
+          </section>
         </div>
       </div>
     </div>

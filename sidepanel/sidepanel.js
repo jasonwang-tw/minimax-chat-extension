@@ -166,6 +166,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const lessonRecordingTimer = document.getElementById('lessonRecordingTimer');
   const lessonTranscriptStatus = document.getElementById('lessonTranscriptStatus');
   const lessonMicPermissionBtn = document.getElementById('lessonMicPermissionBtn');
+  const lessonPermissionHelp = document.getElementById('lessonPermissionHelp');
   const lessonStartBtn = document.getElementById('lessonStartBtn');
   const lessonStopBtn = document.getElementById('lessonStopBtn');
   const lessonOrganizeBtn = document.getElementById('lessonOrganizeBtn');
@@ -4823,6 +4824,17 @@ let currentAudioSrc = null;  // Web Audio API BufferSource
     });
   }
 
+  async function deleteLessonAudio(audioId) {
+    if (!audioId) return;
+    const db = await openLessonAudioDb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction('audio', 'readwrite');
+      tx.objectStore('audio').delete(audioId);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error || new Error('音檔刪除失敗'));
+    });
+  }
+
   function switchVocabularyTab(tab) {
     const lessons = tab === 'lessons';
     vocabularyWordsTab.classList.toggle('active', !lessons);
@@ -4886,6 +4898,7 @@ let currentAudioSrc = null;  // Web Audio API BufferSource
     }
     if (!silent) {
       lessonTranscriptStatus.textContent = '正在要求麥克風權限';
+      lessonPermissionHelp.classList.add('hidden');
       lessonMicPermissionBtn.disabled = true;
     }
     try {
@@ -4894,11 +4907,15 @@ let currentAudioSrc = null;  // Web Audio API BufferSource
       lessonTranscriptStatus.textContent = '麥克風已授權';
       lessonMicPermissionBtn.textContent = '麥克風已授權';
       lessonMicPermissionBtn.disabled = true;
+      lessonPermissionHelp.classList.add('hidden');
       if (!silent) setStatus('麥克風權限已取得，可開始錄音。', false, 2400);
       return true;
     } catch (err) {
-      lessonTranscriptStatus.textContent = `麥克風未授權：${err.message}`;
+      const dismissed = /dismissed/i.test(err.message || '');
+      lessonTranscriptStatus.textContent = dismissed ? '麥克風授權視窗已關閉，尚未允許' : `麥克風未授權：${err.message}`;
       lessonMicPermissionBtn.disabled = false;
+      lessonMicPermissionBtn.textContent = dismissed ? '重新授權麥克風' : '授權麥克風';
+      lessonPermissionHelp.classList.remove('hidden');
       if (!silent) setStatus(`麥克風權限取得失敗：${err.message}`, true, 3600);
       throw err;
     }
@@ -5334,6 +5351,21 @@ ${transcript}`;
     audio.play().catch(err => setStatus(`播放失敗：${err.message}`, true, 2500));
   }
 
+  async function deleteLessonRecord(lessonId) {
+    const lesson = lessonRecords.find(l => l.id === lessonId);
+    if (!lesson) return;
+    if (!confirm(`確定刪除「${lesson.title || 'English lesson'}」？音檔也會一併從本機刪除。`)) return;
+    try {
+      await deleteLessonAudio(lesson.audioId);
+      lessonRecords = lessonRecords.filter(l => l.id !== lessonId);
+      await chrome.storage.local.set({ lessonRecords });
+      renderLessonRecords();
+      setStatus('課程錄音已刪除', false, 2200);
+    } catch (err) {
+      setStatus(`刪除失敗：${err.message}`, true, 3200);
+    }
+  }
+
   function renderLessonRecords() {
     lessonRecordsList.innerHTML = '';
     if (!lessonRecords.length) {
@@ -5362,6 +5394,7 @@ ${transcript}`;
           <button class="btn-secondary-sm lesson-play" type="button">播放</button>
           <button class="btn-secondary-sm lesson-fill" type="button">載入逐字稿</button>
           <button class="btn-primary-sm lesson-organize-one" type="button">整理</button>
+          <button class="btn-secondary-sm lesson-delete" type="button">刪除</button>
         </div>
       `;
       div.querySelector('.lesson-play').addEventListener('click', () => playLessonAudio(lesson.audioId));
@@ -5370,6 +5403,7 @@ ${transcript}`;
         lessonOrganizeBtn.disabled = !lessonTranscriptDraft.value.trim();
       });
       div.querySelector('.lesson-organize-one').addEventListener('click', () => organizeLessonRecord(lesson.id));
+      div.querySelector('.lesson-delete').addEventListener('click', () => deleteLessonRecord(lesson.id));
       lessonRecordsList.appendChild(div);
     });
   }

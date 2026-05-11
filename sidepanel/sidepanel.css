@@ -89,11 +89,41 @@ body {
 .lesson-notice,
 .lesson-guide,
 .lesson-recorder,
+.lesson-records-section,
 .lesson-record-card {
   border: 1px solid var(--border-color);
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.035);
   padding: 12px;
+}
+
+.lesson-records-section {
+  margin-top: 4px;
+  background: rgba(255, 255, 255, 0.018);
+}
+
+.lesson-records-section-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.lesson-records-section-header h4 {
+  font-size: 13px;
+  margin: 0;
+}
+
+.lesson-records-section-header span {
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.lesson-records-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
 .lesson-notice {
@@ -129,6 +159,40 @@ body {
 
 .lesson-guide li {
   margin-bottom: 4px;
+}
+
+.lesson-permission-help {
+  margin-top: 10px;
+  border: 1px solid rgba(245, 158, 11, 0.25);
+  background: rgba(245, 158, 11, 0.08);
+  color: #fbbf24;
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.lesson-permission-help.hidden {
+  display: none;
+}
+
+.lesson-permission-help strong {
+  display: block;
+  font-size: 12px;
+  margin-bottom: 6px;
+}
+
+.lesson-permission-help ol {
+  margin-left: 18px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.lesson-permission-help li {
+  margin-bottom: 4px;
+}
+
+.lesson-permission-help code {
+  color: var(--text-primary);
 }
 
 .lesson-recorder-status,
