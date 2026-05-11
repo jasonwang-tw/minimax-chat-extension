@@ -17,6 +17,11 @@ let memoryCategoryFilter = '';     // 長期記憶分類篩選
 let memorySearchQuery = '';        // 長期記憶關鍵字篩選
 let vocabularyCategoryFilter = ''; // 單字簿分類篩選
 let vocabularyLangFilter = '';     // 單字簿語言篩選
+let vocabularySearchQuery = '';    // 單字簿關鍵字篩選
+let vocabularyReviewMode = false;  // 單字簿複習模式
+let vocabularyReviewItems = [];    // 複習中的單字項目
+let vocabularyReviewIndex = 0;     // 複習卡片游標
+let vocabularyReviewAnswerVisible = false;
 let knowledgeBase = [];            // 全域知識庫條目
 let selectedKnowledge = [];        // 本次訊息已選取的知識庫條目
 let kbPaletteIndex = -1;           // @ palette 鍵盤游標
@@ -142,7 +147,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   const vocabularyModalOverlay = document.getElementById('vocabularyModalOverlay');
   const vocabularyModalClose = document.getElementById('vocabularyModalClose');
   const vocabularyList = document.getElementById('vocabularyList');
+  const vocabularyStats = document.getElementById('vocabularyStats');
+  const vocabularySearchInput = document.getElementById('vocabularySearchInput');
   const vocabularyLangFilterEl = document.getElementById('vocabularyLangFilter');
+  const vocabularyReviewBtn = document.getElementById('vocabularyReviewBtn');
+  const vocabularyReviewPanel = document.getElementById('vocabularyReviewPanel');
   const vocabularyClearAllBtn = document.getElementById('vocabularyClearAllBtn');
   const openVocabularyBtn = document.getElementById('openVocabularyBtn');
   // 知識庫元素
@@ -604,7 +613,8 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
       if (changes.vocabulary) {
         if (vocabularyModal && !vocabularyModal.classList.contains('hidden')) {
-          renderVocabularyList(changes.vocabulary.newValue || []);
+          if (vocabularyReviewMode) openVocabularyReviewMode(changes.vocabulary.newValue || []);
+          else renderVocabularyList(changes.vocabulary.newValue || []);
         }
       }
       if (changes.knowledgeBase) {
@@ -4383,12 +4393,28 @@ document.addEventListener('DOMContentLoaded', async () => {
   vocabularyCategoryFilterEl.addEventListener('change', async e => {
     vocabularyCategoryFilter = e.target.value;
     const { vocabulary = [] } = await chrome.storage.local.get(['vocabulary']);
-    renderVocabularyList(vocabulary);
+    if (vocabularyReviewMode) openVocabularyReviewMode(vocabulary);
+    else renderVocabularyList(vocabulary);
   });
   vocabularyLangFilterEl.addEventListener('change', async e => {
     vocabularyLangFilter = e.target.value;
     const { vocabulary = [] } = await chrome.storage.local.get(['vocabulary']);
-    renderVocabularyList(vocabulary);
+    if (vocabularyReviewMode) openVocabularyReviewMode(vocabulary);
+    else renderVocabularyList(vocabulary);
+  });
+  vocabularySearchInput.addEventListener('input', async e => {
+    vocabularySearchQuery = e.target.value.trim();
+    const { vocabulary = [] } = await chrome.storage.local.get(['vocabulary']);
+    if (vocabularyReviewMode) {
+      openVocabularyReviewMode(vocabulary);
+    } else {
+      renderVocabularyList(vocabulary);
+    }
+  });
+  vocabularyReviewBtn.addEventListener('click', async () => {
+    const { vocabulary = [] } = await chrome.storage.local.get(['vocabulary']);
+    if (vocabularyReviewMode) closeVocabularyReviewMode();
+    else openVocabularyReviewMode(vocabulary);
   });
 
   // 管理分類 toggle
@@ -5289,6 +5315,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     openVocabularyBtn.classList.add('active');
     await populateCategoryFilter('vocabulary', vocabularyCategoryFilterEl);
     const { vocabulary = [] } = await chrome.storage.local.get(['vocabulary']);
+    vocabularySearchInput.value = vocabularySearchQuery;
     populateVocabularyLangFilter(vocabulary);
     renderVocabularyList(vocabulary);
   }
@@ -5298,6 +5325,184 @@ document.addEventListener('DOMContentLoaded', async () => {
     openVocabularyBtn.classList.remove('active');
     vocabularyCatManager.classList.add('hidden');
     manageVocabularyCatBtn.classList.remove('active');
+    closeVocabularyReviewMode();
+  }
+
+  function renderVocabularyStats(total, filtered) {
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const todayCount = total.filter(v => Number(v.createdAt || 0) >= todayStart.getTime()).length;
+    const reviewDueCount = total.filter(v => (v.mastery || 'new') !== 'mastered').length;
+    const masteredCount = total.filter(v => v.mastery === 'mastered').length;
+    vocabularyStats.innerHTML = `
+      <div class="vocab-stat"><strong>${total.length}</strong><span>總單字</span></div>
+      <div class="vocab-stat"><strong>${todayCount}</strong><span>今日新增</span></div>
+      <div class="vocab-stat"><strong>${reviewDueCount}</strong><span>待複習</span></div>
+      <div class="vocab-stat"><strong>${masteredCount}</strong><span>已掌握</span></div>
+      <div class="vocab-stat"><strong>${filtered.length}</strong><span>目前顯示</span></div>
+    `;
+  }
+
+  function getVocabularySearchHaystack(item) {
+    return [
+      item.word,
+      item.definition,
+      item.zhTranslation,
+      item.category,
+      item.sourceTitle,
+      item.sourceUrl,
+      item.contextSentence,
+      getVocabularyMasteryLabel(item.mastery),
+      getVocabularyLangLabel(item.lang)
+    ].filter(Boolean).join(' ').toLowerCase();
+  }
+
+  function getVocabularySourceLabel(item) {
+    if (item.sourceTitle) return item.sourceTitle;
+    if (item.sourceUrl) {
+      try { return new URL(item.sourceUrl).hostname; } catch { return item.sourceUrl; }
+    }
+    const labels = {
+      'selection-toolbar': '網頁選取',
+      'context-menu': '右鍵加入',
+      session: '對話整理',
+      chat: '對話整理'
+    };
+    return labels[item.source] || '';
+  }
+
+  function getVocabularyMasteryLabel(mastery) {
+    const labels = {
+      new: '新單字',
+      learning: '學習中',
+      mastered: '已掌握'
+    };
+    return labels[mastery || 'new'] || '新單字';
+  }
+
+  function getVocabularyTranslationText(item) {
+    if (item.lang === 'zh') return item.definition || '中文詞條';
+    return item.zhTranslation || item.definition || '';
+  }
+
+  function getFilteredVocabulary(vocabulary) {
+    const query = vocabularySearchQuery.toLowerCase();
+    return vocabulary.filter(v => {
+      if (vocabularyCategoryFilter && v.category !== vocabularyCategoryFilter) return false;
+      if (vocabularyLangFilter && (v.lang || '') !== vocabularyLangFilter) return false;
+      if (query && !getVocabularySearchHaystack(v).includes(query)) return false;
+      return true;
+    });
+  }
+
+  function getVocabularyReviewItems(vocabulary) {
+    const filtered = getFilteredVocabulary(vocabulary);
+    const candidates = filtered.filter(v => (v.mastery || 'new') !== 'mastered');
+    const pool = candidates.length ? candidates : filtered;
+    return pool.slice().sort((a, b) => {
+      const aLast = Number(a.lastReviewedAt || 0);
+      const bLast = Number(b.lastReviewedAt || 0);
+      if (aLast !== bLast) return aLast - bLast;
+      return Number(a.createdAt || 0) - Number(b.createdAt || 0);
+    });
+  }
+
+  function openVocabularyReviewMode(vocabulary) {
+    vocabularyReviewMode = true;
+    vocabularyReviewItems = getVocabularyReviewItems(vocabulary);
+    vocabularyReviewIndex = 0;
+    vocabularyReviewAnswerVisible = false;
+    vocabularyReviewBtn.classList.add('active');
+    vocabularyReviewBtn.textContent = '結束複習';
+    vocabularyList.classList.add('hidden');
+    vocabularyReviewPanel.classList.remove('hidden');
+    renderVocabularyStats(vocabulary, getFilteredVocabulary(vocabulary));
+    renderVocabularyReviewPanel();
+  }
+
+  function closeVocabularyReviewMode() {
+    vocabularyReviewMode = false;
+    vocabularyReviewItems = [];
+    vocabularyReviewIndex = 0;
+    vocabularyReviewAnswerVisible = false;
+    vocabularyReviewBtn.classList.remove('active');
+    vocabularyReviewBtn.textContent = '複習模式';
+    vocabularyReviewPanel.classList.add('hidden');
+    vocabularyReviewPanel.innerHTML = '';
+    vocabularyList.classList.remove('hidden');
+  }
+
+  function renderVocabularyReviewPanel() {
+    if (!vocabularyReviewMode) return;
+    if (vocabularyReviewItems.length === 0) {
+      vocabularyReviewPanel.innerHTML = `
+        <div class="vocab-review-empty">
+          <strong>沒有可複習的單字</strong>
+          <span>調整搜尋、語言或分類篩選後再試。</span>
+        </div>
+      `;
+      return;
+    }
+
+    const item = vocabularyReviewItems[Math.min(vocabularyReviewIndex, vocabularyReviewItems.length - 1)];
+    const progress = `${vocabularyReviewIndex + 1} / ${vocabularyReviewItems.length}`;
+    const translationText = getVocabularyTranslationText(item) || '尚無翻譯';
+    const sourceLabel = getVocabularySourceLabel(item);
+    const contextHtml = item.contextSentence
+      ? `<div class="vocab-review-context">${escapeHtml(item.contextSentence)}</div>`
+      : '';
+    const sourceHtml = sourceLabel
+      ? `<div class="vocab-review-source">${item.sourceUrl ? `<a href="${escapeAttr(item.sourceUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(sourceLabel)}</a>` : escapeHtml(sourceLabel)}</div>`
+      : '';
+    vocabularyReviewPanel.innerHTML = `
+      <div class="vocab-review-card">
+        <div class="vocab-review-head">
+          <span>${progress}</span>
+          <span>${getVocabularyMasteryLabel(item.mastery)} · 已複習 ${Number(item.reviewCount || 0)} 次</span>
+        </div>
+        <div class="vocab-review-word">${escapeHtml(item.word)}</div>
+        <div class="vocab-review-answer ${vocabularyReviewAnswerVisible ? '' : 'hidden'}">
+          <div class="vocab-review-translation">${escapeHtml(translationText)}</div>
+          ${contextHtml}
+          ${sourceHtml}
+        </div>
+        <div class="vocab-review-actions">
+          <button type="button" class="btn-secondary-sm vocab-review-show">${vocabularyReviewAnswerVisible ? '隱藏答案' : '顯示答案'}</button>
+          <button type="button" class="btn-secondary-sm vocab-review-grade" data-grade="hard">不熟</button>
+          <button type="button" class="btn-secondary-sm vocab-review-grade" data-grade="ok">普通</button>
+          <button type="button" class="btn-secondary-sm vocab-review-grade" data-grade="mastered">已掌握</button>
+        </div>
+      </div>
+    `;
+
+    vocabularyReviewPanel.querySelector('.vocab-review-show').addEventListener('click', () => {
+      vocabularyReviewAnswerVisible = !vocabularyReviewAnswerVisible;
+      renderVocabularyReviewPanel();
+    });
+    vocabularyReviewPanel.querySelectorAll('.vocab-review-grade').forEach(btn => {
+      btn.addEventListener('click', () => handleVocabularyReviewGrade(item.id, btn.dataset.grade));
+    });
+  }
+
+  async function handleVocabularyReviewGrade(itemId, grade) {
+    const { vocabulary: current = [] } = await chrome.storage.local.get(['vocabulary']);
+    const idx = current.findIndex(v => v.id === itemId);
+    if (idx === -1) return;
+    current[idx] = {
+      ...current[idx],
+      mastery: grade === 'mastered' ? 'mastered' : 'learning',
+      reviewCount: Number(current[idx].reviewCount || 0) + 1,
+      lastReviewedAt: Date.now()
+    };
+    await chrome.storage.local.set({ vocabulary: current });
+
+    vocabularyReviewItems = getVocabularyReviewItems(current);
+    if (vocabularyReviewIndex >= vocabularyReviewItems.length) {
+      vocabularyReviewIndex = Math.max(0, vocabularyReviewItems.length - 1);
+    }
+    vocabularyReviewAnswerVisible = false;
+    renderVocabularyStats(current, getFilteredVocabulary(current));
+    renderVocabularyReviewPanel();
   }
 
   async function renderVocabularyList(vocabulary) {
@@ -5306,40 +5511,62 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (_v !== _renderVocabVer) return; // 已有更新的 render，捨棄本次
     populateVocabularyLangFilter(vocabulary);
     vocabularyList.innerHTML = '';
-    const filtered = vocabulary.filter(v => {
-      if (vocabularyCategoryFilter && v.category !== vocabularyCategoryFilter) return false;
-      if (vocabularyLangFilter && (v.lang || '') !== vocabularyLangFilter) return false;
-      return true;
-    });
+    const filtered = getFilteredVocabulary(vocabulary);
+    renderVocabularyStats(vocabulary, filtered);
     if (filtered.length === 0) {
-      const hasFilter = vocabularyCategoryFilter || vocabularyLangFilter;
+      const hasFilter = vocabularyCategoryFilter || vocabularyLangFilter || vocabularySearchQuery;
       vocabularyList.innerHTML = hasFilter
         ? '<p class="memory-empty">此篩選條件沒有單字。</p>'
         : '<p class="memory-empty">尚無單字。<br>在任意網頁反白文字後使用浮動小選單「加入單字」。</p>';
       return;
     }
     const langLabel = { en: 'EN', zh: '中', ja: '日', ko: '韓', vi: '越', th: '泰', ar: '阿', other: '?' };
-    const ttsLangMap = { en: 'en-US', zh: 'zh-TW', ja: 'ja-JP', other: 'zh-TW' };
+    const ttsLangMap = { en: 'en-US', zh: 'zh-TW', ja: 'ja-JP', ko: 'ko-KR', vi: 'vi-VN', th: 'th-TH', ar: 'ar-SA', other: 'zh-TW' };
     filtered.slice().reverse().forEach(item => {
       const div = document.createElement('div');
-      div.className = 'memory-item';
+      div.className = 'vocab-card';
       const ttsLang = ttsLangMap[item.lang] || 'zh-TW';
       const catOptions = `<option value="">${cats.length ? '無分類' : '新增分類後使用'}</option>`
         + cats.map(c => `<option value="${escapeAttr(c)}" ${item.category === c ? 'selected' : ''}>${escapeHtml(c)}</option>`).join('');
-      const zhBtnHtml = item.lang !== 'zh'
-        ? `<span class="btn-vocab-zh btn-icon-xs" title="${item.zhTranslation ? escapeAttr(item.zhTranslation) : '載入中...'}" data-word="${escapeAttr(item.word)}" data-id="${item.id}">中</span>`
+      const translationText = item.lang === 'zh'
+        ? (item.definition || '中文詞條')
+        : (item.zhTranslation || item.definition || '');
+      const sourceLabel = getVocabularySourceLabel(item);
+      const sourceHtml = sourceLabel
+        ? `<div class="vocab-source">${item.sourceUrl ? `<a href="${escapeAttr(item.sourceUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(sourceLabel)}</a>` : escapeHtml(sourceLabel)}</div>`
         : '';
+      const contextHtml = item.contextSentence
+        ? `<div class="vocab-context">${escapeHtml(item.contextSentence)}</div>`
+        : '';
+      const translationHtml = translationText
+        ? `<div class="vocab-translation">${escapeHtml(translationText)}</div>`
+        : `<button type="button" class="vocab-translate-btn" data-id="${escapeAttr(item.id)}" data-word="${escapeAttr(item.word)}">取得中文翻譯</button>`;
       div.innerHTML = `
-        <span class="memory-item-badge context-menu">${langLabel[item.lang] || '?'}</span>
-        <span class="memory-item-text vocab-word editable" title="點擊編輯">${escapeHtml(item.word)}</span>
-        <span class="memory-item-date">${formatItemDate(item.createdAt)}</span>
-        <select class="item-cat-select ${item.category ? 'has-value' : ''}" title="分類">${catOptions}</select>
-        ${zhBtnHtml}
-        <button class="btn-vocab-tts btn-icon-xs" title="朗讀" data-text="${escapeAttr(item.word)}" data-lang="${ttsLang}">${TTS_SVG}</button>
-        <button class="btn-vocab-copy btn-icon-xs" title="複製" data-text="${escapeAttr(item.word)}">${COPY_SVG}</button>
-        <button class="btn-memory-delete" title="刪除">
-          <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
-        </button>
+        <div class="vocab-card-main">
+          <div class="vocab-card-top">
+            <span class="memory-item-badge context-menu">${langLabel[item.lang] || '?'}</span>
+            <div class="vocab-card-content">
+              <div class="vocab-word-row">
+                <span class="memory-item-text vocab-word editable" title="點擊編輯">${escapeHtml(item.word)}</span>
+                <div class="vocab-card-actions">
+                  <button class="btn-vocab-tts btn-icon-xs" title="朗讀" data-text="${escapeAttr(item.word)}" data-lang="${ttsLang}">${TTS_SVG}</button>
+                  <button class="btn-vocab-copy btn-icon-xs" title="複製" data-text="${escapeAttr(item.word)}">${COPY_SVG}</button>
+                  <button class="btn-memory-delete" title="刪除">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
+                  </button>
+                </div>
+              </div>
+              ${translationHtml}
+              ${contextHtml}
+              ${sourceHtml}
+            </div>
+          </div>
+        </div>
+        <div class="vocab-card-meta">
+          <span class="memory-item-date">${formatItemDate(item.createdAt)}</span>
+          <span class="vocab-mastery ${escapeAttr(item.mastery || 'new')}">${getVocabularyMasteryLabel(item.mastery)}</span>
+          <select class="item-cat-select ${item.category ? 'has-value' : ''}" title="分類">${catOptions}</select>
+        </div>
       `;
       // 分類選擇
       div.querySelector('.item-cat-select').addEventListener('change', async e => {
@@ -5358,7 +5585,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       wordSpan.addEventListener('click', () => {
         const input = document.createElement('input');
         input.type = 'text';
-        input.className = 'memory-item-input';
+        input.className = 'memory-item-input vocab-word-input';
         input.value = item.word;
         wordSpan.replaceWith(input);
         input.focus();
@@ -5368,7 +5595,11 @@ document.addEventListener('DOMContentLoaded', async () => {
           if (newWord && newWord !== item.word) {
             const { vocabulary: current = [] } = await chrome.storage.local.get(['vocabulary']);
             const idx = current.findIndex(v => v.id === item.id);
-            if (idx !== -1) { current[idx].word = newWord; await chrome.storage.local.set({ vocabulary: current }); }
+            if (idx !== -1) {
+              current[idx].word = newWord;
+              current[idx].zhTranslation = '';
+              await chrome.storage.local.set({ vocabulary: current });
+            }
           }
           const { vocabulary: latest = [] } = await chrome.storage.local.get(['vocabulary']);
           renderVocabularyList(latest);
@@ -5381,22 +5612,25 @@ document.addEventListener('DOMContentLoaded', async () => {
       });
       ttsBtn.addEventListener('click', handleTTS);
       copyBtn.addEventListener('click', handleCopy);
-      // 中文翻譯 hover
-      const zhBtn = div.querySelector('.btn-vocab-zh');
-      if (zhBtn && !item.zhTranslation) {
-        zhBtn.addEventListener('mouseenter', async () => {
-          if (zhBtn.dataset.loaded) return;
-          zhBtn.dataset.loaded = '1';
+      const translateBtn = div.querySelector('.vocab-translate-btn');
+      if (translateBtn) {
+        translateBtn.addEventListener('click', async () => {
+          translateBtn.disabled = true;
+          translateBtn.textContent = '翻譯中...';
           const res = await chrome.runtime.sendMessage({ type: 'TRANSLATE_WORD', data: { text: item.word } });
           if (res.success) {
-            zhBtn.title = res.translated;
             const { vocabulary: current = [] } = await chrome.storage.local.get(['vocabulary']);
             const idx = current.findIndex(v => v.id === item.id);
-            if (idx !== -1) { current[idx].zhTranslation = res.translated; await chrome.storage.local.set({ vocabulary: current }); }
+            if (idx !== -1) {
+              current[idx].zhTranslation = res.translated;
+              await chrome.storage.local.set({ vocabulary: current });
+            }
+            renderVocabularyList(current);
           } else {
-            zhBtn.title = '翻譯失敗';
+            translateBtn.disabled = false;
+            translateBtn.textContent = '翻譯失敗，重試';
           }
-        }, { once: true });
+        });
       }
       div.querySelector('.btn-memory-delete').addEventListener('click', async () => {
         const { vocabulary: current = [] } = await chrome.storage.local.get(['vocabulary']);

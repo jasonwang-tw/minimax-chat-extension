@@ -20,6 +20,7 @@ window.__minimaxTranslateLoaded = true;
   let isPointerSelecting = false;
   let suppressOutsideClickUntil = 0;
   let isSelectionActionBusy = false;
+  let pendingTranslatePopup = null;
 
   // ── 語言顯示名稱 ──────────────────────────────────────────
   const LANG_NAMES = {
@@ -413,7 +414,7 @@ window.__minimaxTranslateLoaded = true;
     removePopup();
     removeSelectionAction();
 
-    const rect = data.rect || getSelectionRect();
+    const rect = data.rect || pendingTranslatePopup?.rect || getSelectionRect();
     const pos = rect ? calcPosition(rect) : { top: 100, left: Math.max((window.innerWidth - 360) / 2, 8) };
 
     // 建立 Shadow DOM host
@@ -520,6 +521,7 @@ window.__minimaxTranslateLoaded = true;
     });
 
     shadowRoot.appendChild(popup);
+    pendingTranslatePopup = null;
   }
 
   // ── 移除 popup ─────────────────────────────────────────────
@@ -562,6 +564,7 @@ window.__minimaxTranslateLoaded = true;
     const rect = lastSelectionRect;
     if (!text) return;
 
+    pendingTranslatePopup = { text, rect };
     isSelectionActionBusy = true;
     showActionToast('翻譯中...', 'warning');
     const isChinese = /[\u4e00-\u9fff\u3400-\u4dbf]/.test(text);
@@ -573,9 +576,10 @@ window.__minimaxTranslateLoaded = true;
         data: { text, from, to }
       });
       if (!response?.success) throw new Error(response?.error || '翻譯失敗');
-      showPopup({ original: text, translated: response.translated, from, to, rect });
+      showPopup({ original: pendingTranslatePopup?.text || text, translated: response.translated, from, to, rect: pendingTranslatePopup?.rect || rect });
     } catch {
       isSelectionActionBusy = false;
+      pendingTranslatePopup = null;
       showActionToast('翻譯失敗', 'error');
       setTimeout(removeSelectionAction, 1400);
     }
@@ -609,6 +613,7 @@ window.__minimaxTranslateLoaded = true;
   }
 
   function showSelectionAction() {
+    if (pendingTranslatePopup) return;
     if (isSelectionActionBusy) return;
     if (isPointerSelecting) return;
 
@@ -663,6 +668,7 @@ window.__minimaxTranslateLoaded = true;
   }
 
   function scheduleSelectionAction() {
+    if (pendingTranslatePopup) return;
     if (isSelectionActionBusy) return;
     if (isPointerSelecting) return;
     if (actionRenderTimer) clearTimeout(actionRenderTimer);
@@ -671,6 +677,7 @@ window.__minimaxTranslateLoaded = true;
 
   function handleSelectionPointerDown(e) {
     if (actionHost && actionHost.contains(e.target)) return;
+    if (pendingTranslatePopup) return;
     if (isSelectionActionBusy) return;
     isPointerSelecting = true;
     removeSelectionAction();
@@ -679,6 +686,7 @@ window.__minimaxTranslateLoaded = true;
   function handleSelectionPointerUp() {
     isPointerSelecting = false;
     if (!getSelectionData()) return;
+    if (pendingTranslatePopup) return;
     suppressOutsideClickUntil = Date.now() + 350;
     scheduleSelectionAction();
   }

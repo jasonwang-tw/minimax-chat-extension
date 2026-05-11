@@ -485,9 +485,14 @@
           </button>
         </div>
         <p class="memory-modal-hint">在任意網頁反白文字後使用浮動小選單「加入單字」，或右鍵「加入單字簿」即可新增。</p>
+        <div id="vocabularyStats" class="vocab-stats"></div>
+        <div class="modal-search-bar">
+          <input type="text" id="vocabularySearchInput" class="modal-search-input" placeholder="搜尋單字、翻譯、來源或語境...">
+        </div>
         <div class="modal-filter-bar modal-filter-bar-vocab">
           <select id="vocabularyLangFilter" class="modal-filter-select"></select>
           <select id="vocabularyCategoryFilter" class="modal-filter-select"></select>
+          <button id="vocabularyReviewBtn" class="btn-manage-cat">複習模式</button>
           <button id="manageVocabularyCatBtn" class="btn-manage-cat">管理分類</button>
         </div>
         <div id="vocabularyCatManager" class="category-manager hidden">
@@ -497,6 +502,7 @@
           </div>
           <div id="vocabularyCatList" class="cat-tag-list"></div>
         </div>
+        <div id="vocabularyReviewPanel" class="vocab-review-panel hidden"></div>
         <div id="vocabularyList" class="memory-list"></div>
         <div class="memory-modal-actions">
           <button id="vocabularyClearAllBtn" class="btn-secondary-sm">清空全部</button>
