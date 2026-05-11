@@ -5,6 +5,9 @@ import { SyncService, DEFAULT_SYNC_SETTINGS } from './sync/sync-service.js';
 const MINIMAX_API_URL = 'https://api.minimax.io/v1/chat/completions';
 const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
 const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash-lite:generateContent';
+const FINNHUB_API_URL = 'https://finnhub.io/api/v1';
+const ALPHA_VANTAGE_API_URL = 'https://www.alphavantage.co/query';
+const FINMIND_API_URL = 'https://api.finmindtrade.com/api/v4/data';
 const MODEL_NAME = 'MiniMax-M2.7';
 const MAX_HISTORY = 50;
 const MAX_CONTEXT_CHARS = 40000; // 保守估計 ~20k tokens（中英混合約 2 字元/token）
@@ -326,7 +329,7 @@ chrome.runtime.onStartup.addListener(async () => {
 
 // 資料變動即時自動備份（debounce 5 秒，避免連續觸發）
 let _autoBackupTimer = null;
-const AUTO_BACKUP_KEYS_SYNC = new Set(['memories', 'apiKey', 'geminiApiKey', 'braveApiKey', 'exaApiKey', 'openrouterApiKey', 'customModels', 'settings', 'defaultPrompts', 'globalPrompt']);
+const AUTO_BACKUP_KEYS_SYNC = new Set(['memories', 'apiKey', 'geminiApiKey', 'braveApiKey', 'exaApiKey', 'finnhubApiKey', 'alphaVantageApiKey', 'finmindToken', 'openrouterApiKey', 'customModels', 'settings', 'defaultPrompts', 'globalPrompt']);
 const AUTO_BACKUP_KEYS_LOCAL = new Set(['vocabulary', 'knowledgeBase', 'chatSessions']);
 
 chrome.storage.onChanged.addListener((changes, area) => {
@@ -2033,6 +2036,117 @@ const AGENT_TOOLS_BROWSER = [
   }
 ];
 
+const AGENT_TOOLS_FINANCE = [
+  {
+    type: 'function',
+    function: {
+      name: 'finance_resolve_symbol',
+      description: 'Normalize a user-entered stock ticker or common company name into a US or Taiwan market symbol before financial research.',
+      parameters: {
+        type: 'object',
+        properties: {
+          input: { type: 'string', description: 'Ticker, company name, or alias. Examples: AAPL, NVDA, 2330, 台積電.' },
+          market: { type: 'string', enum: ['US', 'TW', 'AUTO'], description: 'Optional market hint.' }
+        },
+        required: ['input']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'finance_get_quote',
+      description: 'Get the latest available quote for a US or Taiwan stock from configured finance data providers.',
+      parameters: {
+        type: 'object',
+        properties: {
+          symbol: { type: 'string', description: 'Normalized ticker, for example AAPL or 2330.' },
+          market: { type: 'string', enum: ['US', 'TW', 'AUTO'], description: 'Market.' }
+        },
+        required: ['symbol']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'finance_get_history',
+      description: 'Get historical daily prices for charting, trend, volatility, and drawdown analysis.',
+      parameters: {
+        type: 'object',
+        properties: {
+          symbol: { type: 'string', description: 'Normalized ticker.' },
+          market: { type: 'string', enum: ['US', 'TW', 'AUTO'], description: 'Market.' },
+          days: { type: 'number', description: 'Lookback days. Default 180, max 365.' }
+        },
+        required: ['symbol']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'finance_get_company_profile',
+      description: 'Get company profile, industry, exchange, and basic identity information.',
+      parameters: {
+        type: 'object',
+        properties: {
+          symbol: { type: 'string', description: 'Normalized ticker.' },
+          market: { type: 'string', enum: ['US', 'TW', 'AUTO'], description: 'Market.' }
+        },
+        required: ['symbol']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'finance_get_fundamentals',
+      description: 'Get available valuation and fundamental data for the stock.',
+      parameters: {
+        type: 'object',
+        properties: {
+          symbol: { type: 'string', description: 'Normalized ticker.' },
+          market: { type: 'string', enum: ['US', 'TW', 'AUTO'], description: 'Market.' }
+        },
+        required: ['symbol']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'finance_get_news',
+      description: 'Get recent company news or market news for the stock.',
+      parameters: {
+        type: 'object',
+        properties: {
+          symbol: { type: 'string', description: 'Normalized ticker.' },
+          market: { type: 'string', enum: ['US', 'TW', 'AUTO'], description: 'Market.' },
+          companyName: { type: 'string', description: 'Optional company name to improve provider matching.' }
+        },
+        required: ['symbol']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'finance_get_risk_trend',
+      description: 'Calculate a rule-based risk score, volatility, drawdown, trend status, and compact risk trend series.',
+      parameters: {
+        type: 'object',
+        properties: {
+          symbol: { type: 'string', description: 'Normalized ticker.' },
+          market: { type: 'string', enum: ['US', 'TW', 'AUTO'], description: 'Market.' },
+          days: { type: 'number', description: 'Lookback days. Default 180, max 365.' }
+        },
+        required: ['symbol']
+      }
+    }
+  }
+];
+
 // ── Session 層級瀏覽器分頁 / 群組追蹤 ──────────────────────────
 // key: sessionId → { tabId, groupId }
 // tabId：目前最後一個 agent 分頁；groupId：該 session 的分頁群組
@@ -2076,6 +2190,8 @@ async function getActivePageTab() {
 
 // ── tool_start 顯示文字 ───────────────────────────────────────
 function toolDisplayQuery(name, args) {
+  if (args.input) return args.input;
+  if (args.symbol) return [args.market, args.symbol].filter(Boolean).join(' ');
   if (args.query) return args.query;
   if (args.selector) return args.selector;
   if (args.url) return args.url;
@@ -2239,6 +2355,553 @@ async function executeBrowserTool(toolName, args, sessionId) {
 }
 
 // ── XML 工具呼叫解析（MiniMax M2.7 使用 XML 格式而非 OpenAI tool_calls）──
+const TW_STOCK_ALIASES = {
+  '台積電': '2330',
+  '台積': '2330',
+  'tsmc': '2330',
+  '鴻海': '2317',
+  '富士康': '2317',
+  '聯發科': '2454',
+  '聯電': '2303',
+  '廣達': '2382',
+  '台達電': '2308',
+  '大立光': '3008',
+  '中華電': '2412',
+  '玉山金': '2884',
+  '富邦金': '2881',
+  '國泰金': '2882'
+};
+
+function formatDateOnly(date) {
+  return date.toISOString().slice(0, 10);
+}
+
+function dateDaysAgo(days) {
+  const date = new Date();
+  date.setDate(date.getDate() - days);
+  return date;
+}
+
+function compactNumber(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return null;
+  return Math.round(num * 10000) / 10000;
+}
+
+function inferFinanceMarket(symbol, market = 'AUTO') {
+  const input = String(symbol || '').trim();
+  const normalizedMarket = String(market || 'AUTO').toUpperCase();
+  if (normalizedMarket === 'US' || normalizedMarket === 'TW') return normalizedMarket;
+  if (/^\d{4,6}(\.(TW|TWO))?$/i.test(input)) return 'TW';
+  return 'US';
+}
+
+function normalizeFinanceSymbol(input, market = 'AUTO') {
+  const raw = String(input || '').trim();
+  const aliasKey = raw.toLowerCase();
+  const aliasSymbol = TW_STOCK_ALIASES[raw] || TW_STOCK_ALIASES[aliasKey];
+  const source = aliasSymbol || raw.replace(/^\$/, '').replace(/\s+/g, '');
+  const inferredMarket = inferFinanceMarket(source, market);
+  const symbol = inferredMarket === 'TW'
+    ? source.replace(/\.(TW|TWO)$/i, '').replace(/\D/g, '').slice(0, 6)
+    : source.toUpperCase();
+  return {
+    input: raw,
+    symbol,
+    market: inferredMarket,
+    displaySymbol: inferredMarket === 'TW' ? `${symbol}.TW` : symbol,
+    providerSymbol: symbol,
+    warnings: symbol ? [] : ['Unable to resolve a stock symbol from the input.']
+  };
+}
+
+async function financeGetKeys() {
+  return await chrome.storage.sync.get(['finnhubApiKey', 'alphaVantageApiKey', 'finmindToken']);
+}
+
+async function financeFetchJson(url, timeoutMs = 20000) {
+  const response = await fetchWithTimeout(url, { method: 'GET' }, timeoutMs);
+  const text = await response.text();
+  let data;
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    data = { raw: text.slice(0, 1000) };
+  }
+  if (!response.ok) return { error: `HTTP ${response.status}`, status: response.status, data };
+  return data;
+}
+
+function buildUrl(base, params) {
+  const url = new URL(base);
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value != null && value !== '') url.searchParams.set(key, String(value));
+  });
+  return url.toString();
+}
+
+function buildFinMindUrl(params, token) {
+  return buildUrl(FINMIND_API_URL, { ...params, ...(token ? { token } : {}) });
+}
+
+function extractFinMindData(payload) {
+  if (payload?.error) return payload;
+  if (payload?.status && Number(payload.status) >= 400) return { error: payload.msg || `FinMind HTTP ${payload.status}` };
+  if (payload?.status === 402 || payload?.status === 429) return { error: payload.msg || 'FinMind rate limit or permission issue.' };
+  return Array.isArray(payload?.data) ? payload.data : [];
+}
+
+async function financeResolveSymbol(args) {
+  return normalizeFinanceSymbol(args.input || args.symbol, args.market || 'AUTO');
+}
+
+async function financeGetQuote(args) {
+  const resolved = normalizeFinanceSymbol(args.symbol || args.input, args.market || 'AUTO');
+  const keys = await financeGetKeys();
+  if (!resolved.symbol) return { error: resolved.warnings[0] };
+
+  if (resolved.market === 'US') {
+    if (keys.finnhubApiKey) {
+      const url = buildUrl(`${FINNHUB_API_URL}/quote`, { symbol: resolved.symbol, token: keys.finnhubApiKey });
+      const data = await financeFetchJson(url);
+      if (!data.error && data.c) {
+        return {
+          ...resolved,
+          source: 'Finnhub quote',
+          dataTime: data.t ? new Date(data.t * 1000).toISOString() : new Date().toISOString(),
+          quote: {
+            current: compactNumber(data.c),
+            change: compactNumber(data.d),
+            percentChange: compactNumber(data.dp),
+            high: compactNumber(data.h),
+            low: compactNumber(data.l),
+            open: compactNumber(data.o),
+            previousClose: compactNumber(data.pc)
+          }
+        };
+      }
+    }
+    if (keys.alphaVantageApiKey) {
+      const url = buildUrl(ALPHA_VANTAGE_API_URL, {
+        function: 'GLOBAL_QUOTE',
+        symbol: resolved.symbol,
+        apikey: keys.alphaVantageApiKey
+      });
+      const data = await financeFetchJson(url);
+      const quote = data?.['Global Quote'];
+      if (quote && Object.keys(quote).length > 0) {
+        return {
+          ...resolved,
+          source: 'Alpha Vantage GLOBAL_QUOTE',
+          dataTime: new Date().toISOString(),
+          quote: {
+            current: compactNumber(quote['05. price']),
+            change: compactNumber(quote['09. change']),
+            percentChange: compactNumber(String(quote['10. change percent'] || '').replace('%', '')),
+            high: compactNumber(quote['03. high']),
+            low: compactNumber(quote['04. low']),
+            open: compactNumber(quote['02. open']),
+            previousClose: compactNumber(quote['08. previous close']),
+            volume: compactNumber(quote['06. volume'])
+          }
+        };
+      }
+    }
+    return { ...resolved, error: 'Finance quote requires Finnhub API Key or Alpha Vantage API Key in settings.' };
+  }
+
+  const endDate = formatDateOnly(new Date());
+  const startDate = formatDateOnly(dateDaysAgo(20));
+  const url = buildFinMindUrl({
+    dataset: 'TaiwanStockPrice',
+    data_id: resolved.symbol,
+    start_date: startDate,
+    end_date: endDate
+  }, keys.finmindToken);
+  const payload = await financeFetchJson(url);
+  const rows = extractFinMindData(payload);
+  if (rows.error) return { ...resolved, error: rows.error };
+  const latest = rows.filter(r => r.stock_id === resolved.symbol).at(-1);
+  if (!latest) return { ...resolved, error: 'No Taiwan quote data returned by FinMind.' };
+  return {
+    ...resolved,
+    source: 'FinMind TaiwanStockPrice',
+    dataTime: latest.date,
+    delayed: true,
+    quote: {
+      current: compactNumber(latest.close),
+      change: compactNumber(latest.spread),
+      high: compactNumber(latest.max),
+      low: compactNumber(latest.min),
+      open: compactNumber(latest.open),
+      volume: compactNumber(latest.Trading_Volume),
+      turnover: compactNumber(latest.Trading_money)
+    }
+  };
+}
+
+function normalizePricePoints(rows, market) {
+  if (!Array.isArray(rows)) return [];
+  if (market === 'US') {
+    return rows.map(([date, value]) => ({
+      date,
+      open: compactNumber(value['1. open']),
+      high: compactNumber(value['2. high']),
+      low: compactNumber(value['3. low']),
+      close: compactNumber(value['4. close']),
+      volume: compactNumber(value['5. volume'])
+    })).filter(p => p.close != null);
+  }
+  return rows.map(r => ({
+    date: r.date,
+    open: compactNumber(r.open),
+    high: compactNumber(r.max),
+    low: compactNumber(r.min),
+    close: compactNumber(r.close),
+    volume: compactNumber(r.Trading_Volume)
+  })).filter(p => p.close != null);
+}
+
+async function financeGetHistory(args) {
+  const resolved = normalizeFinanceSymbol(args.symbol || args.input, args.market || 'AUTO');
+  const keys = await financeGetKeys();
+  const days = Math.min(Math.max(Number(args.days) || 180, 30), 365);
+  if (!resolved.symbol) return { error: resolved.warnings[0] };
+
+  if (resolved.market === 'US') {
+    if (!keys.alphaVantageApiKey) return { ...resolved, error: 'US historical data requires Alpha Vantage API Key in settings.' };
+    const url = buildUrl(ALPHA_VANTAGE_API_URL, {
+      function: 'TIME_SERIES_DAILY',
+      symbol: resolved.symbol,
+      outputsize: days > 100 ? 'full' : 'compact',
+      apikey: keys.alphaVantageApiKey
+    });
+    const data = await financeFetchJson(url, 25000);
+    const series = data?.['Time Series (Daily)'];
+    if (!series) return { ...resolved, error: data?.Note || data?.Information || data?.['Error Message'] || 'No Alpha Vantage daily series returned.' };
+    const points = normalizePricePoints(Object.entries(series).sort(([a], [b]) => a.localeCompare(b)).slice(-days), 'US');
+    return { ...resolved, source: 'Alpha Vantage TIME_SERIES_DAILY', delayed: true, points };
+  }
+
+  const endDate = formatDateOnly(new Date());
+  const startDate = formatDateOnly(dateDaysAgo(days + 10));
+  const url = buildFinMindUrl({
+    dataset: 'TaiwanStockPrice',
+    data_id: resolved.symbol,
+    start_date: startDate,
+    end_date: endDate
+  }, keys.finmindToken);
+  const payload = await financeFetchJson(url, 25000);
+  const rows = extractFinMindData(payload);
+  if (rows.error) return { ...resolved, error: rows.error };
+  const points = normalizePricePoints(rows.filter(r => r.stock_id === resolved.symbol).slice(-days), 'TW');
+  return { ...resolved, source: 'FinMind TaiwanStockPrice', delayed: true, points };
+}
+
+async function financeGetCompanyProfile(args) {
+  const resolved = normalizeFinanceSymbol(args.symbol || args.input, args.market || 'AUTO');
+  const keys = await financeGetKeys();
+  if (!resolved.symbol) return { error: resolved.warnings[0] };
+
+  if (resolved.market === 'US') {
+    if (keys.finnhubApiKey) {
+      const url = buildUrl(`${FINNHUB_API_URL}/stock/profile2`, { symbol: resolved.symbol, token: keys.finnhubApiKey });
+      const data = await financeFetchJson(url);
+      if (!data.error && Object.keys(data || {}).length > 0) {
+        return {
+          ...resolved,
+          source: 'Finnhub profile2',
+          profile: {
+            name: data.name,
+            country: data.country,
+            exchange: data.exchange,
+            industry: data.finnhubIndustry,
+            ipo: data.ipo,
+            marketCapitalization: compactNumber(data.marketCapitalization),
+            shareOutstanding: compactNumber(data.shareOutstanding),
+            weburl: data.weburl,
+            logo: data.logo
+          }
+        };
+      }
+    }
+    if (keys.alphaVantageApiKey) {
+      const url = buildUrl(ALPHA_VANTAGE_API_URL, { function: 'OVERVIEW', symbol: resolved.symbol, apikey: keys.alphaVantageApiKey });
+      const data = await financeFetchJson(url);
+      if (!data.error && data.Symbol) {
+        return {
+          ...resolved,
+          source: 'Alpha Vantage OVERVIEW',
+          profile: {
+            name: data.Name,
+            description: data.Description,
+            exchange: data.Exchange,
+            currency: data.Currency,
+            country: data.Country,
+            sector: data.Sector,
+            industry: data.Industry,
+            marketCapitalization: compactNumber(data.MarketCapitalization)
+          }
+        };
+      }
+    }
+    return { ...resolved, error: 'Company profile requires Finnhub or Alpha Vantage API Key in settings.' };
+  }
+
+  const url = buildFinMindUrl({ dataset: 'TaiwanStockInfo', data_id: resolved.symbol }, keys.finmindToken);
+  const payload = await financeFetchJson(url);
+  const rows = extractFinMindData(payload);
+  if (rows.error) return { ...resolved, error: rows.error };
+  const info = rows.find(r => r.stock_id === resolved.symbol) || rows[0];
+  return {
+    ...resolved,
+    source: 'FinMind TaiwanStockInfo',
+    profile: info ? {
+      name: info.stock_name,
+      type: info.type,
+      industryCategory: info.industry_category,
+      market: info.market,
+      date: info.date
+    } : null
+  };
+}
+
+async function financeGetFundamentals(args) {
+  const resolved = normalizeFinanceSymbol(args.symbol || args.input, args.market || 'AUTO');
+  const keys = await financeGetKeys();
+  if (!resolved.symbol) return { error: resolved.warnings[0] };
+
+  if (resolved.market === 'US') {
+    if (!keys.alphaVantageApiKey) return { ...resolved, error: 'US fundamentals require Alpha Vantage API Key in settings.' };
+    const url = buildUrl(ALPHA_VANTAGE_API_URL, { function: 'OVERVIEW', symbol: resolved.symbol, apikey: keys.alphaVantageApiKey });
+    const data = await financeFetchJson(url);
+    if (!data.Symbol) return { ...resolved, error: data?.Note || data?.Information || data?.['Error Message'] || 'No Alpha Vantage fundamentals returned.' };
+    return {
+      ...resolved,
+      source: 'Alpha Vantage OVERVIEW',
+      fundamentals: {
+        peRatio: compactNumber(data.PERatio),
+        pegRatio: compactNumber(data.PEGRatio),
+        priceToBook: compactNumber(data.PriceToBookRatio),
+        dividendYield: compactNumber(data.DividendYield),
+        eps: compactNumber(data.EPS),
+        revenueTTM: compactNumber(data.RevenueTTM),
+        grossProfitTTM: compactNumber(data.GrossProfitTTM),
+        profitMargin: compactNumber(data.ProfitMargin),
+        beta: compactNumber(data.Beta),
+        analystTargetPrice: compactNumber(data.AnalystTargetPrice),
+        fiscalYearEnd: data.FiscalYearEnd,
+        latestQuarter: data.LatestQuarter
+      }
+    };
+  }
+
+  const startDate = formatDateOnly(dateDaysAgo(400));
+  const endDate = formatDateOnly(new Date());
+  const [revenuePayload, perPayload] = await Promise.all([
+    financeFetchJson(buildFinMindUrl({ dataset: 'TaiwanStockMonthRevenue', data_id: resolved.symbol, start_date: startDate, end_date: endDate }, keys.finmindToken)),
+    financeFetchJson(buildFinMindUrl({ dataset: 'TaiwanStockPER', data_id: resolved.symbol, start_date: startDate, end_date: endDate }, keys.finmindToken))
+  ]);
+  const revenueRows = extractFinMindData(revenuePayload);
+  const perRows = extractFinMindData(perPayload);
+  return {
+    ...resolved,
+    source: 'FinMind TaiwanStockMonthRevenue + TaiwanStockPER',
+    fundamentals: {
+      monthlyRevenue: Array.isArray(revenueRows) ? revenueRows.slice(-6).map(r => ({
+        date: r.date,
+        revenue: compactNumber(r.revenue),
+        mom: compactNumber(r.revenue_month),
+        yoy: compactNumber(r.revenue_year)
+      })) : [],
+      valuation: Array.isArray(perRows) ? perRows.slice(-1).map(r => ({
+        date: r.date,
+        peRatio: compactNumber(r.PER),
+        priceToBook: compactNumber(r.PBR),
+        dividendYield: compactNumber(r.dividend_yield)
+      }))[0] || null : null,
+      warnings: [revenueRows.error, perRows.error].filter(Boolean)
+    }
+  };
+}
+
+async function financeGetNews(args) {
+  const resolved = normalizeFinanceSymbol(args.symbol || args.input, args.market || 'AUTO');
+  const keys = await financeGetKeys();
+  if (!resolved.symbol) return { error: resolved.warnings[0] };
+
+  if (resolved.market === 'US') {
+    if (keys.finnhubApiKey) {
+      const url = buildUrl(`${FINNHUB_API_URL}/company-news`, {
+        symbol: resolved.symbol,
+        from: formatDateOnly(dateDaysAgo(21)),
+        to: formatDateOnly(new Date()),
+        token: keys.finnhubApiKey
+      });
+      const data = await financeFetchJson(url);
+      if (Array.isArray(data)) {
+        return {
+          ...resolved,
+          source: 'Finnhub company-news',
+          news: data.slice(0, 8).map(item => ({
+            datetime: item.datetime ? new Date(item.datetime * 1000).toISOString() : null,
+            headline: item.headline,
+            source: item.source,
+            url: item.url,
+            summary: item.summary
+          }))
+        };
+      }
+    }
+    if (keys.alphaVantageApiKey) {
+      const data = await financeFetchJson(buildUrl(ALPHA_VANTAGE_API_URL, {
+        function: 'NEWS_SENTIMENT',
+        tickers: resolved.symbol,
+        apikey: keys.alphaVantageApiKey
+      }));
+      if (Array.isArray(data?.feed)) {
+        return {
+          ...resolved,
+          source: 'Alpha Vantage NEWS_SENTIMENT',
+          news: data.feed.slice(0, 8).map(item => ({
+            datetime: item.time_published,
+            headline: item.title,
+            source: item.source,
+            url: item.url,
+            summary: item.summary,
+            sentiment: item.overall_sentiment_label
+          }))
+        };
+      }
+    }
+    return { ...resolved, error: 'US news requires Finnhub or Alpha Vantage API Key in settings. Use web_search as fallback.' };
+  }
+
+  const url = buildFinMindUrl({ dataset: 'TaiwanStockNews', data_id: resolved.symbol }, keys.finmindToken);
+  const payload = await financeFetchJson(url);
+  const rows = extractFinMindData(payload);
+  if (Array.isArray(rows) && rows.length > 0) {
+    return {
+      ...resolved,
+      source: 'FinMind TaiwanStockNews',
+      news: rows.slice(-8).reverse().map(item => ({
+        datetime: item.date,
+        headline: item.title,
+        source: item.source,
+        url: item.link,
+        summary: item.content
+      }))
+    };
+  }
+  return { ...resolved, error: rows.error || 'No Taiwan stock news returned. Use web_search as fallback.' };
+}
+
+function average(values) {
+  const nums = values.filter(Number.isFinite);
+  if (!nums.length) return 0;
+  return nums.reduce((sum, n) => sum + n, 0) / nums.length;
+}
+
+function calculateRiskTrend(points) {
+  const closes = (points || []).map(p => Number(p.close)).filter(Number.isFinite);
+  if (closes.length < 25) return { error: 'Not enough historical points to calculate a stable risk trend.' };
+  const returns = closes.slice(1).map((price, i) => (price / closes[i]) - 1).filter(Number.isFinite);
+  const avgReturn = average(returns);
+  const variance = average(returns.map(r => (r - avgReturn) ** 2));
+  const annualVolatility = Math.sqrt(variance) * Math.sqrt(252);
+  let peak = closes[0];
+  let maxDrawdown = 0;
+  closes.forEach(price => {
+    if (price > peak) peak = price;
+    const drawdown = peak ? (price / peak) - 1 : 0;
+    if (drawdown < maxDrawdown) maxDrawdown = drawdown;
+  });
+  const sma20 = average(closes.slice(-20));
+  const sma60 = closes.length >= 60 ? average(closes.slice(-60)) : average(closes);
+  const latest = closes.at(-1);
+  const momentum20 = (latest / closes.at(-20)) - 1;
+  const riskByVolatility = Math.min(40, annualVolatility * 100);
+  const riskByDrawdown = Math.min(35, Math.abs(maxDrawdown) * 120);
+  const riskByTrend = latest < sma20 ? 12 : 0;
+  const riskByLongTrend = sma20 < sma60 ? 10 : 0;
+  const riskByMomentum = momentum20 < -0.08 ? 8 : momentum20 > 0.18 ? 5 : 0;
+  const riskScore = Math.round(Math.min(100, riskByVolatility + riskByDrawdown + riskByTrend + riskByLongTrend + riskByMomentum));
+  const riskLevel = riskScore >= 70 ? 'high' : riskScore >= 40 ? 'medium' : 'low';
+  const windows = points.slice(-30);
+  const trendScores = windows.map((_, index) => {
+    const subset = points.slice(0, Math.max(points.length - windows.length + index + 1, 25));
+    const subsetCloses = subset.map(p => Number(p.close)).filter(Number.isFinite);
+    const recentSlice = subsetCloses.slice(-21);
+    const recentReturns = recentSlice.slice(1).map((price, i) => recentSlice[i] ? (price / recentSlice[i]) - 1 : 0);
+    const recentAvg = average(recentReturns);
+    const recentVol = Math.sqrt(average(recentReturns.map(r => (r - recentAvg) ** 2))) * Math.sqrt(252);
+    const recentLatest = subsetCloses.at(-1);
+    const recentSma20 = average(subsetCloses.slice(-20));
+    return Math.round(Math.min(100, recentVol * 100 + (recentLatest < recentSma20 ? 20 : 0)));
+  });
+  const bars = '▁▂▃▄▅▆▇█';
+  const maxTrend = Math.max(...trendScores, 1);
+  const sparkline = trendScores.map(score => bars[Math.min(bars.length - 1, Math.floor((score / maxTrend) * (bars.length - 1)))]).join('');
+  return {
+    riskScore,
+    riskLevel,
+    metrics: {
+      latestClose: compactNumber(latest),
+      annualVolatility: compactNumber(annualVolatility),
+      maxDrawdown: compactNumber(maxDrawdown),
+      sma20: compactNumber(sma20),
+      sma60: compactNumber(sma60),
+      momentum20: compactNumber(momentum20)
+    },
+    trend: {
+      labels: windows.map(p => p.date),
+      scores: trendScores,
+      sparkline
+    }
+  };
+}
+
+async function financeGetRiskTrend(args) {
+  const history = await financeGetHistory(args);
+  if (history.error) return history;
+  const risk = calculateRiskTrend(history.points || []);
+  if (risk.error) return { ...history, error: risk.error };
+  return {
+    symbol: history.symbol,
+    market: history.market,
+    displaySymbol: history.displaySymbol,
+    source: history.source,
+    delayed: history.delayed,
+    dataPoints: history.points?.length || 0,
+    ...risk
+  };
+}
+
+async function executeFinanceTool(name, args = {}) {
+  if (name === 'finance_resolve_symbol') return await financeResolveSymbol(args);
+  if (name === 'finance_get_quote') return await financeGetQuote(args);
+  if (name === 'finance_get_history') return await financeGetHistory(args);
+  if (name === 'finance_get_company_profile') return await financeGetCompanyProfile(args);
+  if (name === 'finance_get_fundamentals') return await financeGetFundamentals(args);
+  if (name === 'finance_get_news') return await financeGetNews(args);
+  if (name === 'finance_get_risk_trend') return await financeGetRiskTrend(args);
+  return { error: `Unknown finance tool: ${name}` };
+}
+
+function messageLooksLikeFinanceResearch(message) {
+  const text = String(message || '');
+  return /\/(?:finance|stock|twstock|news)\b|股票|台股|美股|投資|進場|風險|股價|財報|基本面|技術面|殖利率|本益比|NVDA|TSLA|AAPL|MSFT|META|GOOGL|AMZN|\b\d{4}\b/i.test(text);
+}
+
+const FINANCE_RESEARCH_CONTEXT = [
+  'Finance research mode:',
+  '- First normalize the ticker with finance_resolve_symbol, then call quote, history, company profile, fundamentals, news, and risk trend tools when relevant.',
+  '- If a finance provider returns missing credentials or no data, use web_search when available and clearly label fallback sources.',
+  '- Always state data source, data timestamp or delayed status, and uncertainty.',
+  '- Provide company information, current quote context, risk score, risk trend summary, and short / medium / long term entry scenarios with invalidation conditions.',
+  '- Do not present personalized financial advice. Frame outputs as research support for retail investors and include risk management notes.'
+].join('\n');
+
 function parseXmlToolCalls(content) {
   if (!content || typeof content !== 'string') return null;
   const blockMatch = content.match(/<minimax:tool_call>([\s\S]*?)<\/minimax:tool_call>/);
@@ -2329,6 +2992,9 @@ async function handleToolCall(name, args, sessionId) {
   }
   if (name.startsWith('browser_')) {
     return await executeBrowserTool(name, args, sessionId);
+  }
+  if (name.startsWith('finance_')) {
+    return await executeFinanceTool(name, args);
   }
   const { apiToolRegistry } = await chrome.storage.local.get('apiToolRegistry');
   const regTool = (apiToolRegistry || []).find(t => t.enabled && t.name === name);
@@ -3035,7 +3701,7 @@ async function streamAgentChat(message, history, translateConfig, model, systemP
   const apiToolRegistry = await loadApiToolRegistryForAgent();
   const enabledRegistryTools = apiToolRegistry.filter(t => t.enabled);
   const registryTools = enabledRegistryTools.map(buildRegistryTool);
-  const tools = [...AGENT_TOOLS_BROWSER, ...registryTools];
+  const tools = [...AGENT_TOOLS_BROWSER, ...AGENT_TOOLS_FINANCE, ...registryTools];
   if (braveApiKey || exaApiKey) tools.push(AGENT_TOOLS_SEARCH[0]); // web_search
   if (exaApiKey) tools.push(AGENT_TOOLS_SEARCH[1]);                 // deep_search
 
@@ -3072,7 +3738,8 @@ async function streamAgentChat(message, history, translateConfig, model, systemP
   const dateContext = `當前日期：${dateStr}。搜尋資訊時，除非使用者明確指定時間範圍，否則一律以接近當前日期的資訊為準。回答中引用網路搜尋結果時，來源必須以 Markdown 超連結格式標注，例如：[標題](https://example.com)，不可只寫來源名稱而不附 URL。`;
   const toolAuthContext = '可用 API 工具已由擴充功能代管 OAuth 或本機憑證。需要存取 Notion、Gmail、Google Calendar、GA4、WordPress 等已連接服務時，請直接呼叫可用工具，不要要求使用者提供 API Token、環境變數或密鑰。Notion 的 Copy Link / 分享連結只提供頁面 URL，不會授權 API integration；如果 Notion 工具回傳 object_not_found 或 404，請明確要求使用者在該頁面右上角「...」→ Connections / Connect to → 選擇 Open Chat Hub，尤其是頁面移動到新位置之後。不要把「直接分享連結」當成 API 存取權限的解法。若工具回傳尚未授權或權限不足，請要求使用者到設定頁重新授權或調整 connection capabilities。沒有實際呼叫工具前，不得宣稱正在等待 API、正在寫入、已建立、已更新、已完成或即將提供連結。對 Notion/database/寫入類大型任務，必須分段完成：先建立 schema 或父頁，再分批寫入資料列/blocks；每段成功後繼續下一段，不要把大量內容留到最後一次整理，也不要用簡略摘要取代實際寫入。Notion page_id 與 database_id 不可混用：使用者提供的頁面連結通常是 page_id，只能用於 notion_get_page、notion_get_block_children，或作為 notion_create_database 的 parent.page_id；只有 notion_create_database 回傳的 database id 才能用於 notion_query_database 或作為資料列 parent.database_id。';
 
-  const finalSystemPrompt = [dateContext, toolAuthContext, memoryContext, globalPrompt, modePrompt].filter(Boolean).join('\n\n');
+  const financeContext = messageLooksLikeFinanceResearch(message) ? FINANCE_RESEARCH_CONTEXT : '';
+  const finalSystemPrompt = [dateContext, toolAuthContext, financeContext, memoryContext, globalPrompt, modePrompt].filter(Boolean).join('\n\n');
   const effectiveContextChars = normalizeContextCharBudget(contextCharBudget);
   const fixedChars = (finalSystemPrompt?.length || 0) + message.length;
   const historyBudget = Math.max(0, effectiveContextChars - fixedChars);

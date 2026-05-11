@@ -218,7 +218,7 @@
 | 🟢 P3 | 瀏覽器自動化 Phase 3 | Native Messaging + Playwright（完整多 tab 自動化） |
 | 🟢 P3 | MiniMax 影片生成 | 需 Max 方案（$50/月）；非同步任務，複雜度高 |
 | 🔵 P4 | Skill 執行工具 | run_skill；Agent Loop + API Tool 已夠用，只有需要「保證固定步驟的可重複流程」時才有額外價值 |
-| 🟢 P3 | 財經功能 | /stock、/twstock、/news |
+| 🟡 P2 | 金融研究助理 | /finance、/stock、/twstock、/news |
 | 🔵 P4 | MiniMax 音樂生成 | 需 Max 方案（$50/月）；較小眾 |
 | 🔵 P4 | 自動化 Gmail Digest | chrome.alarms + chrome.identity（OAuth 基礎建設已完成於 v1.30.0） |
 | 🔵 P4 | Token lifecycle policy | expiration / rotation / cleanup |
@@ -452,18 +452,22 @@
 - AI 能根據任務選擇合適 skill。
 - skill 執行過程可追蹤與取消。
 
-### 🟢 P3 — 財經功能
+### 🟡 P2 — 金融研究助理
 
-提供股票、台股、新聞等查詢能力，可能接 API 或搜尋工具。
+提供散戶/研究型投資助理能力。使用者輸入美股或台股代碼、中文公司名，AI 自動查詢行情、公司資訊、基本面、新聞與風險資料，輸出研究摘要、風險走勢與短中長期情境。此功能不整合 `anthropics/financial-services` Git 作為 runtime dependency；只參考金融研究框架，不匯入 Claude plugin / Managed Agent / MCP 結構。
 
 主要工作：
-- `/stock`、`/twstock`、`/news` 指令。
-- 接資料來源 API 或搜尋 fallback。
-- 顯示報價、新聞、摘要與來源。
+- `/finance <symbol or company>` 主入口，支援 `AAPL`、`NVDA`、`2330`、`2330.TW`、`台積電` 等輸入。
+- 保留 `/stock`、`/twstock`、`/news` 作為快捷命令。
+- 接低成本資料源：Finnhub、Alpha Vantage、FinMind，並保留 web/deep search fallback。
+- 標準化 `quote`、`history`、`company`、`fundamentals`、`news`、`riskSignals` 資料。
+- 顯示公司資訊、行情、新聞、基本面、技術面/籌碼面、風險分數、風險走勢圖、短中長期策略情境。
 
 完成標準：
-- 使用者可以查詢基本財經資訊。
-- 回答包含資料來源與時間。
+- 使用者可以查詢美股/台股並取得研究型摘要。
+- 回答包含資料來源、資料時間、即時/延遲狀態。
+- 回答包含公司資訊、風險評估、風險走勢圖與短中長期情境。
+- 明確標示非個人化投資建議，不提供下單、保證買賣點或個人化資產配置。
 
 ### 🔵 P4 — MiniMax 音樂生成
 
@@ -912,11 +916,15 @@ Chromium / Chrome
 
 ---
 
-## 🟢 P3 — 財經功能
+## 🟡 P2 — 金融研究助理
 
-- [ ] `/stock`：查詢美股即時資訊
-- [ ] `/twstock`：查詢台股即時資訊
-- [ ] `/news`：財經新聞摘要
+- [ ] `/finance`：輸入美股/台股代碼或公司名，自動產出研究型投資助理摘要
+- [ ] `/stock`：美股快捷查詢，含行情、公司資訊、新聞、風險與策略情境
+- [ ] `/twstock`：台股快捷查詢，含行情、公司資訊、基本面/籌碼資料、風險與策略情境
+- [ ] `/news`：財經新聞摘要與標的相關催化因素
+- [ ] 低成本資料源設定：Finnhub、Alpha Vantage、FinMind
+- [ ] 風險分數與風險走勢圖
+- [ ] 非個人化投資建議與資料延遲提示
 
 ---
 

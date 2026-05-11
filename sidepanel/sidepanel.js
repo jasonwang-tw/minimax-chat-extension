@@ -3148,6 +3148,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       search: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>',
       deep_search: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/><path d="M11 8v6"/><path d="M8 11h6"/></svg>',
       api: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v4"/><path d="M12 17v4"/><path d="M4.2 7.5l3.5 2"/><path d="M16.3 14.5l3.5 2"/><path d="M19.8 7.5l-3.5 2"/><path d="M7.7 14.5l-3.5 2"/><circle cx="12" cy="12" r="5"/></svg>',
+      finance: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3v18h18"/><path d="m7 15 4-4 3 3 5-7"/><path d="M19 7v5h-5"/></svg>',
       plan: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6h13"/><path d="M8 12h13"/><path d="M8 18h13"/><path d="M3 6h.01"/><path d="M3 12h.01"/><path d="M3 18h.01"/></svg>',
       browser_click: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3l10 10-5 1.2L9.8 20 7 3Z"/></svg>',
       browser_fill: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>',
@@ -3174,6 +3175,18 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (tool === 'deep_search') return '深度搜尋';
     if (tool === 'web_search') return '搜尋網路';
     if (tool?.startsWith('browser_')) return getBrowserToolLabel(tool);
+    if (tool?.startsWith('finance_')) {
+      const map = {
+        finance_resolve_symbol: '辨識標的',
+        finance_get_quote: '查詢報價',
+        finance_get_history: '查詢歷史走勢',
+        finance_get_company_profile: '查詢公司資訊',
+        finance_get_fundamentals: '查詢基本面',
+        finance_get_news: '查詢金融新聞',
+        finance_get_risk_trend: '計算風險走勢'
+      };
+      return map[tool] || '金融資料';
+    }
     return tool;
   }
 
@@ -3187,6 +3200,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (e.tool === 'deep_search') { icon = getToolIconSvg('deep_search'); label = '深度搜尋'; }
       else if (e.tool === 'web_search') { icon = getToolIconSvg('search'); label = '搜尋'; }
       else if (e.tool?.startsWith('browser_')) { icon = getToolIconSvg(e.tool); label = getBrowserToolLabel(e.tool); }
+      else if (e.tool?.startsWith('finance_')) { icon = getToolIconSvg('finance'); label = getAgentToolLabel(e.tool); }
       else { icon = getToolIconSvg('api'); label = e.tool; }
       const countStr = e.error
         ? `<span class="agent-sh-count error">失敗</span>`
@@ -3780,6 +3794,11 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // ── Commands ─────────────────────────────────────────────
 
+  const FINANCE_RESEARCH_TEMPLATE = '請用金融研究助理模式分析「{input}」。請自動查詢標的代碼、即時或最新可用資訊、公司資訊、近期新聞、基本面、風險走勢圖摘要，並提供短中長期進場策略、失效條件與風險控管。請標明資料來源、資料時間與延遲限制，且不要給個人化投資建議。';
+  const US_STOCK_RESEARCH_TEMPLATE = '請用金融研究助理模式分析美股「{input}」。請涵蓋即時或最新可用報價、公司資訊、新聞、基本面、風險分數與風險走勢，並整理短中長期策略情境。';
+  const TW_STOCK_RESEARCH_TEMPLATE = '請用金融研究助理模式分析台股「{input}」。請涵蓋最新可用報價、公司資訊、新聞、籌碼或基本面可用資料、風險分數與風險走勢，並整理短中長期策略情境。';
+  const FINANCE_NEWS_TEMPLATE = '請整理「{input}」的最新金融市場或個股新聞，優先補充對股價、基本面、產業與風險的影響，並標明來源與時間。';
+
   const BUILTIN_COMMANDS = [
     { trigger: '/page',      name: '讀取當前頁面',       type: 'action' },
     { trigger: '/page-code', name: '分析頁面原始碼/樣式', type: 'action', argHint: '/page-code <問題（可選）>' },
@@ -3789,6 +3808,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     { trigger: '/remember', name: '記住某件事',  type: 'action', argHint: '/remember <內容>' },
     { trigger: '/search',      name: '一般搜尋（Brave）', type: 'action', argHint: '/search <關鍵字>' },
     { trigger: '/deep-search', name: '深度搜尋（Exa）',   type: 'action', argHint: '/deep-search <關鍵字>' },
+    { trigger: '/finance', name: '金融研究助理', type: 'template', argHint: '/finance <股票代碼或公司名>', template: FINANCE_RESEARCH_TEMPLATE },
+    { trigger: '/stock', name: '美股研究', type: 'template', argHint: '/stock <美股代碼或公司名>', template: US_STOCK_RESEARCH_TEMPLATE },
+    { trigger: '/twstock', name: '台股研究', type: 'template', argHint: '/twstock <台股代碼或公司名>', template: TW_STOCK_RESEARCH_TEMPLATE },
+    { trigger: '/news', name: '金融新聞', type: 'template', argHint: '/news <市場、產業或股票>', template: FINANCE_NEWS_TEMPLATE },
   ];
 
   async function loadCustomCommands() {
@@ -3809,7 +3832,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   function getAllCommands() {
-    return [...BUILTIN_COMMANDS, ...customCommands.map(c => ({ ...c, isCustom: true }))];
+    const enabledCustomCommands = customCommands
+      .filter(c => c.enabled !== false)
+      .map(c => ({ ...c, isCustom: true }));
+    return [...BUILTIN_COMMANDS, ...enabledCustomCommands];
   }
 
   function getActiveSlashCommandToken() {

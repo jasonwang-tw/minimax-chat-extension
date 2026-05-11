@@ -426,6 +426,11 @@ kbd {
   padding: 10px 12px;
 }
 
+.reply-mode-item.is-disabled {
+  border-color: rgba(255, 255, 255, 0.04);
+  opacity: 0.72;
+}
+
 .reply-mode-header {
   display: flex;
   gap: 6px;
@@ -469,6 +474,33 @@ input.cmd-trigger {
 
 .btn-mode-delete:hover {
   color: var(--danger);
+}
+
+.cmd-enabled-toggle {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  min-width: 54px;
+  padding: 8px 10px;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.cmd-enabled-toggle.is-enabled {
+  background: rgba(236, 41, 112, 0.16);
+  border-color: rgba(236, 41, 112, 0.45);
+  color: var(--primary);
+}
+
+.cmd-enabled-toggle.is-disabled {
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-secondary);
+}
+
+.cmd-enabled-toggle:hover {
+  border-color: rgba(236, 41, 112, 0.65);
 }
 
 .mode-prompt {

@@ -19,6 +19,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   const toggleBraveKeyBtn = document.getElementById('toggleBraveKey');
   const exaApiKeyInput = document.getElementById('exaApiKey');
   const toggleExaKeyBtn = document.getElementById('toggleExaKey');
+  const finnhubApiKeyInput = document.getElementById('finnhubApiKey');
+  const toggleFinnhubKeyBtn = document.getElementById('toggleFinnhubKey');
+  const alphaVantageApiKeyInput = document.getElementById('alphaVantageApiKey');
+  const toggleAlphaVantageKeyBtn = document.getElementById('toggleAlphaVantageKey');
+  const finmindTokenInput = document.getElementById('finmindToken');
+  const toggleFinmindTokenBtn = document.getElementById('toggleFinmindToken');
   const openrouterApiKeyInput = document.getElementById('openrouterApiKey');
   const toggleOpenrouterKeyBtn = document.getElementById('toggleOpenrouterKey');
   const customModelsListEl = document.getElementById('customModelsList');
@@ -121,6 +127,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   bindPasswordToggle(toggleGeminiKeyBtn, geminiApiKeyInput);
   bindPasswordToggle(toggleBraveKeyBtn, braveApiKeyInput);
   bindPasswordToggle(toggleExaKeyBtn, exaApiKeyInput);
+  bindPasswordToggle(toggleFinnhubKeyBtn, finnhubApiKeyInput);
+  bindPasswordToggle(toggleAlphaVantageKeyBtn, alphaVantageApiKeyInput);
+  bindPasswordToggle(toggleFinmindTokenBtn, finmindTokenInput);
   bindPasswordToggle(toggleOpenrouterKeyBtn, openrouterApiKeyInput);
 
   addCustomModelBtn?.addEventListener('click', () => {
@@ -138,6 +147,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         geminiApiKey: geminiApiKeyInput.value.trim(),
         braveApiKey: braveApiKeyInput.value.trim(),
         exaApiKey: exaApiKeyInput.value.trim(),
+        finnhubApiKey: finnhubApiKeyInput.value.trim(),
+        alphaVantageApiKey: alphaVantageApiKeyInput.value.trim(),
+        finmindToken: finmindTokenInput.value.trim(),
         openrouterApiKey: openrouterApiKeyInput.value.trim(),
         customModels
       });
@@ -262,6 +274,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       trigger: '/cmd',
       name: '指令說明',
       type: 'template',
+      enabled: true,
       template: '{input}'
     });
     renderCustomCommands();
@@ -394,15 +407,20 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   async function loadSettings() {
-    const { apiKey, geminiApiKey, braveApiKey, exaApiKey, settings, openrouterApiKey } =
+    const { apiKey, geminiApiKey, braveApiKey, exaApiKey, finnhubApiKey, alphaVantageApiKey, finmindToken, settings, openrouterApiKey } =
       await chrome.storage.sync.get([
-        'apiKey', 'geminiApiKey', 'braveApiKey', 'exaApiKey', 'settings', 'openrouterApiKey'
+        'apiKey', 'geminiApiKey', 'braveApiKey', 'exaApiKey',
+        'finnhubApiKey', 'alphaVantageApiKey', 'finmindToken',
+        'settings', 'openrouterApiKey'
       ]);
 
     apiKeyInput.value = apiKey || '';
     geminiApiKeyInput.value = geminiApiKey || '';
     braveApiKeyInput.value = braveApiKey || '';
     exaApiKeyInput.value = exaApiKey || '';
+    finnhubApiKeyInput.value = finnhubApiKey || '';
+    alphaVantageApiKeyInput.value = alphaVantageApiKey || '';
+    finmindTokenInput.value = finmindToken || '';
     maxHistorySelect.value = String(settings?.maxHistory || 50);
     planModeSelect.value = settings?.planMode || 'auto';
     openrouterApiKeyInput.value = openrouterApiKey || '';
@@ -1072,9 +1090,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   function renderCustomCommands() {
     customCommandsList.innerHTML = '';
     customCommands.forEach((command, index) => {
+      const enabled = command.enabled !== false;
       const item = document.createElement('div');
-      item.className = 'reply-mode-item';
+      item.className = `reply-mode-item${enabled ? '' : ' is-disabled'}`;
       item.dataset.id = command.id;
+      item.dataset.enabled = enabled ? 'true' : 'false';
       item.innerHTML = `
         <div class="reply-mode-header">
           <div style="display:flex;gap:6px;flex:1;align-items:center">
@@ -1082,13 +1102,22 @@ document.addEventListener('DOMContentLoaded', async () => {
             <input type="text" class="cmd-trigger mode-name" value="${escapeVal((command.trigger || '/').replace(/^\/+/, ''))}" placeholder="指令名稱">
             <input type="text" class="cmd-name mode-name" value="${escapeVal(command.name || '')}" placeholder="指令說明">
           </div>
+          <button class="cmd-enabled-toggle ${enabled ? 'is-enabled' : 'is-disabled'}" data-index="${index}" type="button" aria-pressed="${enabled ? 'true' : 'false'}">
+            ${enabled ? '啟用' : '停用'}
+          </button>
           <button class="btn-mode-delete" data-index="${index}" title="刪除指令" type="button">
             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
           </button>
         </div>
         <textarea class="cmd-template mode-prompt" rows="2" placeholder="輸入提示詞模板。{input} 會被替換成指令後方輸入的文字，例如：請將以下內容翻譯成英文：{input}">${escapeVal(command.template || '')}</textarea>
       `;
+      item.querySelector('.cmd-enabled-toggle').addEventListener('click', () => {
+        customCommands = collectCommandsFromDom(customCommandsList);
+        customCommands[index].enabled = customCommands[index].enabled === false;
+        renderCustomCommands();
+      });
       item.querySelector('.btn-mode-delete').addEventListener('click', () => {
+        customCommands = collectCommandsFromDom(customCommandsList);
         customCommands.splice(index, 1);
         renderCustomCommands();
       });
@@ -1102,6 +1131,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       trigger: `/${(item.querySelector('.cmd-trigger').value || 'cmd').replace(/^\/+/, '').trim() || 'cmd'}`,
       name: item.querySelector('.cmd-name').value.trim() || '指令說明',
       type: 'template',
+      enabled: item.dataset.enabled !== 'false',
       template: item.querySelector('.cmd-template').value.trim()
     }));
   }
