@@ -3065,7 +3065,7 @@ async function streamAgentChat(message, history, translateConfig, model, systemP
   const enabledToolNames = enabledRegistryTools.map(t => t.name);
   const requiresConnectedToolTask = messageRequiresConnectedTool();
   const requiresMutatingConnectedToolTask = messageRequiresMutatingConnectedTool();
-  const autoContinueMax = requiresConnectedToolTask ? AGENT_AUTO_CONTINUE_SEGMENTS : 0;
+  const autoContinueMax = requiresMutatingConnectedToolTask ? AGENT_AUTO_CONTINUE_SEGMENTS : 0;
   const effectiveMaxIter = maxIter * (autoContinueMax + 1);
   let autoContinueCount = 0;
 
@@ -3102,7 +3102,7 @@ async function streamAgentChat(message, history, translateConfig, model, systemP
 
   function messageRequiresMutatingConnectedTool() {
     if (!messageRequiresConnectedTool()) return false;
-    return /(建立|新增|寫入|追加|更新|修改|刪除|移除|封存|發布|寄出|送出|建立資料庫|create|post|append|patch|put|update|delete|archive|send|publish)/i.test(message || '');
+    return /(建立|新增|寫入|追加|更新|修改|刪除|移除|封存|還原|發布|寄出|送出|加入|儲存|建立資料庫|create|post|append|patch|put|update|delete|insert|write|modify|remove|archive|send|publish)/i.test(message || '');
   }
 
   function replyLooksLikeFakeToolProgress(reply) {
@@ -3181,14 +3181,18 @@ ${toolContext || '沒有可用工具結果'}
 
   function buildDeterministicFallbackReply(reason = '', errorMessage = '') {
     const toolContext = truncateAgentText(toolObservations.join('\n\n---\n\n'), AGENT_FINAL_CONTEXT_LIMIT);
-    const mutatingStatus = mutatingToolExecuted
-      ? '已偵測到至少一次寫入類 API 工具成功執行。'
-      : '目前沒有偵測到成功的寫入類 API 工具。';
+    const apiStatus = requiresMutatingConnectedToolTask
+      ? (mutatingToolExecuted
+        ? '已偵測到至少一次寫入類 API 工具成功執行。'
+        : '目前沒有偵測到成功的寫入類 API 工具。')
+      : (toolsExecuted
+        ? '已偵測到至少一次 API 工具執行。'
+        : '目前沒有偵測到成功的 API 工具。');
     return `Agent 任務未完成最終整理。
 
 停止原因：${reason || '模型未能產生最終回答。'}${errorMessage ? `\n錯誤原因：${errorMessage}` : ''}
 
-API 狀態：${mutatingStatus}
+API 狀態：${apiStatus}
 
 已取得的工具結果摘要：
 \`\`\`text
@@ -3225,7 +3229,7 @@ ${toolContext}
   }
 
   function enqueueAutoContinuation(reason = '', nextInstruction = '') {
-    if (!requiresConnectedToolTask || autoContinueCount >= autoContinueMax) return false;
+    if (!requiresMutatingConnectedToolTask || autoContinueCount >= autoContinueMax) return false;
     autoContinueCount += 1;
     const toolContext = truncateAgentText(toolObservations.join('\n\n---\n\n'), AGENT_FINAL_CONTEXT_LIMIT);
     port.postMessage({
@@ -3414,6 +3418,12 @@ ${truncateAgentText(finalReply, 3000)}`;
 - 要建立 database 時，先建立 schema，不要同時寫入全部資料。
 - 要寫入大量資料時，一次只寫第一批 3-5 筆或第一段 blocks。`
       });
+      if (!requiresMutatingConnectedToolTask) {
+        messages.push({
+          role: 'user',
+          content: '這是讀取/查看型的已連接工具任務，不需要寫入類 API 成功。請使用可用工具取得資料後直接整理回答；不要因為沒有 POST/PATCH/DELETE 工具呼叫而續跑。'
+        });
+      }
       return;
     }
 
@@ -3445,6 +3455,12 @@ ${truncateAgentText(finalReply, 3000)}`;
 - 若要寫入 blocks，下一步只 append 第一段 blocks。
 - 不要輸出完整最終整理，不要宣稱完成，除非所有資料都已實際寫入。`
     });
+    if (!requiresMutatingConnectedToolTask) {
+      messages.push({
+        role: 'user',
+        content: '這是讀取/查看型 Notion 任務，不需要寫入類 API 成功。請依使用者問題讀取必要頁面或區塊內容後，直接用已取得的 Notion 資料整理最終回答。'
+      });
+    }
   }
 
   await runInitialNotionPreflight();
@@ -3461,7 +3477,7 @@ ${truncateAgentText(finalReply, 3000)}`;
           text: `Agent 分析請求失敗：${err.message}。正在改用精簡工具結果做恢復整理。`,
           level: 'warning'
         });
-        if (requiresConnectedToolTask && enqueueAutoContinuation(`Agent 分析請求失敗：${err.message}。請根據既有工具結果繼續下一個最小批次，不要重複已成功的寫入。`)) {
+        if (requiresMutatingConnectedToolTask && enqueueAutoContinuation(`Agent 分析請求失敗：${err.message}。請根據既有工具結果繼續下一個最小批次，不要重複已成功的寫入。`)) {
           continue;
         }
         try {
@@ -3477,7 +3493,7 @@ ${truncateAgentText(finalReply, 3000)}`;
         }
         return;
       }
-      if (requiresConnectedToolTask) {
+      if (requiresMutatingConnectedToolTask) {
         if (enqueueAutoContinuation(`Agent 分析請求失敗：${err.message}。請改用最小工具步驟重新嘗試。`)) {
           continue;
         }
@@ -3645,7 +3661,7 @@ ${truncateAgentText(finalReply, 3000)}`;
       if (enqueueAutoContinuation('工具已執行，但模型沒有產生 final answer。請繼續下一段實際工具操作。')) {
         continue;
       }
-      if (requiresConnectedToolTask) {
+      if (requiresMutatingConnectedToolTask) {
         sendFinalFallback('自動分段接續已達上限，但模型仍未產生完成狀態。', '任務可能尚未完整完成，未產生簡略最終版。');
         return;
       }
@@ -3672,7 +3688,7 @@ ${truncateAgentText(finalReply, 3000)}`;
 
   if (toolsExecuted) {
     const limitReason = `已達工具迭代上限 ${effectiveMaxIter} 輪。`;
-    if (requiresConnectedToolTask) {
+    if (requiresMutatingConnectedToolTask) {
       sendFinalFallback(limitReason, '自動分段已達上限，任務可能尚未完整完成，未產生簡略最終版。');
       return;
     }
