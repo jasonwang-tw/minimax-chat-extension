@@ -285,6 +285,7 @@ chrome.runtime.onInstalled.addListener(({ reason }) => {
     });
     chrome.storage.local.set({
       vocabulary: [],
+      lessonRecords: [],
       categories: { memory: [], knowledge: [], vocabulary: [] },
       syncAuth: {},
       customCommands: []
@@ -1035,6 +1036,48 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'OAUTH_REVOKE') {
     revokeOAuth(message.data?.presetId)
       .then(() => sendResponse({ success: true }))
+      .catch(err => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  if (message.type === 'GET_FINANCE_DASHBOARD') {
+    getFinanceDashboard(message.data || {})
+      .then(data => sendResponse({ success: true, data }))
+      .catch(err => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  if (message.type === 'GET_FINANCE_STOCK_DETAIL') {
+    getFinanceStockDetail(message.data || {})
+      .then(data => sendResponse({ success: true, data }))
+      .catch(err => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  if (message.type === 'LESSON_RECORDING_START') {
+    startLessonOffscreenRecording()
+      .then(data => sendResponse({ success: true, data }))
+      .catch(err => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  if (message.type === 'LESSON_RECORDING_STOP') {
+    stopLessonOffscreenRecording()
+      .then(data => sendResponse({ success: true, data }))
+      .catch(err => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  if (message.type === 'LESSON_RECORDING_PAUSE') {
+    pauseLessonOffscreenRecording()
+      .then(data => sendResponse({ success: true, data }))
+      .catch(err => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  if (message.type === 'LESSON_RECORDING_RESUME') {
+    resumeLessonOffscreenRecording()
+      .then(data => sendResponse({ success: true, data }))
       .catch(err => sendResponse({ success: false, error: err.message }));
     return true;
   }
@@ -2386,6 +2429,104 @@ const TW_STOCK_ALIASES = {
   '國泰金': '2882'
 };
 
+const LESSON_OFFSCREEN_URL = chrome.runtime.getURL('offscreen/lesson-recorder.html');
+
+async function ensureLessonOffscreenDocument() {
+  if (!chrome.offscreen?.createDocument) {
+    throw new Error('此 Chrome 版本不支援 offscreen 錄音文件');
+  }
+
+  if (chrome.runtime.getContexts) {
+    const contexts = await chrome.runtime.getContexts({
+      contextTypes: ['OFFSCREEN_DOCUMENT'],
+      documentUrls: [LESSON_OFFSCREEN_URL]
+    });
+    if (contexts.length > 0) return;
+  }
+
+  try {
+    await chrome.offscreen.createDocument({
+      url: 'offscreen/lesson-recorder.html',
+      reasons: ['USER_MEDIA'],
+      justification: 'Record English tutoring lesson tab audio and microphone audio.'
+    });
+  } catch (err) {
+    if (!/Only a single offscreen document/i.test(err.message || '')) throw err;
+  }
+}
+
+function sendLessonOffscreenMessage(message) {
+  return chrome.runtime.sendMessage({
+    ...message,
+    target: 'lesson-recorder-offscreen'
+  });
+}
+
+async function startLessonOffscreenRecording() {
+  if (!chrome.tabCapture?.getMediaStreamId) {
+    throw new Error('此 Chrome 版本不支援 tabCapture stream id');
+  }
+  await ensureLessonOffscreenDocument();
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab?.id) throw new Error('找不到目前可錄製的課程分頁');
+  const streamId = await chrome.tabCapture.getMediaStreamId({ targetTabId: tab.id });
+  const response = await sendLessonOffscreenMessage({
+    type: 'LESSON_OFFSCREEN_START',
+    streamId
+  });
+  if (!response?.success) throw new Error(response?.error || 'offscreen 錄音啟動失敗');
+  return response.data || {};
+}
+
+async function stopLessonOffscreenRecording() {
+  try {
+    const response = await sendLessonOffscreenMessage({ type: 'LESSON_OFFSCREEN_STOP' });
+    if (!response?.success) throw new Error(response?.error || 'offscreen 錄音停止失敗');
+    return response.data || {};
+  } finally {
+    await chrome.offscreen?.closeDocument?.().catch(() => {});
+  }
+}
+
+async function pauseLessonOffscreenRecording() {
+  const response = await sendLessonOffscreenMessage({ type: 'LESSON_OFFSCREEN_PAUSE' });
+  if (!response?.success) throw new Error(response?.error || 'offscreen 錄音暫停失敗');
+  return response.data || {};
+}
+
+async function resumeLessonOffscreenRecording() {
+  const response = await sendLessonOffscreenMessage({ type: 'LESSON_OFFSCREEN_RESUME' });
+  if (!response?.success) throw new Error(response?.error || 'offscreen 錄音繼續失敗');
+  return response.data || {};
+}
+
+const FINANCE_DASHBOARD_UNIVERSE = {
+  US: [
+    { symbol: 'NVDA', name: 'NVIDIA', group: 'AI / Semiconductors' },
+    { symbol: 'AAPL', name: 'Apple', group: 'Mega-cap Tech' },
+    { symbol: 'MSFT', name: 'Microsoft', group: 'Mega-cap Tech' },
+    { symbol: 'AMZN', name: 'Amazon', group: 'Consumer Internet' },
+    { symbol: 'META', name: 'Meta', group: 'Consumer Internet' },
+    { symbol: 'GOOGL', name: 'Alphabet', group: 'Consumer Internet' },
+    { symbol: 'TSLA', name: 'Tesla', group: 'EV / Auto' },
+    { symbol: 'AMD', name: 'AMD', group: 'AI / Semiconductors' },
+    { symbol: 'JPM', name: 'JPMorgan Chase', group: 'Financials' },
+    { symbol: 'XOM', name: 'Exxon Mobil', group: 'Energy' }
+  ],
+  TW: [
+    { symbol: '2330', name: '台積電', group: '半導體' },
+    { symbol: '2454', name: '聯發科', group: '半導體' },
+    { symbol: '2303', name: '聯電', group: '半導體' },
+    { symbol: '2317', name: '鴻海', group: 'AI 伺服器 / 電子代工' },
+    { symbol: '2382', name: '廣達', group: 'AI 伺服器 / 電子代工' },
+    { symbol: '2308', name: '台達電', group: '電源 / 工業' },
+    { symbol: '2412', name: '中華電', group: '電信' },
+    { symbol: '2881', name: '富邦金', group: '金融' },
+    { symbol: '2882', name: '國泰金', group: '金融' },
+    { symbol: '2603', name: '長榮', group: '航運' }
+  ]
+};
+
 function formatDateOnly(date) {
   return date.toISOString().slice(0, 10);
 }
@@ -2433,8 +2574,8 @@ async function financeGetKeys() {
   return await chrome.storage.sync.get(['finnhubApiKey', 'alphaVantageApiKey', 'finmindToken']);
 }
 
-async function financeFetchJson(url, timeoutMs = 20000) {
-  const response = await fetchWithTimeout(url, { method: 'GET' }, timeoutMs);
+async function financeFetchJson(url, timeoutMs = 20000, options = {}) {
+  const response = await fetchWithTimeout(url, { method: 'GET', ...options }, timeoutMs);
   const text = await response.text();
   let data;
   try {
@@ -2456,6 +2597,12 @@ function buildUrl(base, params) {
 
 function buildFinMindUrl(params, token) {
   return buildUrl(FINMIND_API_URL, { ...params, ...(token ? { token } : {}) });
+}
+
+async function financeFetchFinMindJson(params, token) {
+  const url = buildFinMindUrl(params, token);
+  const options = token ? { headers: { Authorization: `Bearer ${token}` } } : {};
+  return await financeFetchJson(url, 20000, options);
 }
 
 function extractFinMindData(payload) {
@@ -2526,28 +2673,43 @@ async function financeGetQuote(args) {
 
   const endDate = formatDateOnly(new Date());
   const startDate = formatDateOnly(dateDaysAgo(20));
-  const url = buildFinMindUrl({
+  const payload = await financeFetchFinMindJson({
     dataset: 'TaiwanStockPrice',
     data_id: resolved.symbol,
     start_date: startDate,
     end_date: endDate
   }, keys.finmindToken);
-  const payload = await financeFetchJson(url);
   const rows = extractFinMindData(payload);
   if (rows.error) return { ...resolved, error: rows.error };
-  const latest = rows.filter(r => r.stock_id === resolved.symbol).at(-1);
+  const stockRows = rows.filter(r => r.stock_id === resolved.symbol);
+  const latest = stockRows.at(-1);
   if (!latest) return { ...resolved, error: 'No Taiwan quote data returned by FinMind.' };
+  const previous = stockRows.at(-2);
+  const current = compactNumber(latest.close);
+  const change = compactNumber(latest.spread);
+  const previousClose = compactNumber(
+    Number.isFinite(Number(current)) && Number.isFinite(Number(change))
+      ? Number(current) - Number(change)
+      : previous?.close
+  );
+  const percentChange = compactNumber(
+    Number.isFinite(Number(current)) && Number.isFinite(Number(previousClose)) && Number(previousClose) !== 0
+      ? ((Number(current) / Number(previousClose)) - 1) * 100
+      : null
+  );
   return {
     ...resolved,
     source: 'FinMind TaiwanStockPrice',
     dataTime: latest.date,
     delayed: true,
     quote: {
-      current: compactNumber(latest.close),
-      change: compactNumber(latest.spread),
+      current,
+      change,
+      percentChange,
       high: compactNumber(latest.max),
       low: compactNumber(latest.min),
       open: compactNumber(latest.open),
+      previousClose,
       volume: compactNumber(latest.Trading_Volume),
       turnover: compactNumber(latest.Trading_money)
     }
@@ -2599,13 +2761,12 @@ async function financeGetHistory(args) {
 
   const endDate = formatDateOnly(new Date());
   const startDate = formatDateOnly(dateDaysAgo(days + 10));
-  const url = buildFinMindUrl({
+  const payload = await financeFetchFinMindJson({
     dataset: 'TaiwanStockPrice',
     data_id: resolved.symbol,
     start_date: startDate,
     end_date: endDate
   }, keys.finmindToken);
-  const payload = await financeFetchJson(url, 25000);
   const rows = extractFinMindData(payload);
   if (rows.error) return { ...resolved, error: rows.error };
   const points = normalizePricePoints(rows.filter(r => r.stock_id === resolved.symbol).slice(-days), 'TW');
@@ -2662,8 +2823,7 @@ async function financeGetCompanyProfile(args) {
     return { ...resolved, error: 'Company profile requires Finnhub or Alpha Vantage API Key in settings.' };
   }
 
-  const url = buildFinMindUrl({ dataset: 'TaiwanStockInfo', data_id: resolved.symbol }, keys.finmindToken);
-  const payload = await financeFetchJson(url);
+  const payload = await financeFetchFinMindJson({ dataset: 'TaiwanStockInfo', data_id: resolved.symbol }, keys.finmindToken);
   const rows = extractFinMindData(payload);
   if (rows.error) return { ...resolved, error: rows.error };
   const info = rows.find(r => r.stock_id === resolved.symbol) || rows[0];
@@ -2713,8 +2873,8 @@ async function financeGetFundamentals(args) {
   const startDate = formatDateOnly(dateDaysAgo(400));
   const endDate = formatDateOnly(new Date());
   const [revenuePayload, perPayload] = await Promise.all([
-    financeFetchJson(buildFinMindUrl({ dataset: 'TaiwanStockMonthRevenue', data_id: resolved.symbol, start_date: startDate, end_date: endDate }, keys.finmindToken)),
-    financeFetchJson(buildFinMindUrl({ dataset: 'TaiwanStockPER', data_id: resolved.symbol, start_date: startDate, end_date: endDate }, keys.finmindToken))
+    financeFetchFinMindJson({ dataset: 'TaiwanStockMonthRevenue', data_id: resolved.symbol, start_date: startDate, end_date: endDate }, keys.finmindToken),
+    financeFetchFinMindJson({ dataset: 'TaiwanStockPER', data_id: resolved.symbol, start_date: startDate, end_date: endDate }, keys.finmindToken)
   ]);
   const revenueRows = extractFinMindData(revenuePayload);
   const perRows = extractFinMindData(perPayload);
@@ -2809,13 +2969,12 @@ async function financeGetNews(args) {
     `${resolved.symbol} ${args.companyName || ''} 台股 新聞`,
     `${resolved.symbol} ${args.companyName || ''} 法說 財報 營收 風險`
   ].map(q => q.replace(/\s+/g, ' ').trim());
-  const url = buildFinMindUrl({
+  const payload = await financeFetchFinMindJson({
     dataset: 'TaiwanStockNews',
     data_id: resolved.symbol,
     start_date: formatDateOnly(dateDaysAgo(30)),
     end_date: formatDateOnly(new Date())
   }, keys.finmindToken);
-  const payload = await financeFetchJson(url);
   const rows = extractFinMindData(payload);
   if (Array.isArray(rows) && rows.length > 0) {
     return {
@@ -2931,6 +3090,149 @@ async function executeFinanceTool(name, args = {}) {
   if (name === 'finance_get_news') return await financeGetNews(args);
   if (name === 'finance_get_risk_trend') return await financeGetRiskTrend(args);
   return { error: `Unknown finance tool: ${name}` };
+}
+
+function getFinanceFreshness(item = {}, fallbackMarket = 'AUTO') {
+  const market = item.market || fallbackMarket;
+  if (item.error) return { label: '資料不足', level: 'warning', timestamp: null, source: item.source || '' };
+  if (market === 'TW') return { label: '日資料', level: 'daily', timestamp: item.dataTime || null, source: item.source || '' };
+  if (item.delayed) return { label: '延遲', level: 'delayed', timestamp: item.dataTime || null, source: item.source || '' };
+  return { label: '最新可用', level: 'latest', timestamp: item.dataTime || new Date().toISOString(), source: item.source || '' };
+}
+
+function getQuotePercentChange(quoteResult = {}) {
+  const q = quoteResult.quote || {};
+  const pct = Number(q.percentChange);
+  if (Number.isFinite(pct)) return pct;
+  const current = Number(q.current);
+  const prev = Number(q.previousClose);
+  if (Number.isFinite(current) && Number.isFinite(prev) && prev !== 0) {
+    return compactNumber(((current / prev) - 1) * 100);
+  }
+  return 0;
+}
+
+function buildFinanceDashboardGroups(items = []) {
+  const byGroup = new Map();
+  items.forEach(item => {
+    const key = item.group || 'Other';
+    if (!byGroup.has(key)) byGroup.set(key, []);
+    byGroup.get(key).push(item);
+  });
+  return [...byGroup.entries()].map(([name, stocks]) => {
+    const valid = stocks.filter(s => !s.error);
+    const avgChange = valid.length ? compactNumber(valid.reduce((sum, s) => sum + Number(s.percentChange || 0), 0) / valid.length) : 0;
+    const upCount = valid.filter(s => Number(s.percentChange || 0) > 0).length;
+    const totalVolume = valid.reduce((sum, s) => sum + (Number(s.volume) || 0), 0);
+    return {
+      name,
+      avgChange,
+      upRatio: valid.length ? compactNumber(upCount / valid.length) : 0,
+      totalVolume: compactNumber(totalVolume),
+      stocks: stocks.sort((a, b) => Math.abs(Number(b.percentChange || 0)) - Math.abs(Number(a.percentChange || 0)))
+    };
+  }).sort((a, b) => Math.abs(Number(b.avgChange || 0)) - Math.abs(Number(a.avgChange || 0)));
+}
+
+async function getFinanceDashboard({ market = 'US' } = {}) {
+  const normalizedMarket = String(market || 'US').toUpperCase() === 'TW' ? 'TW' : 'US';
+  const universe = FINANCE_DASHBOARD_UNIVERSE[normalizedMarket] || FINANCE_DASHBOARD_UNIVERSE.US;
+  const keys = await financeGetKeys();
+  const warnings = [];
+
+  if (normalizedMarket === 'US' && !keys.finnhubApiKey && !keys.alphaVantageApiKey) {
+    warnings.push('美股 dashboard 需要 Finnhub 或 Alpha Vantage API Key；目前只會顯示設定提示與空資料。');
+  }
+  if (normalizedMarket === 'TW' && !keys.finmindToken) {
+    warnings.push('台股資料使用 FinMind 最新可用日資料；未設定 token 時可能受到較嚴格的流量限制。');
+  }
+
+  const quoteResults = await Promise.all(universe.map(async stock => {
+    const quote = await financeGetQuote({ symbol: stock.symbol, market: normalizedMarket });
+    const percentChange = getQuotePercentChange(quote);
+    const freshness = getFinanceFreshness(quote, normalizedMarket);
+    return {
+      ...stock,
+      market: normalizedMarket,
+      displaySymbol: quote.displaySymbol || (normalizedMarket === 'TW' ? `${stock.symbol}.TW` : stock.symbol),
+      source: quote.source || '',
+      error: quote.error || null,
+      price: quote.quote?.current ?? null,
+      change: quote.quote?.change ?? null,
+      percentChange,
+      open: quote.quote?.open ?? null,
+      high: quote.quote?.high ?? null,
+      low: quote.quote?.low ?? null,
+      previousClose: quote.quote?.previousClose ?? null,
+      volume: quote.quote?.volume ?? 0,
+      turnover: quote.quote?.turnover ?? null,
+      freshness
+    };
+  }));
+
+  const groups = buildFinanceDashboardGroups(quoteResults);
+  const validQuoteCount = quoteResults.filter(item => !item.error && Number.isFinite(Number(item.price))).length;
+  const movers = quoteResults
+    .filter(item => !item.error)
+    .sort((a, b) => Math.abs(Number(b.percentChange || 0)) - Math.abs(Number(a.percentChange || 0)))
+    .slice(0, 6);
+
+  const newsTargets = movers.slice(0, 3);
+  const newsResults = await Promise.all(newsTargets.map(async item => {
+    const result = await financeGetNews({ symbol: item.symbol, market: normalizedMarket, companyName: item.name });
+    return {
+      symbol: item.symbol,
+      displaySymbol: item.displaySymbol,
+      name: item.name,
+      source: result.source || '',
+      warnings: result.warnings || [],
+      fallbackQueries: result.fallbackQueries || [],
+      news: (result.news || []).slice(0, 3)
+    };
+  }));
+
+  const hasQuoteApiError = quoteResults.some(item => item.error) && validQuoteCount === 0;
+  const hasNewsApiError = newsResults.some(result => result.warnings?.length);
+  if (hasNewsApiError && !hasQuoteApiError) {
+    warnings.push(normalizedMarket === 'TW'
+      ? '部分台股新聞資料未回傳；行情資料仍可使用。'
+      : '部分美股新聞資料未回傳；行情資料仍可使用。');
+  }
+
+  return {
+    market: normalizedMarket,
+    generatedAt: new Date().toISOString(),
+    freshness: quoteResults.find(item => !item.error)?.freshness || { label: '資料不足', level: 'warning' },
+    validQuoteCount,
+    hasApiError: hasQuoteApiError,
+    hasQuoteApiError,
+    hasNewsApiError,
+    groups,
+    movers,
+    news: newsResults,
+    warnings: [...new Set(warnings)].slice(0, 8)
+  };
+}
+
+async function getFinanceStockDetail({ symbol, market = 'AUTO', companyName = '' } = {}) {
+  const resolved = normalizeFinanceSymbol(symbol, market);
+  if (!resolved.symbol) return { error: resolved.warnings?.[0] || 'Unable to resolve symbol.' };
+  const [quote, history, profile, fundamentals, news] = await Promise.all([
+    financeGetQuote({ symbol: resolved.symbol, market: resolved.market }),
+    financeGetHistory({ symbol: resolved.symbol, market: resolved.market, days: 45 }),
+    financeGetCompanyProfile({ symbol: resolved.symbol, market: resolved.market }),
+    financeGetFundamentals({ symbol: resolved.symbol, market: resolved.market }),
+    financeGetNews({ symbol: resolved.symbol, market: resolved.market, companyName })
+  ]);
+  return {
+    ...resolved,
+    quote,
+    history,
+    profile,
+    fundamentals,
+    news,
+    freshness: getFinanceFreshness(quote, resolved.market)
+  };
 }
 
 function messageLooksLikeFinanceResearch(message) {

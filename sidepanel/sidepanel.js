@@ -22,6 +22,8 @@ let vocabularyReviewMode = false;  // 單字簿複習模式
 let vocabularyReviewItems = [];    // 複習中的單字項目
 let vocabularyReviewIndex = 0;     // 複習卡片游標
 let vocabularyReviewAnswerVisible = false;
+let lessonRecords = [];            // 英文課錄音與整理紀錄
+let lessonAudioDb = null;           // IndexedDB handle for local lesson audio blobs
 let knowledgeBase = [];            // 全域知識庫條目
 let selectedKnowledge = [];        // 本次訊息已選取的知識庫條目
 let kbPaletteIndex = -1;           // @ palette 鍵盤游標
@@ -154,8 +156,39 @@ document.addEventListener('DOMContentLoaded', async () => {
   const vocabularyReviewPanel = document.getElementById('vocabularyReviewPanel');
   const vocabularyClearAllBtn = document.getElementById('vocabularyClearAllBtn');
   const openVocabularyBtn = document.getElementById('openVocabularyBtn');
+  const vocabularyWordsTab = document.getElementById('vocabularyWordsTab');
+  const lessonRecordingTab = document.getElementById('lessonRecordingTab');
+  const vocabularyWordsView = document.getElementById('vocabularyWordsView');
+  const lessonRecordingView = document.getElementById('lessonRecordingView');
+  const lessonNotice = document.getElementById('lessonNotice');
+  const lessonNoticeAck = document.getElementById('lessonNoticeAck');
+  const lessonRecordingStateEl = document.getElementById('lessonRecordingState');
+  const lessonRecordingTimer = document.getElementById('lessonRecordingTimer');
+  const lessonTranscriptStatus = document.getElementById('lessonTranscriptStatus');
+  const lessonMicPermissionBtn = document.getElementById('lessonMicPermissionBtn');
+  const lessonStartBtn = document.getElementById('lessonStartBtn');
+  const lessonStopBtn = document.getElementById('lessonStopBtn');
+  const lessonOrganizeBtn = document.getElementById('lessonOrganizeBtn');
+  const lessonTranscriptDraft = document.getElementById('lessonTranscriptDraft');
+  const lessonRecordsList = document.getElementById('lessonRecordsList');
+  const lessonFloatingBar = document.getElementById('lessonFloatingBar');
+  const lessonFloatingState = document.getElementById('lessonFloatingState');
+  const lessonFloatingTimer = document.getElementById('lessonFloatingTimer');
+  const lessonFloatingPauseBtn = document.getElementById('lessonFloatingPauseBtn');
+  const lessonFloatingStopBtn = document.getElementById('lessonFloatingStopBtn');
   // 知識庫元素
   const openKnowledgeBtn = document.getElementById('openKnowledgeBtn');
+  const openMarketBtn = document.getElementById('openMarketBtn');
+  const marketPanel = document.getElementById('marketPanel');
+  const marketPanelClose = document.getElementById('marketPanelClose');
+  const marketRefreshBtn = document.getElementById('marketRefreshBtn');
+  const marketFreshness = document.getElementById('marketFreshness');
+  const marketWarnings = document.getElementById('marketWarnings');
+  const marketHeatmap = document.getElementById('marketHeatmap');
+  const marketGroups = document.getElementById('marketGroups');
+  const marketNews = document.getElementById('marketNews');
+  const marketDetail = document.getElementById('marketDetail');
+  const marketDetailHint = document.getElementById('marketDetailHint');
   const knowledgeChips = document.getElementById('knowledgeChips');
   const knowledgePalette = document.getElementById('knowledgePalette');
   const knowledgeModal = document.getElementById('knowledgeModal');
@@ -239,7 +272,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   let currentAudio = null;     // 目前播放中的 Audio 物件（fallback 用）
   let currentTTSBtn = null;    // 目前播放中的按鈕
   let currentAudioCtx = null;  // Web Audio API context
-  let currentAudioSrc = null;  // Web Audio API BufferSource
+let currentAudioSrc = null;  // Web Audio API BufferSource
+  let lessonRecorderState = null; // { recorder, chunks, startedAt, timer, streams, audioContext, recognition, transcript }
+  let activeMarket = 'US';
+  let marketDashboard = null;
+  let selectedMarketStock = null;
 
   // Region screenshot state
   let regionStartX = 0, regionStartY = 0;
@@ -573,8 +610,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   await loadMemories();
   await migrateCategoriesIfNeeded();
   await loadCustomCommands();
-  const { knowledgeBase: initKb = [] } = await chrome.storage.local.get(['knowledgeBase']);
+  const { knowledgeBase: initKb = [], lessonRecords: initLessons = [] } = await chrome.storage.local.get(['knowledgeBase', 'lessonRecords']);
   knowledgeBase = initKb;
+  lessonRecords = Array.isArray(initLessons) ? initLessons : [];
   const { sessionSummaries: initSS = {} } = await chrome.storage.local.get(['sessionSummaries']);
   sessionSummaries = initSS;
 
@@ -623,6 +661,12 @@ document.addEventListener('DOMContentLoaded', async () => {
           renderKnowledgeTagFilters();
           renderKnowledgeTagManager();
           renderKnowledgeList();
+        }
+      }
+      if (changes.lessonRecords) {
+        lessonRecords = changes.lessonRecords.newValue || [];
+        if (lessonRecordsList && !lessonRecordingView.classList.contains('hidden')) {
+          renderLessonRecords();
         }
       }
       if (changes.sessionSummaries) {
@@ -956,6 +1000,22 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Vocabulary Modal
   openVocabularyBtn.addEventListener('click', () => { closeAllPanels(); openVocabularyModal(); });
   vocabularyModalClose.addEventListener('click', closeVocabularyModal);
+  vocabularyWordsTab.addEventListener('click', () => switchVocabularyTab('words'));
+  lessonRecordingTab.addEventListener('click', () => switchVocabularyTab('lessons'));
+  lessonNoticeAck.addEventListener('click', async () => {
+    await chrome.storage.local.set({ lessonRecordingNoticeAck: true });
+    lessonNotice.classList.add('hidden');
+    setStatus('錄音提醒已確認，可開始錄音。', false, 2200);
+  });
+  lessonMicPermissionBtn.addEventListener('click', requestLessonMicrophonePermission);
+  lessonStartBtn.addEventListener('click', startLessonRecording);
+  lessonStopBtn.addEventListener('click', stopLessonRecording);
+  lessonFloatingStopBtn.addEventListener('click', stopLessonRecording);
+  lessonFloatingPauseBtn.addEventListener('click', toggleLessonRecordingPause);
+  lessonOrganizeBtn.addEventListener('click', () => organizeLessonRecord());
+  lessonTranscriptDraft.addEventListener('input', () => {
+    lessonOrganizeBtn.disabled = !lessonTranscriptDraft.value.trim() && !lessonRecords[0]?.transcriptSegments?.length;
+  });
   memoryClearAllBtn.addEventListener('click', async () => {
     if (confirm('確定要清除所有長期記憶？')) {
       memories = [];
@@ -974,6 +1034,39 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Knowledge Modal
   openKnowledgeBtn.addEventListener('click', () => { closeAllPanels(); openKnowledgeModal(); });
   knowledgeModalClose.addEventListener('click', closeKnowledgeModal);
+  openMarketBtn.addEventListener('click', () => { closeAllPanels(); openMarketPanel(); });
+  marketPanelClose.addEventListener('click', closeMarketPanel);
+  marketRefreshBtn.addEventListener('click', () => loadMarketDashboard(true));
+  document.querySelectorAll('.market-tab').forEach(btn => {
+    btn.addEventListener('click', () => {
+      activeMarket = btn.dataset.market || 'US';
+      marketDashboard = null;
+      selectedMarketStock = null;
+      document.querySelectorAll('.market-tab').forEach(el => el.classList.toggle('active', el === btn));
+      loadMarketDashboard(true);
+    });
+  });
+  marketPanel.addEventListener('click', e => {
+    const stockBtn = e.target.closest('[data-market-symbol]');
+    if (stockBtn) {
+      const symbol = stockBtn.dataset.marketSymbol;
+      const stock = (marketDashboard?.groups || []).flatMap(g => g.stocks || []).find(s => s.symbol === symbol);
+      if (stock) {
+        renderMarketDetail(stock);
+        loadMarketStockDetail(stock);
+      }
+      return;
+    }
+    const commandBtn = e.target.closest('[data-market-command]');
+    if (commandBtn) {
+      const command = commandBtn.dataset.marketCommand;
+      const symbol = commandBtn.dataset.symbol || selectedMarketStock?.symbol || '';
+      if (!symbol && command !== 'add') return;
+      if (command === 'finance') sendFinanceQuickCommand('finance', symbol);
+      else if (command === 'news') sendFinanceQuickCommand('news', symbol);
+      else if (command === 'add') addMarketContextToChat();
+    }
+  });
   knowledgeSearchInput.addEventListener('input', () => {
     knowledgeSearchQuery = knowledgeSearchInput.value.trim();
     renderKnowledgeList();
@@ -3808,10 +3901,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     { trigger: '/remember', name: '記住某件事',  type: 'action', argHint: '/remember <內容>' },
     { trigger: '/search',      name: '一般搜尋（Brave）', type: 'action', argHint: '/search <關鍵字>' },
     { trigger: '/deep-search', name: '深度搜尋（Exa）',   type: 'action', argHint: '/deep-search <關鍵字>' },
-    { trigger: '/finance', name: '金融研究助理', type: 'template', argHint: '/finance <股票代碼或公司名>', template: FINANCE_RESEARCH_TEMPLATE },
-    { trigger: '/stock', name: '美股研究', type: 'template', argHint: '/stock <美股代碼或公司名>', template: US_STOCK_RESEARCH_TEMPLATE },
-    { trigger: '/twstock', name: '台股研究', type: 'template', argHint: '/twstock <台股代碼或公司名>', template: TW_STOCK_RESEARCH_TEMPLATE },
-    { trigger: '/news', name: '金融新聞', type: 'template', argHint: '/news <市場、產業或股票>', template: FINANCE_NEWS_TEMPLATE },
+    { trigger: '/finance', name: '金融快速指令：研究助理', type: 'template', argHint: '/finance <股票代碼或公司名>', template: FINANCE_RESEARCH_TEMPLATE },
+    { trigger: '/stock', name: '金融快速指令：美股研究', type: 'template', argHint: '/stock <美股代碼或公司名>', template: US_STOCK_RESEARCH_TEMPLATE },
+    { trigger: '/twstock', name: '金融快速指令：台股研究', type: 'template', argHint: '/twstock <台股代碼或公司名>', template: TW_STOCK_RESEARCH_TEMPLATE },
+    { trigger: '/news', name: '金融快速指令：新聞', type: 'template', argHint: '/news <市場、產業或股票>', template: FINANCE_NEWS_TEMPLATE },
   ];
 
   async function loadCustomCommands() {
@@ -4517,6 +4610,15 @@ document.addEventListener('DOMContentLoaded', async () => {
   function buildKnowledgeBlock() {
     if (selectedKnowledge.length === 0) return '';
     const blocks = selectedKnowledge.map(item => {
+      if (item.source === 'lesson-recording') {
+        const lines = [`【課程錄音參考】`, `課程：${item.title}`];
+        if (item.summary) lines.push(`摘要：${item.summary}`);
+        const snippets = Array.isArray(item.transcriptSegments) ? item.transcriptSegments.slice(0, 4) : [];
+        if (snippets.length) lines.push(`相關逐字稿片段：\n${snippets.map(s => `- ${s}`).join('\n')}`);
+        if (item.corrections?.length) lines.push(`老師修正：\n${item.corrections.slice(0, 5).map(c => `- ${c}`).join('\n')}`);
+        if (item.usefulSentences?.length) lines.push(`實用句型：\n${item.usefulSentences.slice(0, 5).map(s => `- ${s}`).join('\n')}`);
+        return lines.join('\n');
+      }
       const lines = [`【知識庫參考】`, `標題：${item.title}`];
       if (item.summary) lines.push(`摘要：${item.summary}`);
       if (item.tags?.length) lines.push(`標籤：${item.tags.join('、')}`);
@@ -4538,7 +4640,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     selectedKnowledge.forEach(item => {
       const chip = document.createElement('span');
       chip.className = 'kb-chip';
-      chip.innerHTML = `<span class="kb-chip-label" title="${escapeAttr(item.title)}">@ ${escapeHtml(item.title)}</span><button class="kb-chip-remove" title="移除">×</button>`;
+      const prefix = item.source === 'lesson-recording' ? '@課程' : '@';
+      chip.innerHTML = `<span class="kb-chip-label" title="${escapeAttr(item.title)}">${prefix} ${escapeHtml(item.title)}</span><button class="kb-chip-remove" title="移除">×</button>`;
       chip.querySelector('.kb-chip-remove').addEventListener('click', () => {
         selectedKnowledge = selectedKnowledge.filter(k => k.id !== item.id);
         renderKnowledgeChips();
@@ -4557,21 +4660,30 @@ document.addEventListener('DOMContentLoaded', async () => {
     const atMatch = textBefore.match(/@([^\s@]*)$/);
     if (!atMatch) { hideKbPalette(); return; }
     const query = atMatch[1].toLowerCase();
-    const filtered = knowledgeBase.filter(kb =>
+    const lessonItems = lessonRecords.map(lesson => ({
+      ...lesson,
+      source: 'lesson-recording',
+      status: 'ready',
+      tags: ['課程錄音', 'English'],
+      title: lesson.title || `English lesson ${formatItemDate(lesson.createdAt)}`
+    }));
+    const allItems = [...knowledgeBase, ...lessonItems];
+    const filtered = allItems.filter(kb =>
       !query ||
-      kb.title.toLowerCase().includes(query) ||
+      (kb.title || '').toLowerCase().includes(query) ||
       (kb.summary || '').toLowerCase().includes(query) ||
-      (kb.tags || []).some(t => t.toLowerCase().includes(query))
+      (kb.tags || []).some(t => t.toLowerCase().includes(query)) ||
+      (kb.transcriptSegments || []).some(s => String(s).toLowerCase().includes(query))
     );
-    if (knowledgeBase.length === 0) {
+    if (allItems.length === 0) {
       showKbPaletteEmpty();
       return;
     }
-    showKbPaletteItems(filtered.length > 0 ? filtered : knowledgeBase);
+    showKbPaletteItems(filtered.length > 0 ? filtered : allItems);
   }
 
   function showKbPaletteEmpty() {
-    knowledgePalette.innerHTML = '<div class="kb-palette-empty">知識庫尚無內容<br>請先右鍵「加入知識庫」</div>';
+    knowledgePalette.innerHTML = '<div class="kb-palette-empty">尚無可引用內容<br>請先加入知識庫或整理課程錄音</div>';
     knowledgePalette.classList.remove('hidden');
     kbPaletteIndex = -1;
   }
@@ -4582,10 +4694,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     items.forEach((item, idx) => {
       const div = document.createElement('div');
       div.className = 'kb-palette-item' + (idx === 0 ? ' active' : '');
-      const statusLabel = item.status === 'processing' ? '分析中' : '就緒';
+      const isLesson = item.source === 'lesson-recording';
+      const statusLabel = isLesson ? '課程' : (item.status === 'processing' ? '分析中' : '就緒');
       const tagsHtml = (item.tags || []).slice(0, 3).map(t => `<span class="kb-palette-tag">${escapeHtml(t)}</span>`).join('');
       div.innerHTML = `
-        <span class="kb-palette-status ${item.status}">${statusLabel}</span>
+        <span class="kb-palette-status ${isLesson ? 'lesson' : item.status}">${statusLabel}</span>
         <div class="kb-palette-info">
           <div class="kb-palette-title">${escapeHtml(item.title)}</div>
           ${item.summary ? `<div class="kb-palette-summary">${escapeHtml(item.summary)}</div>` : ''}
@@ -4674,6 +4787,394 @@ document.addEventListener('DOMContentLoaded', async () => {
     return detectVocabularyLang(word);
   }
 
+  function openLessonAudioDb() {
+    if (lessonAudioDb) return Promise.resolve(lessonAudioDb);
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open('open-chat-hub-lessons', 1);
+      req.onupgradeneeded = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains('audio')) db.createObjectStore('audio');
+      };
+      req.onsuccess = () => {
+        lessonAudioDb = req.result;
+        resolve(lessonAudioDb);
+      };
+      req.onerror = () => reject(req.error || new Error('無法開啟課程音檔資料庫'));
+    });
+  }
+
+  async function saveLessonAudio(audioId, blob) {
+    const db = await openLessonAudioDb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction('audio', 'readwrite');
+      tx.objectStore('audio').put(blob, audioId);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error || new Error('音檔保存失敗'));
+    });
+  }
+
+  async function getLessonAudio(audioId) {
+    const db = await openLessonAudioDb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction('audio', 'readonly');
+      const req = tx.objectStore('audio').get(audioId);
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror = () => reject(req.error || new Error('音檔讀取失敗'));
+    });
+  }
+
+  function switchVocabularyTab(tab) {
+    const lessons = tab === 'lessons';
+    vocabularyWordsTab.classList.toggle('active', !lessons);
+    lessonRecordingTab.classList.toggle('active', lessons);
+    vocabularyWordsView.classList.toggle('hidden', lessons);
+    lessonRecordingView.classList.toggle('hidden', !lessons);
+    if (lessons) renderLessonRecords();
+  }
+
+  function formatLessonTimer(ms) {
+    const total = Math.max(0, Math.floor(ms / 1000));
+    const min = String(Math.floor(total / 60)).padStart(2, '0');
+    const sec = String(total % 60).padStart(2, '0');
+    return `${min}:${sec}`;
+  }
+
+  function getLessonElapsedMs(state = lessonRecorderState) {
+    if (!state) return 0;
+    const now = state.isPaused && state.pausedAt ? state.pausedAt : Date.now();
+    return Math.max(0, now - state.startedAt - (state.pausedMs || 0));
+  }
+
+  function updateLessonRecordingTimer() {
+    const text = formatLessonTimer(getLessonElapsedMs());
+    lessonRecordingTimer.textContent = text;
+    lessonFloatingTimer.textContent = text;
+  }
+
+  function showLessonFloatingBar() {
+    lessonFloatingBar.classList.remove('hidden');
+    lessonFloatingState.textContent = '錄音中';
+    lessonFloatingPauseBtn.textContent = '暫停';
+    updateLessonRecordingTimer();
+  }
+
+  function hideLessonFloatingBar() {
+    lessonFloatingBar.classList.add('hidden');
+    lessonFloatingState.textContent = '錄音中';
+    lessonFloatingPauseBtn.textContent = '暫停';
+  }
+
+  function setLessonRecordingPaused(paused) {
+    if (!lessonRecorderState) return;
+    lessonRecorderState.isPaused = paused;
+    lessonFloatingState.textContent = paused ? '已暫停' : '錄音中';
+    lessonFloatingPauseBtn.textContent = paused ? '繼續' : '暫停';
+    lessonRecordingStateEl.textContent = paused ? '錄音已暫停' : lessonRecorderState.recordingLabel || '錄音中';
+    updateLessonRecordingTimer();
+  }
+
+  async function ensureLessonNotice() {
+    const { lessonRecordingNoticeAck } = await chrome.storage.local.get(['lessonRecordingNoticeAck']);
+    if (lessonRecordingNoticeAck) return true;
+    lessonNotice.classList.remove('hidden');
+    return false;
+  }
+
+  async function requestLessonMicrophonePermission({ silent = false } = {}) {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      throw new Error('此瀏覽器不支援麥克風錄音權限');
+    }
+    if (!silent) {
+      lessonTranscriptStatus.textContent = '正在要求麥克風權限';
+      lessonMicPermissionBtn.disabled = true;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream.getTracks().forEach(track => track.stop());
+      lessonTranscriptStatus.textContent = '麥克風已授權';
+      lessonMicPermissionBtn.textContent = '麥克風已授權';
+      lessonMicPermissionBtn.disabled = true;
+      if (!silent) setStatus('麥克風權限已取得，可開始錄音。', false, 2400);
+      return true;
+    } catch (err) {
+      lessonTranscriptStatus.textContent = `麥克風未授權：${err.message}`;
+      lessonMicPermissionBtn.disabled = false;
+      if (!silent) setStatus(`麥克風權限取得失敗：${err.message}`, true, 3600);
+      throw err;
+    }
+  }
+
+  function startSpeechRecognition() {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      lessonTranscriptStatus.textContent = '此瀏覽器不支援 Web Speech 轉寫';
+      return null;
+    }
+    const recognition = new SpeechRecognition();
+    recognition.lang = 'en-US';
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.onresult = event => {
+      let finalText = '';
+      let interim = '';
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const text = event.results[i][0]?.transcript || '';
+        if (event.results[i].isFinal) finalText += text + ' ';
+        else interim += text;
+      }
+      if (finalText && lessonRecorderState) {
+        lessonRecorderState.transcript += finalText;
+        lessonTranscriptDraft.value = `${lessonRecorderState.transcript}${interim ? `\n${interim}` : ''}`.trim();
+      } else if (lessonRecorderState && interim) {
+        lessonTranscriptDraft.value = `${lessonRecorderState.transcript}\n${interim}`.trim();
+      }
+    };
+    recognition.onerror = () => {
+      lessonTranscriptStatus.textContent = '轉寫暫停，可課後手動補逐字稿';
+    };
+    recognition.onend = () => {
+      if (lessonRecorderState?.recognition === recognition) {
+        try { recognition.start(); } catch {}
+      }
+    };
+    try {
+      recognition.start();
+      lessonTranscriptStatus.textContent = '正在即時英文轉寫';
+      return recognition;
+    } catch {
+      lessonTranscriptStatus.textContent = '轉寫啟動失敗，可課後手動補逐字稿';
+      return null;
+    }
+  }
+
+  async function captureLessonStreams() {
+    let micStream = null;
+    try {
+      micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (err) {
+      throw new Error(`麥克風權限或裝置不可用：${err.message}`);
+    }
+    const tabStream = await new Promise(resolve => {
+      if (!chrome.tabCapture?.capture) return resolve(null);
+      chrome.tabCapture.capture({ audio: true, video: false }, stream => {
+        resolve(chrome.runtime.lastError ? null : stream);
+      });
+    });
+    return { micStream, tabStream };
+  }
+
+  async function startLessonRecording() {
+    if (lessonRecorderState) return;
+    const noticeReady = await ensureLessonNotice();
+    if (!noticeReady) {
+      setStatus('請先閱讀錄音提醒，按「了解」後即可開始。', false, 2600);
+      return;
+    }
+    lessonRecordingStateEl.textContent = '正在啟動錄音...';
+    lessonTranscriptStatus.textContent = '正在要求錄音權限';
+    lessonStartBtn.disabled = true;
+    lessonStopBtn.disabled = true;
+    lessonOrganizeBtn.disabled = true;
+    let offscreenError = '';
+    try {
+      await requestLessonMicrophonePermission({ silent: true }).catch(err => {
+        offscreenError = `麥克風授權失敗：${err.message}`;
+      });
+      const offscreenStart = await chrome.runtime.sendMessage({ type: 'LESSON_RECORDING_START' }).catch(err => {
+        offscreenError = err.message || String(err);
+        return null;
+      });
+      if (offscreenStart?.success) {
+        lessonRecorderState = {
+          mode: 'offscreen',
+          startedAt: Date.now(),
+          pausedAt: null,
+          pausedMs: 0,
+          isPaused: false,
+          transcript: lessonTranscriptDraft.value.trim() ? `${lessonTranscriptDraft.value.trim()}\n` : '',
+          recognition: startSpeechRecognition(),
+          hasMic: Boolean(offscreenStart.data?.hasMic)
+        };
+        lessonRecorderState.recordingLabel = lessonRecorderState.hasMic ? '錄音中：分頁聲音 + 麥克風' : '錄音中：分頁聲音（麥克風未取得）';
+        lessonStartBtn.disabled = true;
+        lessonStopBtn.disabled = false;
+        lessonOrganizeBtn.disabled = true;
+        lessonRecordingStateEl.textContent = lessonRecorderState.recordingLabel;
+        showLessonFloatingBar();
+        lessonRecorderState.timer = setInterval(updateLessonRecordingTimer, 500);
+        return;
+      } else if (offscreenStart?.error) {
+        offscreenError = offscreenStart.error;
+      }
+
+      const { micStream, tabStream } = await captureLessonStreams();
+      const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+      const audioContext = new AudioContextCtor();
+      const destination = audioContext.createMediaStreamDestination();
+      const streams = [micStream, tabStream].filter(Boolean);
+      streams.forEach(stream => {
+        const source = audioContext.createMediaStreamSource(stream);
+        source.connect(destination);
+      });
+      const recorderOptions = MediaRecorder.isTypeSupported?.('audio/webm') ? { mimeType: 'audio/webm' } : {};
+      const recorder = new MediaRecorder(destination.stream, recorderOptions);
+      const chunks = [];
+      recorder.ondataavailable = event => { if (event.data?.size) chunks.push(event.data); };
+      recorder.start(1000);
+      lessonRecorderState = {
+        recorder,
+        chunks,
+        streams,
+        audioContext,
+        startedAt: Date.now(),
+        pausedAt: null,
+        pausedMs: 0,
+        isPaused: false,
+        transcript: lessonTranscriptDraft.value.trim() ? `${lessonTranscriptDraft.value.trim()}\n` : '',
+        recognition: startSpeechRecognition()
+      };
+      lessonRecorderState.recordingLabel = tabStream ? '錄音中：分頁聲音 + 麥克風' : '錄音中：麥克風（分頁聲音未取得）';
+      lessonStartBtn.disabled = true;
+      lessonStopBtn.disabled = false;
+      lessonOrganizeBtn.disabled = true;
+      lessonRecordingStateEl.textContent = lessonRecorderState.recordingLabel;
+      showLessonFloatingBar();
+      lessonRecorderState.timer = setInterval(updateLessonRecordingTimer, 500);
+      if (offscreenError && !tabStream) {
+        lessonTranscriptStatus.textContent = `分頁音訊未取得，已改用麥克風錄音：${offscreenError}`;
+      }
+    } catch (err) {
+      setStatus(`錄音啟動失敗：${err.message}`, true, 4000);
+      lessonRecordingStateEl.textContent = '錄音啟動失敗';
+      lessonTranscriptStatus.textContent = offscreenError ? `分頁音訊失敗：${offscreenError}；${err.message}` : err.message;
+      lessonStartBtn.disabled = false;
+      lessonStopBtn.disabled = true;
+      lessonOrganizeBtn.disabled = !(lessonTranscriptDraft.value.trim() || lessonRecords[0]?.transcriptSegments?.length);
+    }
+  }
+
+  async function toggleLessonRecordingPause() {
+    if (!lessonRecorderState) return;
+    const state = lessonRecorderState;
+    try {
+      if (state.isPaused) {
+        if (state.mode === 'offscreen') {
+          const res = await chrome.runtime.sendMessage({ type: 'LESSON_RECORDING_RESUME' });
+          if (!res?.success) throw new Error(res?.error || '錄音繼續失敗');
+        } else if (state.recorder?.state === 'paused') {
+          state.recorder.resume();
+        }
+        if (state.pausedAt) {
+          state.pausedMs = (state.pausedMs || 0) + (Date.now() - state.pausedAt);
+          state.pausedAt = null;
+        }
+        state.recognition = startSpeechRecognition();
+        setLessonRecordingPaused(false);
+      } else {
+        if (state.mode === 'offscreen') {
+          const res = await chrome.runtime.sendMessage({ type: 'LESSON_RECORDING_PAUSE' });
+          if (!res?.success) throw new Error(res?.error || '錄音暫停失敗');
+        } else if (state.recorder?.state === 'recording') {
+          state.recorder.pause();
+        }
+        state.pausedAt = Date.now();
+        state.recognition?.stop?.();
+        setLessonRecordingPaused(true);
+      }
+    } catch (err) {
+      setStatus(`錄音控制失敗：${err.message}`, true, 3200);
+    }
+  }
+
+  async function stopLessonRecording() {
+    if (!lessonRecorderState) return;
+    const state = lessonRecorderState;
+    lessonRecorderState = null;
+    clearInterval(state.timer);
+    state.recognition?.stop?.();
+    hideLessonFloatingBar();
+
+    if (state.mode === 'offscreen') {
+      try {
+        const stoppedRecording = await chrome.runtime.sendMessage({ type: 'LESSON_RECORDING_STOP' });
+        if (!stoppedRecording?.success) throw new Error(stoppedRecording?.error || 'offscreen 錄音停止失敗');
+        const data = stoppedRecording.data || {};
+        const now = data.finishedAt || Date.now();
+        const transcriptText = lessonTranscriptDraft.value.trim();
+        const lesson = {
+          id: `lesson_${now}`,
+          title: `English lesson ${new Date(now).toLocaleDateString('zh-TW')}`,
+          audioId: data.audioId,
+          audioType: data.audioType || 'audio/webm',
+          durationMs: data.durationMs || getLessonElapsedMs(state),
+          transcriptSegments: transcriptText ? transcriptText.split(/\n+/).map(s => s.trim()).filter(Boolean).slice(0, 80) : [],
+          summary: transcriptText ? '尚未整理。點擊「整理」產生英文學習摘要。' : '已保存音檔，但尚無逐字稿。',
+          corrections: [],
+          usefulSentences: [],
+          vocabularyIds: [],
+          createdAt: now
+        };
+        lessonRecords = [lesson, ...lessonRecords].slice(0, 100);
+        await chrome.storage.local.set({ lessonRecords });
+        lessonRecordingStateEl.textContent = '錄音已保存';
+        lessonStartBtn.disabled = false;
+        lessonStopBtn.disabled = true;
+        lessonOrganizeBtn.disabled = !transcriptText;
+        renderLessonRecords();
+        setStatus('課程錄音已保存本機', false, 2600);
+      } catch (err) {
+        lessonRecordingStateEl.textContent = '錄音保存失敗';
+        lessonStartBtn.disabled = false;
+        lessonStopBtn.disabled = true;
+        lessonOrganizeBtn.disabled = !lessonTranscriptDraft.value.trim();
+        setStatus(`錄音保存失敗：${err.message}`, true, 4000);
+      }
+      return;
+    }
+
+    const stopped = new Promise(resolve => {
+      state.recorder.onstop = resolve;
+    });
+    state.recorder.stop();
+    await stopped;
+    state.streams.forEach(stream => stream.getTracks().forEach(track => track.stop()));
+    await state.audioContext.close().catch(() => {});
+    if (!state.chunks.length) {
+      lessonRecordingStateEl.textContent = '錄音沒有取得音訊資料';
+      lessonStartBtn.disabled = false;
+      lessonStopBtn.disabled = true;
+      lessonOrganizeBtn.disabled = !lessonTranscriptDraft.value.trim();
+      setStatus('錄音沒有取得音訊資料，請確認分頁或麥克風權限。', true, 3600);
+      return;
+    }
+    const blob = new Blob(state.chunks, { type: state.chunks[0]?.type || 'audio/webm' });
+    const now = Date.now();
+    const audioId = `lesson_audio_${now}`;
+    await saveLessonAudio(audioId, blob);
+    const transcriptText = lessonTranscriptDraft.value.trim();
+    const lesson = {
+      id: `lesson_${now}`,
+      title: `English lesson ${new Date(now).toLocaleDateString('zh-TW')}`,
+      audioId,
+      audioType: blob.type,
+      durationMs: getLessonElapsedMs(state),
+      transcriptSegments: transcriptText ? transcriptText.split(/\n+/).map(s => s.trim()).filter(Boolean).slice(0, 80) : [],
+      summary: transcriptText ? '尚未整理。點擊「整理」產生英文學習摘要。' : '已保存音檔，但尚無逐字稿。',
+      corrections: [],
+      usefulSentences: [],
+      vocabularyIds: [],
+      createdAt: now
+    };
+    lessonRecords = [lesson, ...lessonRecords].slice(0, 100);
+    await chrome.storage.local.set({ lessonRecords });
+    lessonRecordingStateEl.textContent = '錄音已保存';
+    lessonStartBtn.disabled = false;
+    lessonStopBtn.disabled = true;
+    lessonOrganizeBtn.disabled = !transcriptText;
+    renderLessonRecords();
+    setStatus('課程錄音已保存本機', false, 2600);
+  }
+
   function parseVocabularyExtractionResult(text) {
     const fenceMatch = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
     const source = (fenceMatch?.[1] || text || '').trim();
@@ -4698,6 +5199,179 @@ document.addEventListener('DOMContentLoaded', async () => {
         return { word, lang };
       })
       .filter(item => item && item.word);
+  }
+
+  function parseLessonOrganizeResult(text) {
+    const fenceMatch = String(text || '').match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+    const source = (fenceMatch?.[1] || text || '').trim();
+    const jsonText = source.match(/\{[\s\S]*\}/)?.[0] || source;
+    const parsed = JSON.parse(jsonText);
+    return {
+      summary: String(parsed.summary || '').trim(),
+      transcriptSegments: Array.isArray(parsed.transcriptSegments) ? parsed.transcriptSegments.map(String).filter(Boolean).slice(0, 20) : [],
+      corrections: Array.isArray(parsed.corrections) ? parsed.corrections.map(String).filter(Boolean).slice(0, 20) : [],
+      usefulSentences: Array.isArray(parsed.usefulSentences) ? parsed.usefulSentences.map(String).filter(Boolean).slice(0, 20) : [],
+      vocabulary: Array.isArray(parsed.vocabulary) ? parsed.vocabulary : []
+    };
+  }
+
+  async function organizeLessonRecord(lessonId = null) {
+    const lesson = lessonRecords.find(l => l.id === lessonId) || lessonRecords[0];
+    if (!lesson) {
+      setStatus('目前沒有可整理的課程紀錄', false, 2500);
+      return;
+    }
+    const transcript = lessonTranscriptDraft.value.trim() || (lesson.transcriptSegments || []).join('\n');
+    if (!transcript) {
+      setStatus('此課程沒有逐字稿，請先貼上文字內容再整理。', true, 3200);
+      return;
+    }
+    setStatus('正在整理英文課程...');
+    const prompt = `You are an English learning assistant. Organize this one-on-one English tutoring lesson transcript for review.
+
+Return JSON only, no markdown. Schema:
+{
+  "summary": "Traditional Chinese summary of what the lesson covered",
+  "transcriptSegments": ["important English transcript snippet"],
+  "corrections": ["teacher correction or improved sentence"],
+  "usefulSentences": ["useful English sentence pattern"],
+  "vocabulary": [{"word":"word or phrase","lang":"en","context":"short English context","exampleSentence":"example sentence","translation":"Traditional Chinese translation","speakerNote":"why it matters"}]
+}
+
+Keep vocabulary practical for review, max 30 items.
+
+Transcript:
+${transcript}`;
+
+    const port = chrome.runtime.connect({ name: 'chat-stream' });
+    let rawContent = '';
+    port.onMessage.addListener(async msg => {
+      if (msg.type === 'chunk') {
+        rawContent = msg.full || '';
+        return;
+      }
+      if (msg.type === 'done') {
+        try {
+          const parsed = parseLessonOrganizeResult((msg.reply || rawContent || '').trim());
+          const { vocabulary: current = [] } = await chrome.storage.local.get(['vocabulary']);
+          const existingWords = new Set(current.map(v => String(v.word || '').trim().toLowerCase()).filter(Boolean));
+          const now = Date.now();
+          const vocabularyIds = [];
+          parsed.vocabulary.forEach((item, idx) => {
+            const word = String(item.word || item.term || '').trim();
+            if (!word || word.length > 120) return;
+            const key = word.toLowerCase();
+            if (existingWords.has(key)) return;
+            existingWords.add(key);
+            const id = `vocab_${now}_${idx}`;
+            vocabularyIds.push(id);
+            current.push({
+              id,
+              word,
+              definition: '',
+              category: '',
+              lang: normalizeVocabularyLang(item.lang || 'en', word),
+              translation: String(item.translation || '').trim(),
+              context: String(item.context || '').trim(),
+              exampleSentence: String(item.exampleSentence || '').trim(),
+              speakerNote: String(item.speakerNote || '').trim(),
+              source: 'lesson-recording',
+              lessonId: lesson.id,
+              createdAt: Date.now()
+            });
+          });
+          lessonRecords = lessonRecords.map(l => l.id === lesson.id ? {
+            ...l,
+            summary: parsed.summary || l.summary,
+            transcriptSegments: parsed.transcriptSegments.length ? parsed.transcriptSegments : l.transcriptSegments,
+            corrections: parsed.corrections,
+            usefulSentences: parsed.usefulSentences,
+            vocabularyIds: [...new Set([...(l.vocabularyIds || []), ...vocabularyIds])],
+            organizedAt: Date.now()
+          } : l);
+          await chrome.storage.local.set({ vocabulary: current, lessonRecords });
+          renderLessonRecords();
+          if (!vocabularyModal.classList.contains('hidden')) renderVocabularyList(current);
+          setStatus(`課程整理完成，新增 ${vocabularyIds.length} 個單字/片語`, false, 3000);
+        } catch (err) {
+          setStatus(`課程整理失敗：${err.message}`, true, 3600);
+        }
+        port.disconnect();
+      }
+      if (msg.type === 'error') {
+        setStatus(`課程整理失敗：${msg.message}`, true, 3600);
+        port.disconnect();
+      }
+    });
+    port.postMessage({
+      type: 'STREAM_MESSAGE',
+      data: {
+        message: prompt,
+        history: [],
+        images: [],
+        translateConfig: null,
+        model: currentModel,
+        contextCharBudget: getCurrentContextCharBudget(),
+        maxAgentIterations: 3,
+        systemPrompt: '',
+        memoryContext: '',
+        sessionId: currentSession?.id,
+        skipTools: true,
+        planMode: false
+      }
+    });
+  }
+
+  async function playLessonAudio(audioId) {
+    const blob = await getLessonAudio(audioId);
+    if (!blob) {
+      setStatus('找不到本機音檔', true, 2500);
+      return;
+    }
+    const url = URL.createObjectURL(blob);
+    const audio = new Audio(url);
+    audio.onended = () => URL.revokeObjectURL(url);
+    audio.play().catch(err => setStatus(`播放失敗：${err.message}`, true, 2500));
+  }
+
+  function renderLessonRecords() {
+    lessonRecordsList.innerHTML = '';
+    if (!lessonRecords.length) {
+      lessonRecordsList.innerHTML = '<p class="memory-empty">尚無課程錄音。開始錄音後，音檔只會保存在本機。</p>';
+      lessonOrganizeBtn.disabled = true;
+      return;
+    }
+    lessonOrganizeBtn.disabled = !(lessonTranscriptDraft.value.trim() || lessonRecords[0]?.transcriptSegments?.length);
+    lessonRecords.forEach(lesson => {
+      const div = document.createElement('div');
+      div.className = 'lesson-record-card';
+      const snippets = (lesson.transcriptSegments || []).slice(0, 2).map(s => `<li>${escapeHtml(s)}</li>`).join('');
+      const corrections = (lesson.corrections || []).slice(0, 2).map(s => `<li>${escapeHtml(s)}</li>`).join('');
+      div.innerHTML = `
+        <div class="lesson-record-head">
+          <div>
+            <strong>${escapeHtml(lesson.title || 'English lesson')}</strong>
+            <span>${formatItemDate(lesson.createdAt)} · ${formatLessonTimer(lesson.durationMs || 0)}</span>
+          </div>
+          <span class="lesson-record-badge">${lesson.organizedAt ? '已整理' : '待整理'}</span>
+        </div>
+        <p>${escapeHtml(lesson.summary || '尚未整理')}</p>
+        ${snippets ? `<ul class="lesson-snippets">${snippets}</ul>` : ''}
+        ${corrections ? `<div class="lesson-corrections"><span>老師修正</span><ul>${corrections}</ul></div>` : ''}
+        <div class="lesson-record-actions">
+          <button class="btn-secondary-sm lesson-play" type="button">播放</button>
+          <button class="btn-secondary-sm lesson-fill" type="button">載入逐字稿</button>
+          <button class="btn-primary-sm lesson-organize-one" type="button">整理</button>
+        </div>
+      `;
+      div.querySelector('.lesson-play').addEventListener('click', () => playLessonAudio(lesson.audioId));
+      div.querySelector('.lesson-fill').addEventListener('click', () => {
+        lessonTranscriptDraft.value = (lesson.transcriptSegments || []).join('\n');
+        lessonOrganizeBtn.disabled = !lessonTranscriptDraft.value.trim();
+      });
+      div.querySelector('.lesson-organize-one').addEventListener('click', () => organizeLessonRecord(lesson.id));
+      lessonRecordsList.appendChild(div);
+    });
   }
 
   async function handleSessionToVocabulary() {
@@ -5344,6 +6018,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     vocabularySearchInput.value = vocabularySearchQuery;
     populateVocabularyLangFilter(vocabulary);
     renderVocabularyList(vocabulary);
+    renderLessonRecords();
   }
 
   function closeVocabularyModal() {
@@ -6025,6 +6700,292 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
+  // ── Market Dashboard ───────────────────────────────────────
+
+  function openMarketPanel() {
+    marketPanel.classList.remove('hidden');
+    openMarketBtn.classList.add('active');
+    loadMarketDashboard(false);
+  }
+
+  function closeMarketPanel() {
+    marketPanel.classList.add('hidden');
+    openMarketBtn.classList.remove('active');
+  }
+
+  function formatMarketTime(value) {
+    if (!value) return '';
+    try {
+      return new Date(value).toLocaleString('zh-TW', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+    } catch {
+      return String(value);
+    }
+  }
+
+  function formatMarketNumber(value, digits = 2) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return '-';
+    if (Math.abs(n) >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(1)}B`;
+    if (Math.abs(n) >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+    return n.toFixed(digits);
+  }
+
+  function marketChangeClass(value) {
+    const n = Number(value || 0);
+    if (n > 0.05) return 'up';
+    if (n < -0.05) return 'down';
+    return 'flat';
+  }
+
+  async function loadMarketDashboard(force = false) {
+    if (!force && marketDashboard?.market === activeMarket) {
+      renderMarketDashboard(marketDashboard);
+      return;
+    }
+    const requestedMarket = activeMarket;
+    marketFreshness.textContent = '載入中...';
+    marketHeatmap.innerHTML = '<div class="market-loading">正在取得市場資料...</div>';
+    marketGroups.innerHTML = '';
+    marketNews.innerHTML = '';
+    marketDetail.innerHTML = '尚未選取個股。';
+    marketWarnings.innerHTML = '';
+    marketWarnings.classList.add('hidden');
+    try {
+      const res = await chrome.runtime.sendMessage({ type: 'GET_FINANCE_DASHBOARD', data: { market: requestedMarket } });
+      if (requestedMarket !== activeMarket) return;
+      if (!res?.success) throw new Error(res?.error || '市場資料載入失敗');
+      marketDashboard = res.data;
+      selectedMarketStock = null;
+      renderMarketDashboard(marketDashboard);
+    } catch (err) {
+      if (requestedMarket !== activeMarket) return;
+      marketFreshness.textContent = '資料不足';
+      marketHeatmap.innerHTML = `<div class="market-empty">市場資料載入失敗：${escapeHtml(err.message)}</div>`;
+    }
+  }
+
+  function renderMarketDashboard(data) {
+    const freshness = data.freshness || {};
+    marketFreshness.textContent = `${freshness.label || '最新可用'}${freshness.timestamp ? ` · ${formatMarketTime(freshness.timestamp)}` : ''}`;
+    if (data.warnings?.length) {
+      const apiHint = data.market === 'TW'
+        ? '台股 API 目前沒有回傳可用資料；請設定 FinMind token 後重新整理，或稍後再試。'
+        : '美股 API 目前沒有回傳可用資料；請設定 Finnhub 或 Alpha Vantage API Key 後重新整理。';
+      const warnings = data.hasApiError ? [apiHint] : data.warnings;
+      marketWarnings.innerHTML = warnings.map(w => `<div>${escapeHtml(w)}</div>`).join('');
+      marketWarnings.classList.remove('hidden');
+    } else {
+      marketWarnings.innerHTML = '';
+      marketWarnings.classList.add('hidden');
+    }
+    renderMarketHeatmap(data.groups || [], data);
+    renderMarketGroups(data.groups || []);
+    renderMarketNews(data.news || []);
+  }
+
+  function renderMarketHeatmap(groups, dashboard = {}) {
+    const shouldHideForApiIssue = dashboard.hasApiError && (dashboard.market === 'TW' || Number(dashboard.validQuoteCount || 0) === 0);
+    if (!groups.length || Number(dashboard.validQuoteCount || 0) === 0 || shouldHideForApiIssue) {
+      const isTw = dashboard.market === 'TW';
+      marketHeatmap.innerHTML = `
+        <div class="market-empty">
+          <strong>目前沒有取得可用行情資料</strong>
+          <div>下一步建議：</div>
+          <ul>
+            <li>${isTw ? '台股請先在設定頁填入 FinMind token，免費方案仍可能有流量限制。' : '美股請先在設定頁填入 Finnhub API Key 或 Alpha Vantage API Key。'}</li>
+            <li>填完 key 後回到市場 panel 按右上角重新整理。</li>
+            <li>若只想單一查詢，可先用 ${isTw ? '`/twstock 2330`' : '`/finance NVDA`'} 確認金融資料層是否可用。</li>
+          </ul>
+        </div>`;
+      return;
+    }
+    const validGroups = groups
+      .map(group => ({ ...group, stocks: (group.stocks || []).filter(stock => !stock.error && Number.isFinite(Number(stock.price))) }))
+      .filter(group => group.stocks.length > 0);
+    const maxAbs = Math.max(...validGroups.flatMap(g => (g.stocks || []).map(s => Math.abs(Number(s.percentChange || 0)))), 1);
+    marketHeatmap.innerHTML = validGroups.map(group => `
+      <div class="market-heatmap-group">
+        <div class="market-heatmap-group-title">${escapeHtml(group.name)} <span>${formatMarketNumber(group.avgChange)}%</span></div>
+        <div class="market-heatmap-tiles">
+          ${(group.stocks || []).map(stock => {
+            const change = Number(stock.percentChange || 0);
+            const intensity = Math.min(1, Math.abs(change) / maxAbs);
+            const alpha = 0.18 + intensity * 0.5;
+            const color = change >= 0 ? `rgba(16,185,129,${alpha})` : `rgba(239,68,68,${alpha})`;
+            const weight = Math.min(2.4, Math.max(1, Math.log10(Math.max(Number(stock.volume || 0), 10)) / 5));
+            return `<button class="market-tile ${marketChangeClass(change)}" data-market-symbol="${escapeAttr(stock.symbol)}" style="background:${color};flex:${weight}">
+              <strong>${escapeHtml(stock.displaySymbol || stock.symbol)}</strong>
+              <span>${escapeHtml(stock.name || '')}</span>
+              <em>${formatMarketNumber(change)}%</em>
+            </button>`;
+          }).join('')}
+        </div>
+      </div>
+    `).join('');
+  }
+
+  function renderMarketGroups(groups) {
+    if (marketDashboard?.hasApiError && marketDashboard?.market === 'TW') {
+      marketGroups.innerHTML = '<div class="market-empty">台股 API 回傳錯誤，暫時隱藏族群資料。請設定 FinMind token 後重新整理，或稍後再試。</div>';
+      return;
+    }
+    const validGroups = groups.filter(group => (group.stocks || []).some(stock => !stock.error && Number.isFinite(Number(stock.price))));
+    marketGroups.innerHTML = validGroups.length ? validGroups.map(group => `
+      <div class="market-group-row">
+        <div>
+          <strong>${escapeHtml(group.name)}</strong>
+          <span>上漲比例 ${Math.round(Number(group.upRatio || 0) * 100)}%</span>
+        </div>
+        <span class="market-change ${marketChangeClass(group.avgChange)}">${formatMarketNumber(group.avgChange)}%</span>
+      </div>
+    `).join('') : '<div class="market-empty">尚無可用族群資料。請先設定金融 API key 或稍後重試。</div>';
+  }
+
+  function renderMarketNews(newsGroups) {
+    const items = newsGroups.flatMap(group => {
+      const newsItems = (group.news || []).map(news => ({ ...news, symbol: group.displaySymbol || group.symbol, name: group.name }));
+      if (newsItems.length) return newsItems;
+      return (group.fallbackQueries || []).slice(0, 1).map(query => ({
+        symbol: group.displaySymbol || group.symbol,
+        headline: `搜尋 ${query}`,
+        source: 'Search',
+        url: `https://www.google.com/search?q=${encodeURIComponent(query)}`,
+        datetime: null
+      }));
+    });
+    marketNews.innerHTML = items.length ? items.slice(0, 8).map(item => `
+      <div class="market-news-item">
+        <span class="market-news-symbol">${escapeHtml(item.symbol || '')}</span>
+        <a class="market-news-title" href="${escapeAttr(item.url || '#')}" target="_blank" rel="noopener">${escapeHtml(item.headline || item.summary || '未命名消息')}</a>
+        <small class="market-news-meta">${escapeHtml(item.source || '')}${item.datetime ? `<br>${formatMarketTime(item.datetime)}` : ''}</small>
+      </div>
+    `).join('') : '<div class="market-empty">尚無結構化新聞；可使用 /news 指令搭配搜尋 fallback。</div>';
+  }
+
+  function renderSparkline(points = [], change = 0) {
+    const closes = points.map(p => Number(p.close)).filter(Number.isFinite).slice(-30);
+    if (closes.length < 2) {
+      return `<div class="market-chart-empty">尚無足夠歷史資料可繪製趨勢圖</div>`;
+    }
+    const min = Math.min(...closes);
+    const max = Math.max(...closes);
+    const range = max - min || 1;
+    const width = 260;
+    const height = 82;
+    const d = closes.map((value, idx) => {
+      const x = (idx / (closes.length - 1)) * width;
+      const y = height - ((value - min) / range) * height;
+      return `${idx === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`;
+    }).join(' ');
+    const first = closes[0];
+    const last = closes.at(-1);
+    const periodChange = first ? ((last / first) - 1) * 100 : 0;
+    return `
+      <div class="market-sparkline ${marketChangeClass(change || periodChange)}">
+        <svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" role="img" aria-label="近 30 日收盤價趨勢">
+          <path d="${d}"></path>
+        </svg>
+        <div class="market-sparkline-meta">
+          <span>近 ${closes.length} 日收盤趨勢</span>
+          <strong>${formatMarketNumber(periodChange)}%</strong>
+        </div>
+      </div>
+    `;
+  }
+
+  function renderMarketDetailStats(stock, detail = null) {
+    const q = detail?.quote?.quote || {};
+    const profile = detail?.profile?.profile || {};
+    const fundamentals = detail?.fundamentals?.fundamentals || {};
+    const latestRevenue = fundamentals.monthlyRevenue?.at?.(-1);
+    const valuation = fundamentals.valuation || {};
+    const rows = [
+      ['開盤', q.open ?? stock.open],
+      ['最高', q.high ?? stock.high],
+      ['最低', q.low ?? stock.low],
+      ['前收', q.previousClose ?? stock.previousClose],
+      ['成交量', q.volume ?? stock.volume, 0],
+      ['成交值', q.turnover ?? stock.turnover, 0],
+      ['產業', profile.industryCategory || profile.industry || profile.sector],
+      ['本益比', fundamentals.peRatio ?? valuation.peRatio],
+      ['股價淨值比', fundamentals.priceToBook ?? valuation.priceToBook],
+      ['殖利率', fundamentals.dividendYield ?? valuation.dividendYield],
+      ['月營收 YoY', latestRevenue?.yoy != null ? `${formatMarketNumber(latestRevenue.yoy)}%` : null]
+    ].filter(([, value]) => value !== undefined && value !== null && value !== '');
+    return rows.length ? `
+      <div class="market-detail-stats">
+        ${rows.slice(0, 10).map(([label, value, digits]) => `
+          <div><span>${escapeHtml(label)}</span><strong>${typeof value === 'number' ? formatMarketNumber(value, digits ?? 2) : escapeHtml(String(value))}</strong></div>
+        `).join('')}
+      </div>
+    ` : '';
+  }
+
+  function renderMarketDetail(stock, detail = null) {
+    selectedMarketStock = stock;
+    marketDetailHint.textContent = stock.displaySymbol || stock.symbol;
+    const change = Number(stock.percentChange || 0);
+    const price = detail?.quote?.quote?.current ?? stock.price;
+    const freshness = detail?.freshness || stock.freshness || {};
+    const points = detail?.history?.points || [];
+    marketDetail.innerHTML = `
+      <div class="market-detail-card">
+        <div class="market-detail-top">
+          <div>
+            <strong>${escapeHtml(stock.displaySymbol || stock.symbol)}</strong>
+            <span>${escapeHtml(stock.name || '')}</span>
+          </div>
+          <span class="market-change ${marketChangeClass(change)}">${formatMarketNumber(change)}%</span>
+        </div>
+        <div class="market-detail-price">${formatMarketNumber(price)} <span>${escapeHtml(freshness.label || '最新可用')} ${freshness.timestamp ? `· ${formatMarketTime(freshness.timestamp)}` : ''}</span></div>
+        ${renderSparkline(points, change)}
+        ${renderMarketDetailStats(stock, detail)}
+        <div class="market-detail-actions">
+          <button class="btn-primary-sm" type="button" data-market-command="finance" data-symbol="${escapeAttr(stock.symbol)}">深入分析</button>
+          <button class="btn-secondary-sm" type="button" data-market-command="news" data-symbol="${escapeAttr(stock.symbol)}">新聞</button>
+          <button class="btn-secondary-sm" type="button" data-market-command="add" data-symbol="${escapeAttr(stock.symbol)}">加入對話</button>
+        </div>
+      </div>
+    `;
+  }
+
+  async function loadMarketStockDetail(stock) {
+    marketDetailHint.textContent = '載入個股資料...';
+    try {
+      const res = await chrome.runtime.sendMessage({
+        type: 'GET_FINANCE_STOCK_DETAIL',
+        data: { symbol: stock.symbol, market: stock.market || activeMarket, companyName: stock.name }
+      });
+      if (!res?.success) throw new Error(res?.error || '個股資料載入失敗');
+      renderMarketDetail(stock, res.data);
+    } catch (err) {
+      marketDetailHint.textContent = '個股資料不足';
+      setStatus(`個股資料載入失敗：${err.message}`, true, 2600);
+    }
+  }
+
+  function sendFinanceQuickCommand(type, symbol) {
+    const template = type === 'news' ? FINANCE_NEWS_TEMPLATE : FINANCE_RESEARCH_TEMPLATE;
+    const trigger = type === 'news' ? '/news' : '/finance';
+    const message = template.replace('{input}', symbol);
+    closeMarketPanel();
+    messageInput.value = '';
+    messageInput.dispatchEvent(new Event('input'));
+    setStatus(`已送出 ${trigger} ${symbol}`, false, 1800);
+    handleSend({ apiMessageOverride: message, displayMessageOverride: type === 'news' ? `新聞．${symbol}` : `深入分析．${symbol}` });
+  }
+
+  function addMarketContextToChat() {
+    if (!selectedMarketStock) return;
+    const stock = selectedMarketStock;
+    const line = `加入對話．${stock.displaySymbol || stock.symbol}\n【市場摘要】${stock.displaySymbol || stock.symbol} ${stock.name || ''}：價格 ${formatMarketNumber(stock.price)}，漲跌 ${formatMarketNumber(stock.percentChange)}%，資料狀態 ${stock.freshness?.label || '最新可用'} ${stock.freshness?.timestamp ? formatMarketTime(stock.freshness.timestamp) : ''}。`;
+    messageInput.value = `${messageInput.value ? `${messageInput.value}\n\n` : ''}${line}`;
+    messageInput.dispatchEvent(new Event('input'));
+    closeMarketPanel();
+    messageInput.focus();
+    setStatus('已加入市場摘要到對話輸入框', false, 2200);
+  }
+
   // ── Spaces ────────────────────────────────────────────────────
 
   const SPACE_ICONS = [
@@ -6153,6 +7114,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     closeMemoryModal();
     closeVocabularyModal();
     closeKnowledgeModal();
+    closeMarketPanel();
     closeSpacePicker();
   }
 

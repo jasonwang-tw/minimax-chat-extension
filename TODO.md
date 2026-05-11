@@ -213,12 +213,14 @@
 | 🟡 P2 | 任務腳本（Task Script） | 長任務腳本化，搭配 Agent |
 | 🟡 P2 | 筆記工具（MD Notes） | write/read/list note |
 | 🟡 P2 | 多模型並排比較 | 同一 prompt 同時送到 2-3 個模型，並排比較回覆品質、速度與成本 |
+| 🟠 P1 | 英文課錄音與課程引用 | 錄製英文家教課、整理摘要/修正/單字，支援 @ 引用 |
+| 🟠 P1 | 金融市場儀表板與金融指令整合 | Header 市場入口；保留 /finance、/stock、/twstock、/news 作快速深入分析 |
 | ✅ Done | Spaces 多空間 Phase 1 | 完成於 v1.28.0（空間列表、設定、Sessions、指示注入） |
 | 🟡 P2 | 部落格助手 | jasonsbase-blog 實裝 |
 | 🟢 P3 | 瀏覽器自動化 Phase 3 | Native Messaging + Playwright（完整多 tab 自動化） |
 | 🟢 P3 | MiniMax 影片生成 | 需 Max 方案（$50/月）；非同步任務，複雜度高 |
 | 🔵 P4 | Skill 執行工具 | run_skill；Agent Loop + API Tool 已夠用，只有需要「保證固定步驟的可重複流程」時才有額外價值 |
-| 🟡 P2 | 金融研究助理 | /finance、/stock、/twstock、/news |
+| 🟡 P2 | 金融研究助理 | 已納入「金融市場儀表板與金融指令整合」規劃 |
 | 🔵 P4 | MiniMax 音樂生成 | 需 Max 方案（$50/月）；較小眾 |
 | 🔵 P4 | 自動化 Gmail Digest | chrome.alarms + chrome.identity（OAuth 基礎建設已完成於 v1.30.0） |
 | 🔵 P4 | Token lifecycle policy | expiration / rotation / cleanup |
@@ -244,6 +246,43 @@
 - AI 可以穩定自行調用 `web_search` / `deep_search`。
 - 搜尋歷程可在 UI 中追蹤。
 - 工具失敗不會中斷整個對話。
+
+### 🟠 P1 — 英文課錄音與課程引用
+
+以英文一對一家教課為主，讓使用者可在課程中錄製分頁音訊與麥克風，課後整理出摘要、老師修正、實用句型、單字/片語，並可透過 `@` 在 Session 內引用課程紀錄。
+
+主要工作：
+- 在單字簿 Modal 內新增「課程錄音」分頁。
+- 錄音來源：課程分頁音訊 + 麥克風；第一版只存本機，不同步雲端。
+- 音檔 blob 存 IndexedDB，`lessonRecords` metadata 存 `chrome.storage.local`。
+- 首次錄音顯示一次提醒，提醒只在使用者 sidepanel 內顯示，不注入老師端頁面。
+- 課後整理 prompt 以英文學習為主，萃取摘要、逐字稿片段、老師修正、常用句、單字/片語。
+- 復用既有單字簿去重流程，課程單字寫入 `vocabulary` 並帶上 `lessonId`、`context`、`exampleSentence` 等 metadata。
+- 擴充 `@` palette，支援搜尋課程紀錄並注入「摘要 + 相關逐字稿片段」。
+
+完成標準：
+- 可開始/停止錄音並保存本機音檔。
+- 課程紀錄 reload 後仍存在。
+- 課後整理可寫入單字簿且不重複。
+- `@` 可引用課程摘要與片段。
+
+### 🟠 P1 — 金融市場儀表板與金融指令整合
+
+建立 Header「市場」入口作為金融資訊探索頁，同時保留 `/finance`、`/stock`、`/twstock`、`/news` 作為 Session 內快速深入分析指令。市場儀表板與指令共用既有 `finance_*` tools，不建立第二套資料層。
+
+主要工作：
+- Header 新增「市場」按鈕與全覆蓋 panel，與歷史/記憶/單字簿/知識庫/空間互斥。
+- 新增 `GET_FINANCE_DASHBOARD` background message，聚合台股/美股 dashboard 資料。
+- 使用免費最新可用資料；資料需標示 `即時`、`延遲`、`日資料` 或 `最新可用` 與 timestamp。
+- 市場 panel 顯示台股/美股切換、熱力圖、熱門族群、新聞雷達、個股詳情。
+- Panel 操作保留與指令整合：「深入分析」送出 `/finance <symbol>`、「新聞」送出 `/news <symbol or sector>`、「加入對話」注入市場摘要。
+- `/finance`、`/stock`、`/twstock`、`/news` 不移除，定位為金融快速指令。
+
+完成標準：
+- 無 API key 時顯示設定提示，不空白。
+- dashboard 與 `/finance` 使用同一批 finance data 與 timestamp。
+- heatmap 族群與個股點擊互動可用。
+- 快速操作能正確觸發既有金融指令。
 
 ### 🔵 P4 — MiniMax 圖像生成
 

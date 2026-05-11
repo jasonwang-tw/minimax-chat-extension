@@ -30,6 +30,9 @@
         <button id="openKnowledgeBtn" class="btn-icon" title="知識庫">
           <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.66 4.03 3 9 3s9-1.34 9-3V5"/><path d="M3 12c0 1.66 4.03 3 9 3s9-1.34 9-3"/></svg>
         </button>
+        <button id="openMarketBtn" class="btn-icon" title="市場">
+          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="m7 15 4-4 3 3 5-7"/><path d="M19 7v5h-5"/></svg>
+        </button>
         <button id="openSpacesBtn" class="btn-icon" title="空間">
           <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
         </button>
@@ -444,6 +447,61 @@
       </div>
     </div>
 
+    <!-- Market Panel -->
+    <div id="marketPanel" class="spaces-panel hidden">
+      <div class="spaces-panel-content">
+        <div class="spaces-panel-header">
+          <h3>市場</h3>
+          <div class="spaces-panel-header-actions">
+            <button id="marketRefreshBtn" class="btn-icon" title="重新整理">
+              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M3 21v-5h5"/><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>
+            </button>
+            <button id="marketPanelClose" class="btn-icon" title="關閉">
+              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+          </div>
+        </div>
+        <div class="market-toolbar">
+          <button class="market-tab active" data-market="US">美股</button>
+          <button class="market-tab" data-market="TW">台股</button>
+          <span id="marketFreshness" class="market-freshness">尚未載入</span>
+        </div>
+        <div id="marketWarnings" class="market-warnings hidden"></div>
+        <div class="market-grid">
+          <section class="market-section market-heatmap-section">
+            <div class="market-section-header">
+              <h4>熱力圖</h4>
+              <span>顏色代表漲跌，大小代表量能 proxy</span>
+            </div>
+            <div id="marketHeatmap" class="market-heatmap"></div>
+          </section>
+          <div class="market-side-column">
+          <section class="market-section market-groups-section">
+            <div class="market-section-header">
+              <h4>熱門族群</h4>
+              <span>平均漲跌 / 上漲比例</span>
+            </div>
+            <div id="marketGroups" class="market-list"></div>
+          </section>
+          <section class="market-section market-news-section">
+            <div class="market-section-header">
+              <h4>新聞雷達</h4>
+              <span>近期消息與相關代碼</span>
+            </div>
+            <div id="marketNews" class="market-news-list"></div>
+          </section>
+          </div>
+          <section class="market-section market-detail-section">
+            <div class="market-section-header">
+              <h4>個股詳情</h4>
+              <span id="marketDetailHint">點擊熱力圖或族群個股</span>
+            </div>
+            <div id="marketDetail" class="market-detail-empty">尚未選取個股。</div>
+          </section>
+        </div>
+      </div>
+    </div>
+
     <!-- Memory Modal -->
     <div id="memoryModal" class="memory-modal hidden">
       <div class="memory-modal-content">
@@ -480,11 +538,16 @@
       <div class="memory-modal-content">
         <div class="memory-modal-header">
           <h3>單字簿</h3>
-          <button id="vocabularyModalClose" class="btn-icon" title="關閉">
-            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-          </button>
+          <div class="vocab-header-actions">
+            <button id="vocabularyWordsTab" class="vocab-header-tab active" type="button">單字</button>
+            <button id="lessonRecordingTab" class="vocab-header-tab" type="button">錄音</button>
+            <button id="vocabularyModalClose" class="btn-icon" title="關閉">
+              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+          </div>
         </div>
         <p class="memory-modal-hint">在任意網頁反白文字後使用浮動小選單「加入單字」，或右鍵「加入單字簿」即可新增。</p>
+        <div id="vocabularyWordsView">
         <div id="vocabularyStats" class="vocab-stats"></div>
         <div class="modal-search-bar">
           <input type="text" id="vocabularySearchInput" class="modal-search-input" placeholder="搜尋單字、翻譯、來源或語境...">
@@ -506,6 +569,37 @@
         <div id="vocabularyList" class="memory-list"></div>
         <div class="memory-modal-actions">
           <button id="vocabularyClearAllBtn" class="btn-secondary-sm">清空全部</button>
+        </div>
+        </div>
+        <div id="lessonRecordingView" class="lesson-view hidden">
+          <div class="lesson-guide">
+            <strong>如何開始錄音</strong>
+            <ol>
+              <li>先開啟英文家教的會議分頁，並確認正在播放課程聲音。</li>
+              <li>回到 Open Chat Hub sidepanel，按「開始錄音」。第一次使用時 Chrome 可能會要求麥克風權限。</li>
+              <li>課程結束後按「停止並保存」，再按「整理最新課程」把逐字稿、修正句、單字寫入單字簿。</li>
+            </ol>
+          </div>
+          <div id="lessonNotice" class="lesson-notice hidden">
+            <strong>錄音提醒</strong>
+            <span>請確認你有權錄音，必要時先告知對方。此提醒只會顯示在你的 sidepanel，不會出現在老師端網頁。</span>
+            <button id="lessonNoticeAck" class="btn-primary-sm" type="button">了解</button>
+          </div>
+          <div class="lesson-recorder">
+            <div class="lesson-recorder-status">
+              <strong id="lessonRecordingState">尚未錄音</strong>
+              <span id="lessonRecordingTimer">00:00</span>
+              <span id="lessonTranscriptStatus">Web Speech 轉寫待命</span>
+            </div>
+            <div class="lesson-recorder-actions">
+              <button id="lessonMicPermissionBtn" class="btn-secondary-sm" type="button">授權麥克風</button>
+              <button id="lessonStartBtn" class="btn-primary-sm" type="button">開始錄音</button>
+              <button id="lessonStopBtn" class="btn-secondary-sm" type="button" disabled>停止並保存</button>
+              <button id="lessonOrganizeBtn" class="btn-secondary-sm" type="button" disabled>整理最新課程</button>
+            </div>
+            <textarea id="lessonTranscriptDraft" class="lesson-transcript-draft" placeholder="錄音時會盡量即時轉寫英文內容；也可以在課後手動貼上逐字稿再整理。"></textarea>
+          </div>
+          <div id="lessonRecordsList" class="lesson-records-list"></div>
         </div>
       </div>
     </div>
@@ -551,6 +645,18 @@
 
     </div><!-- /.main-area -->
   </div><!-- /.container -->
+
+  <div id="lessonFloatingBar" class="lesson-floating-bar hidden">
+    <div class="lesson-floating-status">
+      <span class="lesson-recording-dot"></span>
+      <strong id="lessonFloatingState">錄音中</strong>
+      <span id="lessonFloatingTimer">00:00</span>
+    </div>
+    <div class="lesson-floating-actions">
+      <button id="lessonFloatingPauseBtn" class="btn-secondary-sm" type="button">暫停</button>
+      <button id="lessonFloatingStopBtn" class="btn-primary-sm" type="button">停止</button>
+    </div>
+  </div>
 
   <!-- Region Screenshot Modal -->
   <div id="regionModal" class="region-modal hidden">
