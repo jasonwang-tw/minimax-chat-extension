@@ -32,8 +32,12 @@ const AGENT_AUTO_CONTINUE_SEGMENTS = 3;
 const DEFAULT_PROMPTS = {
   chat: '',
   imageAnalysis: '請詳細分析這張圖片的所有內容，包含視覺元素、文字、佈局與重要細節。',
-  ocr: '請仔細辨識並提取這張圖片中的所有文字內容，保持原始排版結構，不要遺漏任何文字。'
+  ocr: '只輸出圖片中可見文字，盡量保持原始換行、順序與排版；不要加入分析、摘要、解釋、評價或改寫。若沒有可辨識文字，只回覆「未辨識到文字」。'
 };
+
+function buildOcrPrompt(prompt) {
+  return `${prompt || DEFAULT_PROMPTS.ocr}\n\n重要：只輸出辨識到的原文文字，不要加入分析、摘要、解釋、評論、建議、標題或 Markdown 格式。`;
+}
 
 const DEFAULT_REPLY_MODES = [
   { id: 'standard', name: '標準', icon: '💬', prompt: '' },
@@ -1214,7 +1218,7 @@ async function streamHandleMessage({ message, history, images, image, mode, tran
       && pdfFiles.length === 0
       && !isOcrMode
       && await supportsOpenRouterImageInput(model || MODEL_NAME, openrouterApiKey);
-    const routeDetails = describeVisualRoute(imageFiles, pdfFiles, pdfRoute, model, useOpenRouterVision);
+    const routeDetails = describeVisualRoute(imageFiles, pdfFiles, pdfRoute, model, useOpenRouterVision, isOcrMode);
     port.postMessage({
       type: 'agent_notice',
       text: routeDetails,
@@ -1248,9 +1252,11 @@ async function streamHandleMessage({ message, history, images, image, mode, tran
       }
     }
 
-    const statusText = pdfFiles.length > 0 && imageFiles.length === 0
-      ? (pdfRoute === 'gemini' ? '使用 Gemini 分析掃描型 PDF 中...' : '使用 Gemini 分析 PDF 中...')
-      : (visualFiles.length > 1 ? `使用 Gemini 分析 ${visualFiles.length} 個視覺檔案中...` : '使用 Gemini 分析圖片中...');
+    const statusText = isOcrMode
+      ? (visualFiles.length > 1 ? `使用 Gemini OCR 辨識 ${visualFiles.length} 個視覺檔案中...` : '使用 Gemini OCR 辨識中...')
+      : pdfFiles.length > 0 && imageFiles.length === 0
+        ? (pdfRoute === 'gemini' ? '使用 Gemini 分析掃描型 PDF 中...' : '使用 Gemini 分析 PDF 中...')
+        : (visualFiles.length > 1 ? `使用 Gemini 分析 ${visualFiles.length} 個視覺檔案中...` : '使用 Gemini 分析圖片中...');
     port.postMessage({ type: 'status', text: statusText });
 
     let textAppend = '';
@@ -1273,7 +1279,7 @@ async function streamHandleMessage({ message, history, images, image, mode, tran
     const isOcr = visualFiles.every(img => img.mode === 'ocr');
     let geminiPrompt;
     if (isOcr) {
-      geminiPrompt = prompts.ocr || DEFAULT_PROMPTS.ocr;
+      geminiPrompt = buildOcrPrompt(prompts.ocr);
       if (visualFiles.length > 1) geminiPrompt = `以下有 ${visualFiles.length} 張圖片，請逐一辨識：\n\n` + geminiPrompt;
     } else {
       const basePrompt = prompts.imageAnalysis || DEFAULT_PROMPTS.imageAnalysis;
@@ -1288,15 +1294,18 @@ async function streamHandleMessage({ message, history, images, image, mode, tran
       const files = formatFileNames(visualFiles);
       throw new Error(`Gemini 視覺分析失敗。檔案：${files}。錯誤：${err.message}`);
     }
+    if (isOcr) {
+      const reply = geminiResult.trim();
+      if (!reply) throw new Error('Gemini OCR 未返回文字內容');
+      port.postMessage({ type: 'chunk', text: reply, full: reply });
+      port.postMessage({ type: 'done', reply });
+      return;
+    }
+
     port.postMessage({ type: 'status', text: '整理回應中...' });
 
-    let minimaxPrompt;
-    if (isOcr) {
-      minimaxPrompt = `以下是從圖片中辨識出的文字：\n\n${geminiResult}\n\n請整理並格式化，修正OCR錯誤，保持原始語意。`;
-    } else {
-      const userQ = combinedMessage ? `\n\n使用者問題：${combinedMessage}` : '';
-      minimaxPrompt = `以下是圖片分析結果：\n\n${geminiResult}${userQ}\n\n請根據以上分析，提供清晰、有條理的回應。`;
-    }
+    const userQ = combinedMessage ? `\n\n使用者問題：${combinedMessage}` : '';
+    const minimaxPrompt = `以下是圖片分析結果：\n\n${geminiResult}${userQ}\n\n請根據以上分析，提供清晰、有條理的回應。`;
     await streamMiniMaxChat(minimaxPrompt, history, null, model, planPrompt, memoryContext, port, sessionId, contextCharBudget);
     return;
   }
@@ -1423,10 +1432,15 @@ function formatFileNames(files) {
   return names.length > 0 ? names.join('、') : '未命名檔案';
 }
 
-function describeVisualRoute(imageFiles, pdfFiles, pdfRoute, model, useOpenRouterVision = false) {
+function describeVisualRoute(imageFiles, pdfFiles, pdfRoute, model, useOpenRouterVision = false, isOcrMode = false) {
   const imageCount = imageFiles?.length || 0;
   const pdfCount = pdfFiles?.length || 0;
   const requestedModel = model || MODEL_NAME;
+
+  if (isOcrMode) {
+    const totalCount = imageCount + pdfCount;
+    return `分析方式：OCR 模式使用 Gemini 文字辨識，直接輸出辨識結果，不再交給聊天模型二次分析。視覺檔案 ${totalCount} 個。`;
+  }
 
   if (imageCount > 0 && pdfCount > 0) {
     return `分析方式：圖片與 PDF 混合上傳，統一使用 Gemini 視覺分析。圖片 ${imageCount} 個、PDF ${pdfCount} 個。`;
@@ -4487,7 +4501,7 @@ async function handleImagePipeline(message, history, images, model, memoryContex
   // Step 1: Gemini 分析（一次送出所有圖片）
   let geminiPrompt;
   if (isOcr) {
-    geminiPrompt = prompts.ocr || DEFAULT_PROMPTS.ocr;
+    geminiPrompt = buildOcrPrompt(prompts.ocr);
     if (images.length > 1) geminiPrompt = `以下有 ${images.length} 張圖片，請逐一辨識每張圖片中的文字：\n\n` + geminiPrompt;
   } else {
     const basePrompt = prompts.imageAnalysis || DEFAULT_PROMPTS.imageAnalysis;
@@ -4497,19 +4511,20 @@ async function handleImagePipeline(message, history, images, model, memoryContex
 
   const geminiResult = await callGemini(geminiApiKey, images, geminiPrompt);
 
+  if (isOcr) {
+    const reply = geminiResult.trim();
+    if (!reply) throw new Error('Gemini OCR 未返回文字內容');
+    return { reply };
+  }
+
   // Step 2: MiniMax 整理輸出
   const { apiKey } = await chrome.storage.sync.get(['apiKey']);
   if (!apiKey) {
     throw new Error('請先在設定頁面輸入 MiniMax API Key');
   }
 
-  let minimaxPrompt;
-  if (isOcr) {
-    minimaxPrompt = `以下是從圖片中辨識出的文字內容：\n\n${geminiResult}\n\n請整理並格式化這些文字，修正明顯的OCR錯誤，保持原始語意。`;
-  } else {
-    const userQuestion = message ? `\n\n使用者的問題：${message}` : '';
-    minimaxPrompt = `以下是圖片分析結果：\n\n${geminiResult}${userQuestion}\n\n請根據以上分析，提供清晰、有條理的回應。`;
-  }
+  const userQuestion = message ? `\n\n使用者的問題：${message}` : '';
+  const minimaxPrompt = `以下是圖片分析結果：\n\n${geminiResult}${userQuestion}\n\n請根據以上分析，提供清晰、有條理的回應。`;
 
   return handleMiniMaxChat(minimaxPrompt, history, null, model, null, memoryContext);
 }
