@@ -12,6 +12,14 @@ window.__minimaxTranslateLoaded = true;
   let shadowRoot = null;
   let currentAudio = null;
   let ttsBtn = null;
+  let actionHost = null;
+  let actionShadowRoot = null;
+  let actionRenderTimer = null;
+  let lastSelectionText = '';
+  let lastSelectionRect = null;
+  let isPointerSelecting = false;
+  let suppressOutsideClickUntil = 0;
+  let isSelectionActionBusy = false;
 
   // ── 語言顯示名稱 ──────────────────────────────────────────
   const LANG_NAMES = {
@@ -42,6 +50,14 @@ window.__minimaxTranslateLoaded = true;
     const host = document.createElement('div');
     host.id = 'minimax-translate-host';
     host.style.cssText = 'position:fixed;z-index:2147483647;pointer-events:none;top:0;left:0;';
+    document.body.appendChild(host);
+    return host;
+  }
+
+  function createActionHost() {
+    const host = document.createElement('div');
+    host.id = 'minimax-selection-action-host';
+    host.style.cssText = 'position:fixed;z-index:2147483646;pointer-events:none;top:0;left:0;';
     document.body.appendChild(host);
     return host;
   }
@@ -212,6 +228,111 @@ window.__minimaxTranslateLoaded = true;
     @keyframes spin { to { transform: rotate(360deg); } }
   `;
 
+  const ACTION_STYLES = `
+    :host { all: initial; }
+
+    .selection-action {
+      position: fixed;
+      z-index: 2147483646;
+      pointer-events: auto;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      animation: action-in 0.12s ease;
+    }
+
+    @keyframes action-in {
+      from { opacity: 0; transform: translateY(-4px) scale(0.96); }
+      to { opacity: 1; transform: translateY(0) scale(1); }
+    }
+
+    .selection-trigger {
+      width: 30px;
+      height: 30px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,0.18);
+      background: #1e1e1e;
+      color: #f4f4f5;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.34), 0 2px 8px rgba(0,0,0,0.22);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      padding: 0;
+    }
+
+    .selection-trigger:hover,
+    .selection-action:focus-within .selection-trigger {
+      color: #ffffff;
+      background: #262626;
+    }
+
+    .selection-menu {
+      display: flex;
+      align-items: center;
+      gap: 0;
+      opacity: 0;
+      pointer-events: none;
+      transform: translateX(-4px);
+      transition: opacity 0.12s ease, transform 0.12s ease;
+      background: #1e1e1e;
+      border: 1px solid rgba(255,255,255,0.14);
+      border-radius: 8px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.34), 0 2px 8px rgba(0,0,0,0.22);
+      overflow: hidden;
+    }
+
+    .selection-action:hover .selection-menu,
+    .selection-action:focus-within .selection-menu,
+    .selection-action.menu-open .selection-menu {
+      opacity: 1;
+      pointer-events: auto;
+      transform: translateX(0);
+    }
+
+    .selection-menu button {
+      border: 0;
+      background: transparent;
+      color: #eeeeee;
+      font-size: 12px;
+      line-height: 1;
+      padding: 8px 10px;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+
+    .selection-menu button:hover {
+      background: rgba(255,255,255,0.08);
+    }
+
+    .selection-divider {
+      width: 1px;
+      height: 16px;
+      background: rgba(255,255,255,0.14);
+    }
+
+    .selection-toast {
+      position: absolute;
+      top: 34px;
+      left: 0;
+      min-width: 90px;
+      border-radius: 7px;
+      padding: 6px 8px;
+      background: rgba(17,17,17,0.96);
+      border: 1px solid rgba(255,255,255,0.12);
+      color: #eeeeee;
+      font-size: 12px;
+      line-height: 1.2;
+      box-shadow: 0 8px 22px rgba(0,0,0,0.3);
+    }
+
+    .selection-toast.success { color: #34d399; }
+    .selection-toast.warning { color: #eeeeee; }
+    .selection-toast.error { color: #f87171; }
+    .hidden { display: none; }
+  `;
+
   // ── 計算 popup 位置（選取範圍正下方，不超出視窗） ──────────
   // getBoundingClientRect() 已是 viewport 座標，position:fixed 直接使用，不加 scroll offset
   function calcPosition(rect) {
@@ -237,11 +358,62 @@ window.__minimaxTranslateLoaded = true;
     return { top, left };
   }
 
+  function calcActionPosition(rect) {
+    const GAP = 7;
+    const ACTION_W = 180;
+    const ACTION_H = 34;
+
+    let top = rect.bottom + GAP;
+    let left = rect.left + Math.min(Math.max(rect.width - 30, 0), 24);
+
+    if (left + ACTION_W > window.innerWidth - 8) {
+      left = window.innerWidth - ACTION_W - 8;
+    }
+    left = Math.max(left, 8);
+
+    if (top + ACTION_H > window.innerHeight - 8) {
+      top = rect.top - ACTION_H - GAP;
+      if (top < 8) top = 8;
+    }
+
+    return { top, left };
+  }
+
+  function getSelectionData() {
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return null;
+
+    const text = sel.toString().trim();
+    if (!text) return null;
+
+    const range = sel.getRangeAt(0);
+    let rect = range.getBoundingClientRect();
+    if ((!rect || (rect.width === 0 && rect.height === 0)) && range.getClientRects().length) {
+      rect = range.getClientRects()[0];
+    }
+    if (!rect || (rect.width === 0 && rect.height === 0)) return null;
+
+    return { text, rect };
+  }
+
+  function getContextSentence(text) {
+    const sel = window.getSelection();
+    const nodeText = sel?.anchorNode?.textContent?.replace(/\s+/g, ' ').trim() || '';
+    if (!nodeText) return '';
+    const normalizedText = text.replace(/\s+/g, ' ').trim();
+    const idx = nodeText.indexOf(normalizedText);
+    if (idx === -1) return nodeText.slice(0, 240);
+    const start = Math.max(0, idx - 90);
+    const end = Math.min(nodeText.length, idx + normalizedText.length + 90);
+    return nodeText.slice(start, end).trim();
+  }
+
   // ── 顯示 popup ─────────────────────────────────────────────
   function showPopup(data) {
     removePopup();
+    removeSelectionAction();
 
-    const rect = getSelectionRect();
+    const rect = data.rect || getSelectionRect();
     const pos = rect ? calcPosition(rect) : { top: 100, left: Math.max((window.innerWidth - 360) / 2, 8) };
 
     // 建立 Shadow DOM host
@@ -364,6 +536,153 @@ window.__minimaxTranslateLoaded = true;
     }
   }
 
+  function removeSelectionAction() {
+    if (actionRenderTimer) {
+      clearTimeout(actionRenderTimer);
+      actionRenderTimer = null;
+    }
+    if (actionHost) {
+      actionHost.remove();
+      actionHost = null;
+      actionShadowRoot = null;
+    }
+    isSelectionActionBusy = false;
+  }
+
+  function showActionToast(message, type = 'success') {
+    if (!actionShadowRoot) return;
+    const toast = actionShadowRoot.querySelector('.selection-toast');
+    if (!toast) return;
+    toast.textContent = message;
+    toast.className = `selection-toast ${type}`;
+  }
+
+  async function handleSelectionTranslate() {
+    const text = lastSelectionText;
+    const rect = lastSelectionRect;
+    if (!text) return;
+
+    isSelectionActionBusy = true;
+    showActionToast('翻譯中...', 'warning');
+    const isChinese = /[\u4e00-\u9fff\u3400-\u4dbf]/.test(text);
+    const [from, to] = isChinese ? ['zh-TW', 'en'] : ['auto', 'zh-TW'];
+
+    try {
+      const response = await chrome.runtime.sendMessage({
+        type: 'TRANSLATE_WORD',
+        data: { text, from, to }
+      });
+      if (!response?.success) throw new Error(response?.error || '翻譯失敗');
+      showPopup({ original: text, translated: response.translated, from, to, rect });
+    } catch {
+      isSelectionActionBusy = false;
+      showActionToast('翻譯失敗', 'error');
+      setTimeout(removeSelectionAction, 1400);
+    }
+  }
+
+  async function handleSelectionAddVocabulary() {
+    const text = lastSelectionText;
+    if (!text) return;
+
+    isSelectionActionBusy = true;
+    showActionToast('加入中...', 'warning');
+    try {
+      const response = await chrome.runtime.sendMessage({
+        type: 'ADD_TO_VOCABULARY',
+        data: {
+          word: text,
+          source: 'selection-toolbar',
+          sourceUrl: location.href,
+          sourceTitle: document.title,
+          contextSentence: getContextSentence(text)
+        }
+      });
+      if (!response?.success) throw new Error(response?.error || '加入失敗');
+      showActionToast(response.added ? '已加入單字簿' : '已存在', response.added ? 'success' : 'warning');
+      setTimeout(removeSelectionAction, 1100);
+    } catch {
+      isSelectionActionBusy = false;
+      showActionToast('加入失敗', 'error');
+      setTimeout(removeSelectionAction, 1400);
+    }
+  }
+
+  function showSelectionAction() {
+    if (isSelectionActionBusy) return;
+    if (isPointerSelecting) return;
+
+    const selection = getSelectionData();
+    if (!selection) {
+      removeSelectionAction();
+      return;
+    }
+
+    lastSelectionText = selection.text;
+    lastSelectionRect = selection.rect;
+    removeSelectionAction();
+
+    const pos = calcActionPosition(selection.rect);
+    actionHost = createActionHost();
+    actionShadowRoot = actionHost.attachShadow({ mode: 'closed' });
+
+    const style = document.createElement('style');
+    style.textContent = ACTION_STYLES;
+    actionShadowRoot.appendChild(style);
+
+    const action = document.createElement('div');
+    action.className = 'selection-action';
+    action.style.cssText = `top:${pos.top}px;left:${pos.left}px;`;
+    action.innerHTML = `
+      <button class="selection-trigger" title="Open Chat Hub">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/>
+          <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>
+        </svg>
+      </button>
+      <div class="selection-menu" role="menu">
+        <button type="button" data-action="translate">翻譯</button>
+        <span class="selection-divider"></span>
+        <button type="button" data-action="add-vocabulary">加入單字</button>
+      </div>
+      <div class="selection-toast hidden"></div>
+    `;
+
+    action.addEventListener('mousedown', e => {
+      e.preventDefault();
+      e.stopPropagation();
+    });
+    action.addEventListener('click', e => e.stopPropagation());
+    action.querySelector('.selection-trigger').addEventListener('click', () => {
+      action.classList.toggle('menu-open');
+    });
+    action.querySelector('[data-action="translate"]').addEventListener('click', handleSelectionTranslate);
+    action.querySelector('[data-action="add-vocabulary"]').addEventListener('click', handleSelectionAddVocabulary);
+
+    actionShadowRoot.appendChild(action);
+  }
+
+  function scheduleSelectionAction() {
+    if (isSelectionActionBusy) return;
+    if (isPointerSelecting) return;
+    if (actionRenderTimer) clearTimeout(actionRenderTimer);
+    actionRenderTimer = setTimeout(showSelectionAction, 80);
+  }
+
+  function handleSelectionPointerDown(e) {
+    if (actionHost && actionHost.contains(e.target)) return;
+    if (isSelectionActionBusy) return;
+    isPointerSelecting = true;
+    removeSelectionAction();
+  }
+
+  function handleSelectionPointerUp() {
+    isPointerSelecting = false;
+    if (!getSelectionData()) return;
+    suppressOutsideClickUntil = Date.now() + 350;
+    scheduleSelectionAction();
+  }
+
   // ── 工具函式 ──────────────────────────────────────────────
   function escapeHtml(text) {
     return String(text)
@@ -390,6 +709,10 @@ window.__minimaxTranslateLoaded = true;
     if (popupHost && !popupHost.contains(e.target)) {
       removePopup();
     }
+    if (actionHost && !actionHost.contains(e.target)) {
+      if (Date.now() < suppressOutsideClickUntil && getSelectionData()) return;
+      removeSelectionAction();
+    }
   }, true);
 
   // ── Esc 關閉 ──────────────────────────────────────────────
@@ -397,7 +720,17 @@ window.__minimaxTranslateLoaded = true;
     if (e.key === 'Escape' && popupHost) {
       removePopup();
     }
+    if (e.key === 'Escape' && actionHost) {
+      removeSelectionAction();
+    }
   });
+
+  document.addEventListener('mousedown', handleSelectionPointerDown, true);
+  document.addEventListener('mouseup', handleSelectionPointerUp, true);
+  document.addEventListener('keyup', scheduleSelectionAction, true);
+  document.addEventListener('selectionchange', scheduleSelectionAction);
+  window.addEventListener('scroll', removeSelectionAction, true);
+  window.addEventListener('resize', removeSelectionAction);
 })();
 
 } // end if (!window.__minimaxTranslateLoaded)

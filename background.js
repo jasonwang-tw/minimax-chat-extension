@@ -348,6 +348,39 @@ chrome.storage.onChanged.addListener((changes, area) => {
   }, 5000);
 });
 
+function detectVocabularyLang(word) {
+  if (/[\u4e00-\u9fff]/.test(word)) return 'zh';
+  if (/[\u3040-\u30ff]/.test(word)) return 'ja';
+  if (/^[\x00-\x7F]+$/.test(word)) return 'en';
+  return 'other';
+}
+
+async function addVocabularyItem(data = {}) {
+  const word = String(data.word || '').trim().replace(/\s+/g, ' ');
+  if (!word) return { added: false, reason: 'empty' };
+
+  const { vocabulary = [] } = await chrome.storage.local.get(['vocabulary']);
+  const duplicate = vocabulary.find(v => v.word === word);
+  if (duplicate) return { added: false, reason: 'duplicate', item: duplicate };
+
+  const item = {
+    id: `vocab_${Date.now()}`,
+    word,
+    definition: '',
+    category: '',
+    lang: detectVocabularyLang(word),
+    source: data.source || 'context-menu',
+    sourceUrl: data.sourceUrl || '',
+    sourceTitle: data.sourceTitle || '',
+    contextSentence: data.contextSentence || '',
+    createdAt: Date.now()
+  };
+
+  vocabulary.push(item);
+  await chrome.storage.local.set({ vocabulary });
+  return { added: true, item };
+}
+
 // 右鍵選單點擊處理
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   if (info.menuItemId === 'add-to-memory') {
@@ -369,24 +402,12 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   }
 
   if (info.menuItemId === 'add-to-vocabulary') {
-    const word = info.selectionText?.trim();
-    if (!word) return;
-    const { vocabulary = [] } = await chrome.storage.local.get(['vocabulary']);
-    if (vocabulary.some(v => v.word === word)) return; // 防重複
-    // 簡易語言偵測
-    const lang = /[\u4e00-\u9fff]/.test(word) ? 'zh'
-               : /[\u3040-\u30ff]/.test(word) ? 'ja'
-               : /^[\x00-\x7F]+$/.test(word)  ? 'en'
-               : 'other';
-    vocabulary.push({
-      id: `vocab_${Date.now()}`,
-      word,
-      definition: '',
-      category: '',
-      lang,
-      createdAt: Date.now()
+    await addVocabularyItem({
+      word: info.selectionText,
+      source: 'context-menu',
+      sourceUrl: tab?.url || '',
+      sourceTitle: tab?.title || ''
     });
-    await chrome.storage.local.set({ vocabulary });
   }
 
   if (info.menuItemId === 'add-to-knowledge') {
@@ -772,6 +793,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'TRANSLATE_WORD') {
     translateTextGoogle(message.data.text, message.data.from || 'auto', message.data.to || 'zh-TW')
       .then(result => sendResponse({ success: true, translated: result }))
+      .catch(error => sendResponse({ success: false, error: error.message }));
+    return true;
+  }
+
+  if (message.type === 'ADD_TO_VOCABULARY') {
+    addVocabularyItem(message.data)
+      .then(result => sendResponse({ success: true, ...result }))
       .catch(error => sendResponse({ success: false, error: error.message }));
     return true;
   }

@@ -5315,7 +5315,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       const hasFilter = vocabularyCategoryFilter || vocabularyLangFilter;
       vocabularyList.innerHTML = hasFilter
         ? '<p class="memory-empty">此篩選條件沒有單字。</p>'
-        : '<p class="memory-empty">尚無單字。<br>在任意網頁反白文字後右鍵「加入單字簿」。</p>';
+        : '<p class="memory-empty">尚無單字。<br>在任意網頁反白文字後使用浮動小選單「加入單字」。</p>';
       return;
     }
     const langLabel = { en: 'EN', zh: '中', ja: '日', ko: '韓', vi: '越', th: '泰', ar: '阿', other: '?' };

@@ -1,5 +1,12 @@
 # Open Chat Hub — TODO
 
+## In Progress
+
+- Redesign Vocabulary UI and learning workflow:
+  - [x] Phase 1: Show a small action icon after webpage text selection, then reveal `翻譯 | 加入單字` on hover/click so users do not need the browser context menu.
+  - [ ] Phase 2: Redesign the side-panel vocabulary manager with search, stats, visible translations, compact learning cards, and source/context metadata.
+  - [ ] Phase 3: Add a lightweight review mode with mastery state, review count, and last-reviewed tracking.
+
 ## Done
 
 - Installed `wordpress/minimax-sync` on `https://jasonsbase.com`
