@@ -2729,6 +2729,11 @@ async function financeGetNews(args) {
   const resolved = normalizeFinanceSymbol(args.symbol || args.input, args.market || 'AUTO');
   const keys = await financeGetKeys();
   if (!resolved.symbol) return { error: resolved.warnings[0] };
+  const warnings = [];
+  const fallbackQueries = [
+    `${resolved.displaySymbol} ${args.companyName || ''} latest stock news`,
+    `${resolved.displaySymbol} ${args.companyName || ''} earnings revenue guidance risk`
+  ].map(q => q.replace(/\s+/g, ' ').trim());
 
   if (resolved.market === 'US') {
     if (keys.finnhubApiKey) {
@@ -2752,6 +2757,7 @@ async function financeGetNews(args) {
           }))
         };
       }
+      warnings.push(`Finnhub company-news unavailable: ${data?.error || data?.data?.error || data?.data?.message || 'empty response'}`);
     }
     if (keys.alphaVantageApiKey) {
       const data = await financeFetchJson(buildUrl(ALPHA_VANTAGE_API_URL, {
@@ -2773,11 +2779,28 @@ async function financeGetNews(args) {
           }))
         };
       }
+      warnings.push(`Alpha Vantage NEWS_SENTIMENT unavailable: ${data?.error || data?.Note || data?.Information || data?.['Error Message'] || 'empty response'}`);
     }
-    return { ...resolved, error: 'US news requires Finnhub or Alpha Vantage API Key in settings. Use web_search as fallback.' };
+    return {
+      ...resolved,
+      source: 'finance news fallback',
+      news: [],
+      warnings: warnings.length ? warnings : ['US news requires Finnhub or Alpha Vantage API Key in settings.'],
+      fallbackQueries,
+      note: 'No structured finance news was returned. Use web_search or deep_search with fallbackQueries.'
+    };
   }
 
-  const url = buildFinMindUrl({ dataset: 'TaiwanStockNews', data_id: resolved.symbol }, keys.finmindToken);
+  const twFallbackQueries = [
+    `${resolved.symbol} ${args.companyName || ''} 台股 新聞`,
+    `${resolved.symbol} ${args.companyName || ''} 法說 財報 營收 風險`
+  ].map(q => q.replace(/\s+/g, ' ').trim());
+  const url = buildFinMindUrl({
+    dataset: 'TaiwanStockNews',
+    data_id: resolved.symbol,
+    start_date: formatDateOnly(dateDaysAgo(30)),
+    end_date: formatDateOnly(new Date())
+  }, keys.finmindToken);
   const payload = await financeFetchJson(url);
   const rows = extractFinMindData(payload);
   if (Array.isArray(rows) && rows.length > 0) {
@@ -2793,7 +2816,15 @@ async function financeGetNews(args) {
       }))
     };
   }
-  return { ...resolved, error: rows.error || 'No Taiwan stock news returned. Use web_search as fallback.' };
+  if (rows.error) warnings.push(`FinMind TaiwanStockNews unavailable: ${rows.error}`);
+  return {
+    ...resolved,
+    source: 'finance news fallback',
+    news: [],
+    warnings: warnings.length ? warnings : ['No Taiwan stock news returned by FinMind.'],
+    fallbackQueries: twFallbackQueries,
+    note: 'No structured Taiwan stock news was returned. Use web_search or deep_search with fallbackQueries.'
+  };
 }
 
 function average(values) {
@@ -4246,7 +4277,7 @@ ${truncateAgentText(finalReply, 3000)}`;
               level: 'warning'
             });
           }
-          port.postMessage({ type: 'tool_done', tool: name, count: result.results?.length ?? null, error: result.error || null });
+          port.postMessage({ type: 'tool_done', tool: name, count: result.results?.length ?? result.news?.length ?? null, error: result.error || null });
           const compactResult = compactToolResultForAgent(result);
           toolObservations.push(formatXmlToolResultForAgent(name, args, compactResult));
           messages.push({ role: 'tool', tool_call_id: tc.id || '', content: JSON.stringify(compactResult) });
@@ -4272,7 +4303,7 @@ ${truncateAgentText(finalReply, 3000)}`;
               level: 'warning'
             });
           }
-          port.postMessage({ type: 'tool_done', tool: tc.name, count: result.results?.length ?? null, error: result.error || null });
+          port.postMessage({ type: 'tool_done', tool: tc.name, count: result.results?.length ?? result.news?.length ?? null, error: result.error || null });
           const formattedResult = formatXmlToolResultForAgent(tc.name, tc.args, result);
           resultParts.push(formattedResult);
           toolObservations.push(formattedResult);

@@ -1091,25 +1091,44 @@ document.addEventListener('DOMContentLoaded', async () => {
     customCommandsList.innerHTML = '';
     customCommands.forEach((command, index) => {
       const enabled = command.enabled !== false;
+      const triggerInputId = `cmd-trigger-${index}`;
+      const nameInputId = `cmd-name-${index}`;
+      const templateInputId = `cmd-template-${index}`;
       const item = document.createElement('div');
       item.className = `reply-mode-item${enabled ? '' : ' is-disabled'}`;
       item.dataset.id = command.id;
       item.dataset.enabled = enabled ? 'true' : 'false';
       item.innerHTML = `
-        <div class="reply-mode-header">
-          <div style="display:flex;gap:6px;flex:1;align-items:center">
-            <span style="color:#aaa;font-size:12px">/</span>
-            <input type="text" class="cmd-trigger mode-name" value="${escapeVal((command.trigger || '/').replace(/^\/+/, ''))}" placeholder="指令名稱">
-            <input type="text" class="cmd-name mode-name" value="${escapeVal(command.name || '')}" placeholder="指令說明">
+        <div class="reply-mode-status-row">
+          <span class="reply-mode-field-label">狀態</span>
+          <div class="cmd-status-control">
+            <span class="cmd-status-text">${enabled ? '啟用' : '停用'}</span>
+            <button class="cmd-enabled-toggle ${enabled ? 'is-enabled' : 'is-disabled'}" data-index="${index}" type="button" role="switch" aria-checked="${enabled ? 'true' : 'false'}" aria-label="${enabled ? '停用指令' : '啟用指令'}" title="${enabled ? '停用指令' : '啟用指令'}">
+              <span class="cmd-switch-track" aria-hidden="true"><span class="cmd-switch-knob"></span></span>
+              <span class="cmd-switch-status">${enabled ? '啟用' : '停用'}</span>
+            </button>
           </div>
-          <button class="cmd-enabled-toggle ${enabled ? 'is-enabled' : 'is-disabled'}" data-index="${index}" type="button" aria-pressed="${enabled ? 'true' : 'false'}">
-            ${enabled ? '啟用' : '停用'}
-          </button>
           <button class="btn-mode-delete" data-index="${index}" title="刪除指令" type="button">
             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
           </button>
         </div>
-        <textarea class="cmd-template mode-prompt" rows="2" placeholder="輸入提示詞模板。{input} 會被替換成指令後方輸入的文字，例如：請將以下內容翻譯成英文：{input}">${escapeVal(command.template || '')}</textarea>
+        <div class="reply-mode-fields-row">
+          <label class="reply-mode-field cmd-trigger-field" for="${triggerInputId}">
+            <span class="reply-mode-field-label">指令名稱</span>
+            <div class="cmd-trigger-input-wrap">
+              <span class="cmd-trigger-prefix">/</span>
+              <input id="${triggerInputId}" type="text" class="cmd-trigger mode-name" value="${escapeVal((command.trigger || '/').replace(/^\/+/, ''))}" placeholder="例如 stock-tw">
+            </div>
+          </label>
+          <label class="reply-mode-field cmd-name-field" for="${nameInputId}">
+            <span class="reply-mode-field-label">顯示名稱</span>
+            <input id="${nameInputId}" type="text" class="cmd-name mode-name" value="${escapeVal(command.name || '')}" placeholder="例如 分析台股">
+          </label>
+        </div>
+        <label class="reply-mode-field cmd-template-field" for="${templateInputId}">
+          <span class="reply-mode-field-label">提示詞模板</span>
+          <textarea id="${templateInputId}" class="cmd-template mode-prompt" rows="2" placeholder="輸入提示詞模板。{input} 會被替換成指令後方輸入的文字，例如：請將以下內容翻譯成英文：{input}">${escapeVal(command.template || '')}</textarea>
+        </label>
       `;
       item.querySelector('.cmd-enabled-toggle').addEventListener('click', () => {
         customCommands = collectCommandsFromDom(customCommandsList);
