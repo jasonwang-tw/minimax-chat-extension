@@ -6,7 +6,7 @@ Open Chat Hub 是一個多模型 AI 側邊欄工作台，讓你在瀏覽器內�
 
 ## 版本
 
-**v1.31.4** (2026-05-11)
+**v1.32.0** (2026-05-12)
 
 ## 功能特色
 
@@ -147,6 +147,16 @@ npm run build:css
 - **TailwindCSS + SCSS**：樣式設計
 
 ## Changelog
+
+## [1.32.0] - 2026-05-12
+### Added
+- 新增英文課錄音流程：單字簿 Modal 內加入「錄音」分頁，支援 tab audio + microphone 錄製、提醒確認、暫停/停止浮動控制與本機課程紀錄列表。
+- 新增 offscreen lesson recorder，透過 Chrome `offscreen`、`tabCapture` 與 `audioCapture` 權限保存課程音訊，並保留逐字稿草稿與課後整理入口。
+- 新增金融市場儀表板入口，支援台股/美股市場切換、族群 heatmap、熱門標的、新聞雷達、個股詳情與「深入分析 / 新聞 / 加入對話」快速操作。
+
+### Changed
+- 金融工具補強 dashboard 共用資料層與 timestamp 標示，FinMind request 改為可帶 token header，並改善台股報價的前收與漲跌資料整理。
+- 課程錄音權限提示與說明樣式補齊，避免使用者在未授權麥克風或尚未重載 extension 時卡住。
 
 ## [1.31.4] - 2026-05-11
 ### Fixed

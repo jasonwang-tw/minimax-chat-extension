@@ -177,6 +177,13 @@
 - 模型分析逾時重試提高到 2 次，且重試只重新請求模型判斷，不會重複執行已成功的 API 工具
 - 已連接工具任務遇到分析逾時時會自動接續下一個最小批次；達上限後才改用壓縮工具結果做恢復整理
 
+## Done (v1.32.0)
+
+- 英文課錄音第一版落地：單字簿 Modal 新增「錄音」分頁，可提示授權、啟動/停止錄音、顯示錄音狀態與本機課程紀錄。
+- 新增 offscreen 錄音文件與 background message flow，整合 `tabCapture`、`audioCapture`、`offscreen` 權限，為課程音訊保存與課後整理做準備。
+- 金融市場儀表板第一版落地：Header 市場入口支援台股/美股切換、heatmap、新聞雷達、個股詳情與快速送出 `/finance`、`/news`。
+- 金融資料流程補強：dashboard 與既有 finance tools 共用資料來源，並補上 timestamp / data freshness 顯示與 FinMind token header。
+
 ## Done (v1.24.x)
 
 - 瀏覽器自動化 Phase 1：8 個 browser_* Agent Tools（click / fill / select / get_text / get_html / scroll / wait_for / navigate）
