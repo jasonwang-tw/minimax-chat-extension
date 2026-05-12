@@ -175,6 +175,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const lessonFloatingBar = document.getElementById('lessonFloatingBar');
   const lessonFloatingState = document.getElementById('lessonFloatingState');
   const lessonFloatingTimer = document.getElementById('lessonFloatingTimer');
+  const lessonAudioMeter = document.getElementById('lessonAudioMeter');
   const lessonFloatingPauseBtn = document.getElementById('lessonFloatingPauseBtn');
   const lessonFloatingStopBtn = document.getElementById('lessonFloatingStopBtn');
   // 知識庫元素
@@ -275,6 +276,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   let currentAudioCtx = null;  // Web Audio API context
 let currentAudioSrc = null;  // Web Audio API BufferSource
   let lessonRecorderState = null; // { recorder, chunks, startedAt, timer, streams, audioContext, recognition, transcript }
+  let lessonMicPermissionWindowId = null;
+  const lessonAudioUrls = new Map();
   let activeMarket = 'US';
   let marketDashboard = null;
   let selectedMarketStock = null;
@@ -1007,6 +1010,28 @@ let currentAudioSrc = null;  // Web Audio API BufferSource
     await chrome.storage.local.set({ lessonRecordingNoticeAck: true });
     lessonNotice.classList.add('hidden');
     setStatus('錄音提醒已確認，可開始錄音。', false, 2200);
+  });
+  chrome.runtime.onMessage.addListener((message) => {
+    if (message?.type === 'LESSON_AUDIO_LEVEL') {
+      if (lessonRecorderState?.mode === 'offscreen' && !lessonRecorderState.isPaused) {
+        setLessonAudioMeterLevel(message.level);
+      }
+      return false;
+    }
+
+    if (message?.type !== 'LESSON_MIC_PERMISSION_RESULT') return false;
+    lessonMicPermissionWindowId = null;
+    if (message.success) {
+      markLessonMicrophoneGranted();
+      setStatus('麥克風權限已取得，可開始錄音。', false, 2600);
+    } else {
+      lessonTranscriptStatus.textContent = `麥克風未授權：${message.error || '使用者未允許'}`;
+      lessonMicPermissionBtn.disabled = false;
+      lessonMicPermissionBtn.textContent = '重新授權麥克風';
+      lessonPermissionHelp.classList.remove('hidden');
+      setStatus(`麥克風權限取得失敗：${message.error || '使用者未允許'}`, true, 3600);
+    }
+    return false;
   });
   lessonMicPermissionBtn.addEventListener('click', requestLessonMicrophonePermission);
   lessonStartBtn.addEventListener('click', startLessonRecording);
@@ -4863,17 +4888,75 @@ let currentAudioSrc = null;  // Web Audio API BufferSource
     lessonFloatingTimer.textContent = text;
   }
 
+  function setLessonAudioMeterLevel(level = 0) {
+    if (!lessonAudioMeter) return;
+    const normalized = Math.max(0, Math.min(1, Number(level) || 0));
+    lessonAudioMeter.classList.remove('idle', 'paused');
+    const bars = lessonAudioMeter.querySelectorAll('span');
+    bars.forEach((bar, index) => {
+      const wave = Math.sin((Date.now() / 110) + index * 0.92) * 0.18;
+      const taper = 1 - Math.abs(index - ((bars.length - 1) / 2)) * 0.075;
+      const value = Math.max(0.08, Math.min(1, (normalized * taper) + wave));
+      bar.style.setProperty('--level', value.toFixed(3));
+    });
+  }
+
+  function setLessonAudioMeterMode(mode) {
+    if (!lessonAudioMeter) return;
+    lessonAudioMeter.classList.toggle('idle', mode === 'idle');
+    lessonAudioMeter.classList.toggle('paused', mode === 'paused');
+  }
+
+  function stopLessonAudioMeter(state = lessonRecorderState) {
+    if (state?.levelAnimationId) {
+      cancelAnimationFrame(state.levelAnimationId);
+      state.levelAnimationId = null;
+    }
+    setLessonAudioMeterMode('idle');
+  }
+
+  function startLessonAudioMeter(state) {
+    if (!state?.analyser) {
+      setLessonAudioMeterMode('idle');
+      return;
+    }
+    const data = state.levelData || new Uint8Array(state.analyser.fftSize);
+    state.levelData = data;
+
+    const tick = () => {
+      if (lessonRecorderState !== state) return;
+      if (state.isPaused) {
+        setLessonAudioMeterMode('paused');
+      } else {
+        state.analyser.getByteTimeDomainData(data);
+        let sum = 0;
+        for (let i = 0; i < data.length; i++) {
+          const centered = (data[i] - 128) / 128;
+          sum += centered * centered;
+        }
+        const rms = Math.sqrt(sum / data.length);
+        setLessonAudioMeterLevel(Math.min(1, rms * 5.8));
+      }
+      state.levelAnimationId = requestAnimationFrame(tick);
+    };
+
+    stopLessonAudioMeter(state);
+    state.levelAnimationId = requestAnimationFrame(tick);
+  }
+
   function showLessonFloatingBar() {
     lessonFloatingBar.classList.remove('hidden');
     lessonFloatingState.textContent = '錄音中';
     lessonFloatingPauseBtn.textContent = '暫停';
+    setLessonAudioMeterMode('idle');
     updateLessonRecordingTimer();
   }
 
-  function hideLessonFloatingBar() {
+  function hideLessonFloatingBar(state = lessonRecorderState) {
     lessonFloatingBar.classList.add('hidden');
     lessonFloatingState.textContent = '錄音中';
     lessonFloatingPauseBtn.textContent = '暫停';
+    stopLessonAudioMeter(state);
   }
 
   function setLessonRecordingPaused(paused) {
@@ -4882,6 +4965,7 @@ let currentAudioSrc = null;  // Web Audio API BufferSource
     lessonFloatingState.textContent = paused ? '已暫停' : '錄音中';
     lessonFloatingPauseBtn.textContent = paused ? '繼續' : '暫停';
     lessonRecordingStateEl.textContent = paused ? '錄音已暫停' : lessonRecorderState.recordingLabel || '錄音中';
+    setLessonAudioMeterMode(paused ? 'paused' : 'idle');
     updateLessonRecordingTimer();
   }
 
@@ -4892,32 +4976,85 @@ let currentAudioSrc = null;  // Web Audio API BufferSource
     return false;
   }
 
-  async function requestLessonMicrophonePermission({ silent = false } = {}) {
+  async function getLessonMicrophonePermissionState() {
+    if (!navigator.permissions?.query) return 'unknown';
+    try {
+      const result = await navigator.permissions.query({ name: 'microphone' });
+      return result.state || 'unknown';
+    } catch {
+      return 'unknown';
+    }
+  }
+
+  function markLessonMicrophoneGranted() {
+    lessonTranscriptStatus.textContent = '麥克風已授權';
+    lessonMicPermissionBtn.textContent = '麥克風已授權';
+    lessonMicPermissionBtn.disabled = true;
+    lessonPermissionHelp.classList.add('hidden');
+  }
+
+  async function openLessonMicrophonePermissionWindow() {
+    const url = chrome.runtime.getURL('permissions/microphone.html');
+    if (lessonMicPermissionWindowId && chrome.windows?.update) {
+      try {
+        await chrome.windows.update(lessonMicPermissionWindowId, { focused: true });
+        return;
+      } catch {
+        lessonMicPermissionWindowId = null;
+      }
+    }
+
+    if (chrome.windows?.create) {
+      const win = await chrome.windows.create({
+        url,
+        type: 'popup',
+        width: 460,
+        height: 390,
+        focused: true
+      });
+      lessonMicPermissionWindowId = win?.id || null;
+      return;
+    }
+
+    window.open(url, 'open-chat-hub-microphone', 'width=460,height=390');
+  }
+
+  async function ensureLessonMicrophonePermission({ prompt = true } = {}) {
     if (!navigator.mediaDevices?.getUserMedia) {
       throw new Error('此瀏覽器不支援麥克風錄音權限');
     }
-    if (!silent) {
-      lessonTranscriptStatus.textContent = '正在要求麥克風權限';
-      lessonPermissionHelp.classList.add('hidden');
-      lessonMicPermissionBtn.disabled = true;
-    }
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      stream.getTracks().forEach(track => track.stop());
-      lessonTranscriptStatus.textContent = '麥克風已授權';
-      lessonMicPermissionBtn.textContent = '麥克風已授權';
-      lessonMicPermissionBtn.disabled = true;
-      lessonPermissionHelp.classList.add('hidden');
-      if (!silent) setStatus('麥克風權限已取得，可開始錄音。', false, 2400);
+
+    const state = await getLessonMicrophonePermissionState();
+    if (state === 'granted') {
+      markLessonMicrophoneGranted();
       return true;
+    }
+
+    lessonMicPermissionBtn.disabled = false;
+    lessonMicPermissionBtn.textContent = state === 'denied' ? '重新設定麥克風' : '授權麥克風';
+    lessonPermissionHelp.classList.remove('hidden');
+
+    if (state === 'denied') {
+      lessonTranscriptStatus.textContent = '麥克風已被 Chrome 封鎖，請在網站設定改成允許';
+      return false;
+    }
+
+    if (!prompt) return false;
+
+    lessonTranscriptStatus.textContent = '請在麥克風授權視窗按「允許麥克風」';
+    await openLessonMicrophonePermissionWindow();
+    setStatus('已開啟麥克風授權視窗；允許後請回來按「開始錄音」。', false, 4200);
+    return false;
+  }
+
+  async function requestLessonMicrophonePermission() {
+    try {
+      const granted = await ensureLessonMicrophonePermission({ prompt: true });
+      if (granted) setStatus('麥克風權限已取得，可開始錄音。', false, 2400);
     } catch (err) {
-      const dismissed = /dismissed/i.test(err.message || '');
-      lessonTranscriptStatus.textContent = dismissed ? '麥克風授權視窗已關閉，尚未允許' : `麥克風未授權：${err.message}`;
-      lessonMicPermissionBtn.disabled = false;
-      lessonMicPermissionBtn.textContent = dismissed ? '重新授權麥克風' : '授權麥克風';
+      lessonTranscriptStatus.textContent = `麥克風授權檢查失敗：${err.message}`;
       lessonPermissionHelp.classList.remove('hidden');
-      if (!silent) setStatus(`麥克風權限取得失敗：${err.message}`, true, 3600);
-      throw err;
+      setStatus(`麥克風權限取得失敗：${err.message}`, true, 3600);
     }
   }
 
@@ -4966,17 +5103,30 @@ let currentAudioSrc = null;  // Web Audio API BufferSource
 
   async function captureLessonStreams() {
     let micStream = null;
+    let tabStream = null;
+    const errors = [];
     try {
       micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
     } catch (err) {
-      throw new Error(`麥克風權限或裝置不可用：${err.message}`);
+      errors.push(`麥克風權限或裝置不可用：${err.message}`);
     }
-    const tabStream = await new Promise(resolve => {
-      if (!chrome.tabCapture?.capture) return resolve(null);
+    tabStream = await new Promise(resolve => {
+      if (!chrome.tabCapture?.capture) {
+        errors.push('此 Chrome 版本不支援直接擷取分頁音訊');
+        return resolve(null);
+      }
       chrome.tabCapture.capture({ audio: true, video: false }, stream => {
-        resolve(chrome.runtime.lastError ? null : stream);
+        if (chrome.runtime.lastError) {
+          errors.push(`分頁音訊不可用：${chrome.runtime.lastError.message}`);
+          resolve(null);
+          return;
+        }
+        resolve(stream);
       });
     });
+    if (!micStream && !tabStream) {
+      throw new Error(errors.join('；') || '無法取得麥克風或分頁音訊');
+    }
     return { micStream, tabStream };
   }
 
@@ -4994,9 +5144,16 @@ let currentAudioSrc = null;  // Web Audio API BufferSource
     lessonOrganizeBtn.disabled = true;
     let offscreenError = '';
     try {
-      await requestLessonMicrophonePermission({ silent: true }).catch(err => {
-        offscreenError = `麥克風授權失敗：${err.message}`;
-      });
+      const micReady = await ensureLessonMicrophonePermission({ prompt: true });
+      if (!micReady) {
+        lessonRecordingStateEl.textContent = '等待麥克風授權';
+        lessonTranscriptStatus.textContent = '允許麥克風後，回到這裡再按一次「開始錄音」';
+        lessonStartBtn.disabled = false;
+        lessonStopBtn.disabled = true;
+        lessonOrganizeBtn.disabled = !(lessonTranscriptDraft.value.trim() || lessonRecords[0]?.transcriptSegments?.length);
+        return;
+      }
+
       const offscreenStart = await chrome.runtime.sendMessage({ type: 'LESSON_RECORDING_START' }).catch(err => {
         offscreenError = err.message || String(err);
         return null;
@@ -5028,10 +5185,14 @@ let currentAudioSrc = null;  // Web Audio API BufferSource
       const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
       const audioContext = new AudioContextCtor();
       const destination = audioContext.createMediaStreamDestination();
+      const analyser = audioContext.createAnalyser();
+      analyser.fftSize = 256;
+      analyser.smoothingTimeConstant = 0.72;
       const streams = [micStream, tabStream].filter(Boolean);
       streams.forEach(stream => {
         const source = audioContext.createMediaStreamSource(stream);
         source.connect(destination);
+        source.connect(analyser);
       });
       const recorderOptions = MediaRecorder.isTypeSupported?.('audio/webm') ? { mimeType: 'audio/webm' } : {};
       const recorder = new MediaRecorder(destination.stream, recorderOptions);
@@ -5043,6 +5204,9 @@ let currentAudioSrc = null;  // Web Audio API BufferSource
         chunks,
         streams,
         audioContext,
+        analyser,
+        levelData: new Uint8Array(analyser.fftSize),
+        levelAnimationId: null,
         startedAt: Date.now(),
         pausedAt: null,
         pausedMs: 0,
@@ -5056,9 +5220,12 @@ let currentAudioSrc = null;  // Web Audio API BufferSource
       lessonOrganizeBtn.disabled = true;
       lessonRecordingStateEl.textContent = lessonRecorderState.recordingLabel;
       showLessonFloatingBar();
+      startLessonAudioMeter(lessonRecorderState);
       lessonRecorderState.timer = setInterval(updateLessonRecordingTimer, 500);
-      if (offscreenError && !tabStream) {
-        lessonTranscriptStatus.textContent = `分頁音訊未取得，已改用麥克風錄音：${offscreenError}`;
+      if (offscreenError || !tabStream) {
+        lessonTranscriptStatus.textContent = tabStream
+          ? `已改用本頁錄音流程：${offscreenError}`
+          : `分頁音訊未取得，已改用麥克風錄音：${offscreenError || '請先在課程分頁點一次擴充功能圖示'}`;
       }
     } catch (err) {
       setStatus(`錄音啟動失敗：${err.message}`, true, 4000);
@@ -5109,7 +5276,7 @@ let currentAudioSrc = null;  // Web Audio API BufferSource
     lessonRecorderState = null;
     clearInterval(state.timer);
     state.recognition?.stop?.();
-    hideLessonFloatingBar();
+    hideLessonFloatingBar(state);
 
     if (state.mode === 'offscreen') {
       try {
@@ -5118,14 +5285,18 @@ let currentAudioSrc = null;  // Web Audio API BufferSource
         const data = stoppedRecording.data || {};
         const now = data.finishedAt || Date.now();
         const transcriptText = lessonTranscriptDraft.value.trim();
+        const savedAudio = data.audioId ? await getLessonAudio(data.audioId).catch(() => null) : null;
         const lesson = {
           id: `lesson_${now}`,
           title: `English lesson ${new Date(now).toLocaleDateString('zh-TW')}`,
           audioId: data.audioId,
           audioType: data.audioType || 'audio/webm',
+          audioSize: savedAudio?.size || data.audioSize || 0,
           durationMs: data.durationMs || getLessonElapsedMs(state),
           transcriptSegments: transcriptText ? transcriptText.split(/\n+/).map(s => s.trim()).filter(Boolean).slice(0, 80) : [],
-          summary: transcriptText ? '尚未整理。點擊「整理」產生英文學習摘要。' : '已保存音檔，但尚無逐字稿。',
+          summary: savedAudio
+            ? (transcriptText ? '尚未整理。點擊「整理」產生英文學習摘要。' : '已保存音檔，但尚無逐字稿。')
+            : '已建立課程紀錄，但目前讀不到本機音檔，請重新錄製。',
           corrections: [],
           usefulSentences: [],
           vocabularyIds: [],
@@ -5138,7 +5309,7 @@ let currentAudioSrc = null;  // Web Audio API BufferSource
         lessonStopBtn.disabled = true;
         lessonOrganizeBtn.disabled = !transcriptText;
         renderLessonRecords();
-        setStatus('課程錄音已保存本機', false, 2600);
+        setStatus(savedAudio ? '課程錄音已保存本機' : '課程紀錄已保存，但音檔讀取驗證失敗', !savedAudio, 3200);
       } catch (err) {
         lessonRecordingStateEl.textContent = '錄音保存失敗';
         lessonStartBtn.disabled = false;
@@ -5174,6 +5345,7 @@ let currentAudioSrc = null;  // Web Audio API BufferSource
       title: `English lesson ${new Date(now).toLocaleDateString('zh-TW')}`,
       audioId,
       audioType: blob.type,
+      audioSize: blob.size,
       durationMs: getLessonElapsedMs(state),
       transcriptSegments: transcriptText ? transcriptText.split(/\n+/).map(s => s.trim()).filter(Boolean).slice(0, 80) : [],
       summary: transcriptText ? '尚未整理。點擊「整理」產生英文學習摘要。' : '已保存音檔，但尚無逐字稿。',
@@ -5339,16 +5511,44 @@ ${transcript}`;
     });
   }
 
-  async function playLessonAudio(audioId) {
-    const blob = await getLessonAudio(audioId);
-    if (!blob) {
-      setStatus('找不到本機音檔', true, 2500);
-      return;
+  async function playLessonAudio(audioId, cardEl = null) {
+    try {
+      if (!audioId) throw new Error('這筆課程沒有音檔 ID');
+      const blob = await getLessonAudio(audioId);
+      if (!blob) throw new Error('找不到本機音檔，可能是舊版本保存時未寫入音檔');
+      if (!blob.size) throw new Error('本機音檔是空的，請重新錄製');
+
+      const previousUrl = lessonAudioUrls.get(audioId);
+      if (previousUrl) URL.revokeObjectURL(previousUrl);
+
+      const playableBlob = blob.type ? blob : new Blob([blob], { type: 'audio/webm' });
+      const url = URL.createObjectURL(playableBlob);
+      lessonAudioUrls.set(audioId, url);
+
+      let player = cardEl?.querySelector?.('.lesson-audio-player') || null;
+      if (!player && cardEl) {
+        player = document.createElement('audio');
+        player.className = 'lesson-audio-player';
+        player.controls = true;
+        player.preload = 'metadata';
+        const actions = cardEl.querySelector('.lesson-record-actions');
+        actions?.before(player);
+      }
+
+      const audio = player || new Audio();
+      audio.controls = true;
+      audio.src = url;
+      audio.load();
+      await audio.play().catch(err => {
+        if (player) {
+          setStatus('播放器已載入，請在卡片內按播放。', false, 2600);
+          return;
+        }
+        throw err;
+      });
+    } catch (err) {
+      setStatus(`播放失敗：${err.message}`, true, 3600);
     }
-    const url = URL.createObjectURL(blob);
-    const audio = new Audio(url);
-    audio.onended = () => URL.revokeObjectURL(url);
-    audio.play().catch(err => setStatus(`播放失敗：${err.message}`, true, 2500));
   }
 
   async function deleteLessonRecord(lessonId) {
@@ -5356,6 +5556,11 @@ ${transcript}`;
     if (!lesson) return;
     if (!confirm(`確定刪除「${lesson.title || 'English lesson'}」？音檔也會一併從本機刪除。`)) return;
     try {
+      const objectUrl = lessonAudioUrls.get(lesson.audioId);
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl);
+        lessonAudioUrls.delete(lesson.audioId);
+      }
       await deleteLessonAudio(lesson.audioId);
       lessonRecords = lessonRecords.filter(l => l.id !== lessonId);
       await chrome.storage.local.set({ lessonRecords });
@@ -5397,7 +5602,7 @@ ${transcript}`;
           <button class="btn-secondary-sm lesson-delete" type="button">刪除</button>
         </div>
       `;
-      div.querySelector('.lesson-play').addEventListener('click', () => playLessonAudio(lesson.audioId));
+      div.querySelector('.lesson-play').addEventListener('click', () => playLessonAudio(lesson.audioId, div));
       div.querySelector('.lesson-fill').addEventListener('click', () => {
         lessonTranscriptDraft.value = (lesson.transcriptSegments || []).join('\n');
         lessonOrganizeBtn.disabled = !lessonTranscriptDraft.value.trim();

@@ -601,7 +601,8 @@
               <strong>麥克風尚未授權</strong>
               <ol>
                 <li>如果看到權限視窗，請按「允許」，不要直接關閉視窗。</li>
-                <li>若沒有跳出視窗，請重新載入 extension，接受新增的錄音權限。</li>
+                <li>若沒有跳出視窗，請按「授權麥克風」開啟獨立授權視窗。</li>
+                <li>若要錄分頁聲音，請先在課程分頁上點一次 Open Chat Hub 工具列圖示，再開始錄音。</li>
                 <li>到 macOS「系統設定 → 隱私權與安全性 → 麥克風」確認 Chrome 已允許。</li>
                 <li>到 Chrome 網址列輸入 <code>chrome://settings/content/microphone</code>，確認預設行為允許網站要求使用麥克風。</li>
               </ol>
@@ -666,6 +667,17 @@
       <span class="lesson-recording-dot"></span>
       <strong id="lessonFloatingState">錄音中</strong>
       <span id="lessonFloatingTimer">00:00</span>
+      <div id="lessonAudioMeter" class="lesson-audio-meter idle" aria-label="錄音音量">
+        <span></span>
+        <span></span>
+        <span></span>
+        <span></span>
+        <span></span>
+        <span></span>
+        <span></span>
+        <span></span>
+        <span></span>
+      </div>
     </div>
     <div class="lesson-floating-actions">
       <button id="lessonFloatingPauseBtn" class="btn-secondary-sm" type="button">暫停</button>

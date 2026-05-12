@@ -700,10 +700,54 @@ function extractKbJson(text) {
   return null;
 }
 
+let lastInvokedTabForLessonRecording = null;
+
+function isCapturableTabUrl(url = '') {
+  return /^(https?:|file:)/i.test(url);
+}
+
+function rememberLessonCaptureTab(tab) {
+  if (!tab?.id || !isCapturableTabUrl(tab.url || '')) return;
+  lastInvokedTabForLessonRecording = {
+    id: tab.id,
+    windowId: tab.windowId,
+    url: tab.url,
+    invokedAt: Date.now()
+  };
+}
+
+async function getLessonCaptureTab() {
+  const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (activeTab?.id && isCapturableTabUrl(activeTab.url || '')) return activeTab;
+
+  if (lastInvokedTabForLessonRecording?.id) {
+    try {
+      const tab = await chrome.tabs.get(lastInvokedTabForLessonRecording.id);
+      if (tab?.id && isCapturableTabUrl(tab.url || '')) return tab;
+    } catch {
+      lastInvokedTabForLessonRecording = null;
+    }
+  }
+
+  return activeTab || null;
+}
+
+function explainTabCaptureError(err, tab) {
+  const raw = err?.message || String(err || '分頁音訊不可用');
+  if (!tab?.url || !isCapturableTabUrl(tab.url)) {
+    return `目前分頁不能擷取音訊。請切到課程分頁後點一次 Open Chat Hub 圖示，再開始錄音。原始錯誤：${raw}`;
+  }
+  if (/has not been invoked|activeTab|Chrome pages cannot be captured/i.test(raw)) {
+    return `目前課程分頁尚未授權分頁音訊。請在課程分頁上點一次 Open Chat Hub 工具列圖示開啟側邊欄，再按開始錄音。原始錯誤：${raw}`;
+  }
+  return raw;
+}
+
 // 監聽工具列圖示點擊，開啟側邊欄
 // 使用 windowId 而非 tabId，避免跨頁面切換時出現錯誤
 chrome.action.onClicked.addListener(async (tab) => {
   try {
+    rememberLessonCaptureTab(tab);
     await chrome.sidePanel.open({ windowId: tab.windowId });
     // 設定側邊欄路徑（確保每次都指向正確的 HTML）
     await chrome.sidePanel.setOptions({
@@ -2467,9 +2511,14 @@ async function startLessonOffscreenRecording() {
     throw new Error('此 Chrome 版本不支援 tabCapture stream id');
   }
   await ensureLessonOffscreenDocument();
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  const tab = await getLessonCaptureTab();
   if (!tab?.id) throw new Error('找不到目前可錄製的課程分頁');
-  const streamId = await chrome.tabCapture.getMediaStreamId({ targetTabId: tab.id });
+  let streamId = '';
+  try {
+    streamId = await chrome.tabCapture.getMediaStreamId({ targetTabId: tab.id });
+  } catch (err) {
+    throw new Error(explainTabCaptureError(err, tab));
+  }
   const response = await sendLessonOffscreenMessage({
     type: 'LESSON_OFFSCREEN_START',
     streamId

@@ -43,6 +43,43 @@ function stopTracks(streams) {
   streams.forEach(stream => stream?.getTracks().forEach(track => track.stop()));
 }
 
+function startAudioLevelBroadcast(state) {
+  if (!state?.analyser) return;
+  const data = state.levelData || new Uint8Array(state.analyser.fftSize);
+  state.levelData = data;
+
+  const tick = () => {
+    if (recorderState !== state) return;
+    if (state.recorder?.state === 'paused') {
+      state.levelTimer = setTimeout(tick, 180);
+      return;
+    }
+
+    state.analyser.getByteTimeDomainData(data);
+    let sum = 0;
+    for (let i = 0; i < data.length; i++) {
+      const centered = (data[i] - 128) / 128;
+      sum += centered * centered;
+    }
+
+    const rms = Math.sqrt(sum / data.length);
+    chrome.runtime.sendMessage({
+      type: 'LESSON_AUDIO_LEVEL',
+      level: Math.min(1, rms * 5.8)
+    }).catch(() => {});
+    state.levelTimer = setTimeout(tick, 90);
+  };
+
+  tick();
+}
+
+function stopAudioLevelBroadcast(state) {
+  if (state?.levelTimer) {
+    clearTimeout(state.levelTimer);
+    state.levelTimer = null;
+  }
+}
+
 async function startRecording(streamId) {
   if (recorderState) throw new Error('Lesson recording is already running');
   const AudioContextCtor = self.AudioContext || self.webkitAudioContext;
@@ -58,13 +95,18 @@ async function startRecording(streamId) {
 
   const audioContext = new AudioContextCtor();
   const destination = audioContext.createMediaStreamDestination();
+  const analyser = audioContext.createAnalyser();
+  analyser.fftSize = 256;
+  analyser.smoothingTimeConstant = 0.72;
   const tabSource = audioContext.createMediaStreamSource(tabStream);
   tabSource.connect(destination);
+  tabSource.connect(analyser);
   tabSource.connect(audioContext.destination);
 
   if (micStream) {
     const micSource = audioContext.createMediaStreamSource(micStream);
     micSource.connect(destination);
+    micSource.connect(analyser);
   }
 
   const recorderOptions = MediaRecorder.isTypeSupported?.('audio/webm') ? { mimeType: 'audio/webm' } : {};
@@ -80,12 +122,16 @@ async function startRecording(streamId) {
     chunks,
     streams: [tabStream, micStream].filter(Boolean),
     audioContext,
+    analyser,
+    levelData: new Uint8Array(analyser.fftSize),
+    levelTimer: null,
     startedAt: Date.now(),
     pausedAt: null,
     pausedMs: 0,
     hasMic: Boolean(micStream)
   };
 
+  startAudioLevelBroadcast(recorderState);
   return { hasMic: recorderState.hasMic };
 }
 
@@ -112,6 +158,7 @@ async function stopRecording() {
   if (!recorderState) throw new Error('Lesson recording is not running');
   const state = recorderState;
   recorderState = null;
+  stopAudioLevelBroadcast(state);
   const stopped = new Promise(resolve => {
     state.recorder.onstop = resolve;
   });

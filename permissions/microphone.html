@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Open Chat Hub 麥克風授權</title>
+  <style>
+    :root {
+      color-scheme: light;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: #172033;
+      background: #f6f8fb;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+    }
+
+    main {
+      width: min(360px, calc(100vw - 32px));
+      background: #fff;
+      border: 1px solid #d8dee9;
+      border-radius: 8px;
+      box-shadow: 0 12px 34px rgba(21, 32, 53, 0.14);
+      padding: 24px;
+    }
+
+    h1 {
+      margin: 0 0 10px;
+      font-size: 20px;
+      line-height: 1.25;
+    }
+
+    p {
+      margin: 0 0 18px;
+      color: #4c5a6f;
+      font-size: 14px;
+      line-height: 1.55;
+    }
+
+    button {
+      width: 100%;
+      border: 0;
+      border-radius: 6px;
+      background: #2563eb;
+      color: #fff;
+      font: inherit;
+      font-weight: 700;
+      padding: 11px 14px;
+      cursor: pointer;
+    }
+
+    button:disabled {
+      cursor: not-allowed;
+      opacity: 0.65;
+    }
+
+    #status {
+      min-height: 20px;
+      margin-top: 14px;
+      color: #334155;
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .error {
+      color: #b42318;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>允許麥克風</h1>
+    <p>Chrome side panel 有時不會顯示麥克風權限視窗。請在這個授權視窗按下按鈕，接著在 Chrome 權限提示選「允許」。</p>
+    <button id="allowBtn" type="button">允許麥克風</button>
+    <div id="status">等待授權</div>
+  </main>
+  <script src="microphone.js"></script>
+</body>
+</html>

@@ -184,6 +184,12 @@
 - 金融市場儀表板第一版落地：Header 市場入口支援台股/美股切換、heatmap、新聞雷達、個股詳情與快速送出 `/finance`、`/news`。
 - 金融資料流程補強：dashboard 與既有 finance tools 共用資料來源，並補上 timestamp / data freshness 顯示與 FinMind token header。
 
+## Done (v1.33.0)
+
+- 課程錄音麥克風授權改為獨立 extension popup，避免 Chrome side panel 內權限視窗不出現或被 dismissed。
+- 錄音浮動控制列新增即時音量波浪，offscreen 與 fallback 錄音流程都可顯示錄音是否有音量輸入。
+- 課程卡片播放改為載入原生音訊播放器，並在保存後驗證本機音檔可讀，降低無法播放時的排查成本。
+
 ## Done (v1.24.x)
 
 - 瀏覽器自動化 Phase 1：8 個 browser_* Agent Tools（click / fill / select / get_text / get_html / scroll / wait_for / navigate）
