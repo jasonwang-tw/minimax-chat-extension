@@ -148,6 +148,12 @@ npm run build:css
 
 ## Changelog
 
+## [1.33.1] - 2026-06-04
+### Fixed
+- 修正網頁選取翻譯 popup 的原文與譯文操作列，兩側皆提供朗讀與複製 icon。
+- 翻譯 popup 的 TTS 改用 Google TTS + Web Audio 播放流程，並保留 Web Speech fallback，避免譯文喇叭點擊後無聲。
+- 選取翻譯 content script 改為版本化初始化與 cleanup，避免 extension reload 後舊注入狀態造成翻譯失效。
+
 ## [1.33.0] - 2026-05-13
 ### Added
 - 新增課程錄音麥克風獨立授權視窗，避免 Chrome side panel 內權限提示被直接 dismiss。

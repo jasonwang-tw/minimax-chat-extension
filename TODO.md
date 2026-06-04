@@ -184,6 +184,12 @@
 - 金融市場儀表板第一版落地：Header 市場入口支援台股/美股切換、heatmap、新聞雷達、個股詳情與快速送出 `/finance`、`/news`。
 - 金融資料流程補強：dashboard 與既有 finance tools 共用資料來源，並補上 timestamp / data freshness 顯示與 FinMind token header。
 
+## Done (v1.33.1)
+
+- 選取翻譯 popup 的原文與譯文皆補齊朗讀與複製 icon。
+- 翻譯 popup TTS 改用 Google TTS + Web Audio 播放流程，失敗時 fallback 至 Web Speech API。
+- content script 改為版本化初始化與 cleanup，降低 extension reload 後舊注入狀態造成選取翻譯失效的機率。
+
 ## Done (v1.33.0)
 
 - 課程錄音麥克風授權改為獨立 extension popup，避免 Chrome side panel 內權限視窗不出現或被 dismissed。

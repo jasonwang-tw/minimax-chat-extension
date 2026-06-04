@@ -1,17 +1,26 @@
 // content/translate-popup.js
 // Shadow DOM 隔離翻譯懸浮視窗，避免頁面 CSS 污染
 
-// 防止 executeScript 重複注入時初始化兩次
-if (window.__minimaxTranslateLoaded) {
+// 防止 executeScript 重複注入時初始化兩次；版本變更時允許重新初始化。
+var MINIMAX_TRANSLATE_SCRIPT_VERSION = '1.33.2-selection-tts';
+if (window.__minimaxTranslateLoaded === MINIMAX_TRANSLATE_SCRIPT_VERSION) {
   // 已有 listener，不重複初始化
 } else {
-window.__minimaxTranslateLoaded = true;
+if (typeof window.__minimaxTranslateCleanup === 'function') {
+  try {
+    window.__minimaxTranslateCleanup();
+  } catch {}
+}
+window.__minimaxTranslateLoaded = MINIMAX_TRANSLATE_SCRIPT_VERSION;
 
 (function () {
   let popupHost = null;
   let shadowRoot = null;
   let currentAudio = null;
-  let ttsBtn = null;
+  let currentAudioSrc = null;
+  let sharedAudioCtx = null;
+  let currentTTSBtn = null;
+  let currentUtterance = null;
   let actionHost = null;
   let actionShadowRoot = null;
   let actionRenderTimer = null;
@@ -48,6 +57,7 @@ window.__minimaxTranslateLoaded = true;
 
   // ── 建立 Shadow DOM 容器 ──────────────────────────────────
   function createHost() {
+    document.getElementById('minimax-translate-host')?.remove();
     const host = document.createElement('div');
     host.id = 'minimax-translate-host';
     host.style.cssText = 'position:fixed;z-index:2147483647;pointer-events:none;top:0;left:0;';
@@ -56,6 +66,7 @@ window.__minimaxTranslateLoaded = true;
   }
 
   function createActionHost() {
+    document.getElementById('minimax-selection-action-host')?.remove();
     const host = document.createElement('div');
     host.id = 'minimax-selection-action-host';
     host.style.cssText = 'position:fixed;z-index:2147483646;pointer-events:none;top:0;left:0;';
@@ -133,6 +144,20 @@ window.__minimaxTranslateLoaded = true;
 
     .popup-body { padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 8px; }
 
+    .popup-text-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 8px;
+      align-items: start;
+    }
+
+    .popup-text-actions {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      flex-shrink: 0;
+    }
+
     .popup-original {
       font-size: 12px;
       color: #888;
@@ -158,37 +183,12 @@ window.__minimaxTranslateLoaded = true;
       font-weight: 400;
     }
 
-    .popup-footer {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 6px;
-      padding: 0 12px 10px;
-    }
-
-    .popup-btn {
-      font-size: 11px;
-      border-radius: 6px;
-      padding: 3px 10px;
-      cursor: pointer;
-      transition: background 0.15s;
-      white-space: nowrap;
-      border: 1px solid;
-    }
-    .popup-btn-copy {
-      color: #aaa;
-      background: rgba(255,255,255,0.04);
-      border-color: rgba(255,255,255,0.1);
-    }
-    .popup-btn-copy:hover { background: rgba(255,255,255,0.09); color: #eee; }
-    .popup-btn-copy.copied { color: #10b981; border-color: rgba(16,185,129,0.35); background: rgba(16,185,129,0.08); }
-
-    .popup-btn-tts {
+    .popup-icon-btn {
       display: flex;
       align-items: center;
       justify-content: center;
-      width: 28px;
-      height: 28px;
+      width: 26px;
+      height: 26px;
       padding: 0;
       color: #aaa;
       background: rgba(255,255,255,0.04);
@@ -198,17 +198,22 @@ window.__minimaxTranslateLoaded = true;
       transition: color 0.15s, background 0.15s;
       flex-shrink: 0;
     }
-    .popup-btn-tts:hover { background: rgba(255,255,255,0.09); color: #eee; }
-    .popup-btn-tts.speaking {
+    .popup-icon-btn:hover { background: rgba(255,255,255,0.09); color: #eee; }
+    .popup-icon-btn.speaking {
       color: #EC2970;
       border-color: rgba(236,41,112,0.4);
       background: rgba(236,41,112,0.08);
+    }
+    .popup-icon-btn.copied {
+      color: #10b981;
+      border-color: rgba(16,185,129,0.35);
+      background: rgba(16,185,129,0.08);
     }
     @keyframes pulse-tts {
       0%, 100% { opacity: 1; }
       50% { opacity: 0.5; }
     }
-    .popup-btn-tts.speaking svg { animation: pulse-tts 1.2s ease infinite; }
+    .popup-icon-btn.speaking svg { animation: pulse-tts 1.2s ease infinite; }
 
     .popup-loading {
       display: flex;
@@ -409,6 +414,201 @@ window.__minimaxTranslateLoaded = true;
     return nodeText.slice(start, end).trim();
   }
 
+  function speakerSvg() {
+    return `
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+        <path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>
+        <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
+      </svg>
+    `;
+  }
+
+  function copySvg() {
+    return `
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <rect x="9" y="9" width="13" height="13" rx="2"/>
+        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+      </svg>
+    `;
+  }
+
+  function buildTextRow({ text, lang, textClass, ttsTitle, copyTitle }) {
+    return `
+      <div class="popup-text-row">
+        <div class="${textClass}">${escapeHtml(text)}</div>
+        <div class="popup-text-actions">
+          <button class="popup-icon-btn popup-btn-tts" type="button" title="${ttsTitle}" data-text="${escapeAttr(text)}" data-lang="${escapeAttr(lang)}">${speakerSvg()}</button>
+          <button class="popup-icon-btn popup-btn-copy" type="button" title="${copyTitle}" data-text="${escapeAttr(text)}">${copySvg()}</button>
+        </div>
+      </div>
+    `;
+  }
+
+  function detectLang(text) {
+    if (!text) return 'zh-TW';
+    if (/[\u3040-\u30ff]/.test(text)) return 'ja';
+    if (/[\uac00-\ud7a3]/.test(text)) return 'ko';
+    if (/[\u0e00-\u0e7f]/.test(text)) return 'th';
+    if (/[\u0600-\u06ff]/.test(text)) return 'ar';
+    if (/[\u4e00-\u9fff\u3400-\u4dbf]/.test(text)) return 'zh-TW';
+    if (/[a-z]/i.test(text)) return 'en';
+    return 'zh-TW';
+  }
+
+  function resolveTTSLang(lang, text) {
+    return !lang || lang === 'auto' ? detectLang(text) : lang;
+  }
+
+  function stopCurrentAudio() {
+    if (currentAudioSrc) {
+      try { currentAudioSrc.stop(); } catch {}
+      currentAudioSrc = null;
+    }
+    if (currentAudio) {
+      currentAudio.pause();
+      currentAudio.src = '';
+      currentAudio = null;
+    }
+    if (currentUtterance) {
+      window.speechSynthesis?.cancel();
+      currentUtterance = null;
+    }
+    if (currentTTSBtn) {
+      currentTTSBtn.classList.remove('speaking');
+      currentTTSBtn = null;
+    }
+  }
+
+  function getAudioCtx() {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return null;
+    if (!sharedAudioCtx || sharedAudioCtx.state === 'closed') {
+      sharedAudioCtx = new AudioCtx();
+    }
+    return sharedAudioCtx;
+  }
+
+  function base64ToArrayBuffer(base64) {
+    const byteChars = atob(base64);
+    const byteArray = new Uint8Array(byteChars.length);
+    for (let i = 0; i < byteChars.length; i++) {
+      byteArray[i] = byteChars.charCodeAt(i);
+    }
+    return byteArray.buffer;
+  }
+
+  function playSystemSpeech(text, lang, btn) {
+    if (!('speechSynthesis' in window)) {
+      stopCurrentAudio();
+      return;
+    }
+
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = lang;
+    utterance.voice = findSpeechVoice(lang);
+    utterance.rate = 1;
+    currentUtterance = utterance;
+    utterance.onend = () => {
+      if (currentTTSBtn === btn) stopCurrentAudio();
+    };
+    utterance.onerror = () => {
+      if (currentTTSBtn === btn) stopCurrentAudio();
+    };
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(utterance);
+  }
+
+  function findSpeechVoice(lang) {
+    const voices = window.speechSynthesis?.getVoices?.() || [];
+    if (!voices.length) return null;
+    const normalizedLang = String(lang || '').toLowerCase();
+    const baseLang = normalizedLang.split('-')[0];
+    return voices.find(voice => voice.lang.toLowerCase() === normalizedLang)
+      || voices.find(voice => voice.lang.toLowerCase().startsWith(`${baseLang}-`))
+      || voices.find(voice => voice.lang.toLowerCase().startsWith(baseLang))
+      || null;
+  }
+
+  async function handleTTSClick(e) {
+    const btn = e.currentTarget;
+    const text = btn.dataset.text;
+    const lang = resolveTTSLang(btn.dataset.lang, text);
+    if (!text) return;
+
+    if (currentTTSBtn === btn) {
+      stopCurrentAudio();
+      return;
+    }
+
+    stopCurrentAudio();
+    currentTTSBtn = btn;
+    btn.classList.add('speaking');
+
+    const audioCtx = getAudioCtx();
+    if (audioCtx?.state === 'suspended') {
+      try { await audioCtx.resume(); } catch {}
+    }
+
+    try {
+      const response = await chrome.runtime.sendMessage({
+        type: 'TTS_FETCH',
+        data: { text, lang }
+      });
+      if (!response?.success) throw new Error(response?.error || 'TTS 失敗');
+      if (currentTTSBtn !== btn) return;
+
+      if (!audioCtx) throw new Error('AudioContext 不可用');
+      const arrayBuffer = base64ToArrayBuffer(response.base64);
+      const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+      if (currentTTSBtn !== btn) return;
+
+      const source = audioCtx.createBufferSource();
+      source.buffer = audioBuffer;
+      source.connect(audioCtx.destination);
+      currentAudioSrc = source;
+      source.onended = () => {
+        if (currentTTSBtn === btn) stopCurrentAudio();
+      };
+      source.start(0);
+    } catch (err) {
+      if (currentTTSBtn !== btn) return;
+      playSystemSpeech(text, lang, btn);
+    }
+  }
+
+  async function writeClipboard(text) {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return;
+    }
+
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.style.cssText = 'position:fixed;top:-9999px;left:-9999px;';
+    document.documentElement.appendChild(textarea);
+    textarea.select();
+    try {
+      document.execCommand('copy');
+    } finally {
+      textarea.remove();
+    }
+  }
+
+  async function handleCopyClick(e) {
+    const btn = e.currentTarget;
+    try {
+      await writeClipboard(btn.dataset.text || '');
+      const originalTitle = btn.title;
+      btn.title = '已複製';
+      btn.classList.add('copied');
+      setTimeout(() => {
+        btn.title = originalTitle;
+        btn.classList.remove('copied');
+      }, 1400);
+    } catch {}
+  }
+
   // ── 顯示 popup ─────────────────────────────────────────────
   function showPopup(data) {
     removePopup();
@@ -433,6 +633,8 @@ window.__minimaxTranslateLoaded = true;
 
     const fromName = getLangName(data.from);
     const toName = getLangName(data.to);
+    const originalLang = resolveTTSLang(data.from, data.original);
+    const translatedLang = resolveTTSLang(data.to, data.translated);
 
     popup.innerHTML = `
       <div class="popup-header">
@@ -448,77 +650,29 @@ window.__minimaxTranslateLoaded = true;
         </button>
       </div>
       <div class="popup-body">
-        <div class="popup-original">${escapeHtml(data.original)}</div>
+        ${buildTextRow({
+          text: data.original,
+          lang: originalLang,
+          textClass: 'popup-original',
+          ttsTitle: '朗讀原文',
+          copyTitle: '複製原文'
+        })}
         <hr class="popup-divider">
-        <div class="popup-translated">${escapeHtml(data.translated)}</div>
-      </div>
-      <div class="popup-footer">
-        <button class="popup-btn-tts" id="ttsBtn" title="朗讀譯文" data-text="${escapeAttr(data.translated)}" data-lang="${data.to}">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
-            <path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>
-            <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
-          </svg>
-        </button>
-        <button class="popup-btn popup-btn-copy" data-text="${escapeAttr(data.translated)}">複製譯文</button>
+        ${buildTextRow({
+          text: data.translated,
+          lang: translatedLang,
+          textClass: 'popup-translated',
+          ttsTitle: '朗讀譯文',
+          copyTitle: '複製譯文'
+        })}
       </div>
     `;
 
     // 關閉按鈕
     popup.querySelector('.popup-close').addEventListener('click', removePopup);
 
-    // TTS 按鈕
-    ttsBtn = popup.querySelector('#ttsBtn');
-    ttsBtn.addEventListener('click', async () => {
-      // 再次點擊 → 停止
-      if (currentAudio) {
-        currentAudio.pause();
-        currentAudio = null;
-        ttsBtn.classList.remove('speaking');
-        return;
-      }
-      const text = ttsBtn.dataset.text;
-      const lang = ttsBtn.dataset.lang || 'zh-TW';
-      if (!text) return;
-
-      ttsBtn.classList.add('speaking');
-      try {
-        const response = await chrome.runtime.sendMessage({
-          type: 'TTS_FETCH',
-          data: { text, lang }
-        });
-        if (!response?.success) throw new Error(response?.error || 'TTS 失敗');
-
-        const audio = new Audio(`data:audio/mpeg;base64,${response.base64}`);
-        currentAudio = audio;
-        audio.onended = () => {
-          currentAudio = null;
-          ttsBtn?.classList.remove('speaking');
-        };
-        audio.onerror = () => {
-          currentAudio = null;
-          ttsBtn?.classList.remove('speaking');
-        };
-        await audio.play();
-      } catch {
-        currentAudio = null;
-        ttsBtn.classList.remove('speaking');
-      }
-    });
-
-    // 複製按鈕
-    popup.querySelector('.popup-btn-copy').addEventListener('click', async (e) => {
-      const btn = e.currentTarget;
-      try {
-        await navigator.clipboard.writeText(btn.dataset.text);
-        btn.textContent = '已複製';
-        btn.classList.add('copied');
-        setTimeout(() => {
-          btn.textContent = '複製譯文';
-          btn.classList.remove('copied');
-        }, 1800);
-      } catch {}
-    });
+    popup.querySelectorAll('.popup-btn-tts').forEach(btn => btn.addEventListener('click', handleTTSClick));
+    popup.querySelectorAll('.popup-btn-copy').forEach(btn => btn.addEventListener('click', handleCopyClick));
 
     shadowRoot.appendChild(popup);
     pendingTranslatePopup = null;
@@ -526,11 +680,7 @@ window.__minimaxTranslateLoaded = true;
 
   // ── 移除 popup ─────────────────────────────────────────────
   function removePopup() {
-    if (currentAudio) {
-      currentAudio.pause();
-      currentAudio = null;
-    }
-    ttsBtn = null;
+    stopCurrentAudio();
     if (popupHost) {
       popupHost.remove();
       popupHost = null;
@@ -559,10 +709,16 @@ window.__minimaxTranslateLoaded = true;
     toast.className = `selection-toast ${type}`;
   }
 
-  async function handleSelectionTranslate() {
-    const text = lastSelectionText;
-    const rect = lastSelectionRect;
-    if (!text) return;
+  async function handleSelectionTranslate(e) {
+    e?.preventDefault();
+    e?.stopPropagation();
+    const selection = getSelectionData();
+    const text = lastSelectionText || selection?.text || '';
+    const rect = lastSelectionRect || selection?.rect || null;
+    if (!text) {
+      showActionToast('請先選取文字', 'warning');
+      return;
+    }
 
     pendingTranslatePopup = { text, rect };
     isSelectionActionBusy = true;
@@ -577,11 +733,15 @@ window.__minimaxTranslateLoaded = true;
       });
       if (!response?.success) throw new Error(response?.error || '翻譯失敗');
       showPopup({ original: pendingTranslatePopup?.text || text, translated: response.translated, from, to, rect: pendingTranslatePopup?.rect || rect });
-    } catch {
+    } catch (err) {
       isSelectionActionBusy = false;
       pendingTranslatePopup = null;
-      showActionToast('翻譯失敗', 'error');
-      setTimeout(removeSelectionAction, 1400);
+      const raw = String(err?.message || '');
+      const message = /Extension context invalidated|Receiving end does not exist|Could not establish connection/i.test(raw)
+        ? '請重新整理頁面後再試'
+        : '翻譯失敗';
+      showActionToast(message, 'error');
+      setTimeout(removeSelectionAction, 1800);
     }
   }
 
@@ -702,18 +862,22 @@ window.__minimaxTranslateLoaded = true;
   }
 
   function escapeAttr(text) {
-    return String(text).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    return String(text)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
   }
 
   // ── 監聽來自 background 的訊息 ────────────────────────────
-  chrome.runtime.onMessage.addListener((message) => {
+  function handleRuntimeMessage(message) {
     if (message.type === 'SHOW_TRANSLATE_POPUP') {
       showPopup(message.data);
     }
-  });
+  }
 
-  // ── 點擊外部關閉 ──────────────────────────────────────────
-  document.addEventListener('click', (e) => {
+  function handleDocumentClick(e) {
     if (popupHost && !popupHost.contains(e.target)) {
       removePopup();
     }
@@ -721,18 +885,38 @@ window.__minimaxTranslateLoaded = true;
       if (Date.now() < suppressOutsideClickUntil && getSelectionData()) return;
       removeSelectionAction();
     }
-  }, true);
+  }
 
-  // ── Esc 關閉 ──────────────────────────────────────────────
-  document.addEventListener('keydown', (e) => {
+  function handleDocumentKeydown(e) {
     if (e.key === 'Escape' && popupHost) {
       removePopup();
     }
     if (e.key === 'Escape' && actionHost) {
       removeSelectionAction();
     }
-  });
+  }
 
+  function cleanupTranslatePopup() {
+    removePopup();
+    removeSelectionAction();
+    document.removeEventListener('click', handleDocumentClick, true);
+    document.removeEventListener('keydown', handleDocumentKeydown);
+    document.removeEventListener('mousedown', handleSelectionPointerDown, true);
+    document.removeEventListener('mouseup', handleSelectionPointerUp, true);
+    document.removeEventListener('keyup', scheduleSelectionAction, true);
+    document.removeEventListener('selectionchange', scheduleSelectionAction);
+    window.removeEventListener('scroll', removeSelectionAction, true);
+    window.removeEventListener('resize', removeSelectionAction);
+    chrome.runtime.onMessage.removeListener(handleRuntimeMessage);
+  }
+
+  window.__minimaxTranslateCleanup = cleanupTranslatePopup;
+
+  chrome.runtime.onMessage.addListener(handleRuntimeMessage);
+
+  // ── 點擊外部 / Esc / 選取監聽 ─────────────────────────────
+  document.addEventListener('click', handleDocumentClick, true);
+  document.addEventListener('keydown', handleDocumentKeydown);
   document.addEventListener('mousedown', handleSelectionPointerDown, true);
   document.addEventListener('mouseup', handleSelectionPointerUp, true);
   document.addEventListener('keyup', scheduleSelectionAction, true);
