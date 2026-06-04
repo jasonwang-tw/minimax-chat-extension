@@ -197,9 +197,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.querySelectorAll('[data-pricing-sort]').forEach(btn => {
     btn.addEventListener('click', () => {
       const key = btn.dataset.pricingSort;
+      const defaultDirection = key === 'created' || key === 'enabled' ? 'desc' : 'asc';
       pricingSort = {
         key,
-        direction: pricingSort.key === key && pricingSort.direction === 'asc' ? 'desc' : 'asc'
+        direction: pricingSort.key === key
+          ? (pricingSort.direction === 'asc' ? 'desc' : 'asc')
+          : defaultDirection
       };
       renderUsagePage();
     });
@@ -500,6 +503,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       const enabledModelIds = new Set((Array.isArray(customModels) ? customModels : []).map(m => m.modelId));
       return enabledModelIds.has(model?.id) ? 1 : 0;
     }
+    if (key === 'created') return normalizeModelCreated(model?.created);
     const pricing = model?.pricing || {};
     if (key === 'input') return pricePerMillion(pricing.prompt);
     if (key === 'output') return pricePerMillion(pricing.completion);
@@ -508,6 +512,26 @@ document.addEventListener('DOMContentLoaded', async () => {
       return Number.isFinite(request) && request >= 0 ? request : null;
     }
     return null;
+  }
+
+  function normalizeModelCreated(value) {
+    const created = Number(value);
+    return Number.isFinite(created) && created > 0 ? created : null;
+  }
+
+  function hasCreatedMetadata(models) {
+    return Object.values(models || {}).some(model => normalizeModelCreated(model?.created) !== null);
+  }
+
+  function formatModelCreated(value) {
+    const created = normalizeModelCreated(value);
+    if (created === null) return '未知';
+    const timestamp = created < 1000000000000 ? created * 1000 : created;
+    return new Date(timestamp).toLocaleDateString('zh-TW', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    });
   }
 
   function getInputModalities(model) {
@@ -646,7 +670,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   async function refreshOpenRouterPricing(force = false) {
     const now = Date.now();
     const { [MODEL_PRICING_CACHE_KEY]: cache } = await chrome.storage.local.get([MODEL_PRICING_CACHE_KEY]);
-    if (!force && cache?.models && now - (cache.updatedAt || 0) < 24 * 60 * 60 * 1000) return cache;
+    if (!force && cache?.models && hasCreatedMetadata(cache.models) && now - (cache.updatedAt || 0) < 24 * 60 * 60 * 1000) return cache;
 
     const key = openrouterApiKeyInput.value.trim();
     const headers = key ? { Authorization: `Bearer ${key}` } : {};
@@ -659,6 +683,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       models[model.id] = {
         id: model.id,
         name: model.name || model.id,
+        created: normalizeModelCreated(model.created),
         pricing: model.pricing || {},
         supportedParameters: model.supported_parameters || [],
         inputModalities: getInputModalities(model),
@@ -674,8 +699,16 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   async function renderUsagePage() {
     if (!usageSummaryEl || !usageByModelBody || !modelPricingBody) return;
-    const { [MODEL_USAGE_LEDGER_KEY]: ledger = [], [MODEL_PRICING_CACHE_KEY]: priceCache } =
+    let { [MODEL_USAGE_LEDGER_KEY]: ledger = [], [MODEL_PRICING_CACHE_KEY]: priceCache } =
       await chrome.storage.local.get([MODEL_USAGE_LEDGER_KEY, MODEL_PRICING_CACHE_KEY]);
+
+    if (priceCache?.models && !hasCreatedMetadata(priceCache.models)) {
+      try {
+        priceCache = await refreshOpenRouterPricing(false);
+      } catch (err) {
+        console.warn('[Options] 無法補齊 OpenRouter 模型上架日期:', err?.message || err);
+      }
+    }
     const entries = filterUsageByRange(Array.isArray(ledger) ? ledger : []);
 
     const total = entries.reduce((acc, entry) => {
@@ -770,13 +803,14 @@ document.addEventListener('DOMContentLoaded', async () => {
       return `
         <tr>
           <td><strong>${escapeVal(model.name || model.id)}</strong><br><span>${escapeVal(model.id)}</span>${renderModalityBadges(model)}${renderRecommendationBadges(model)}${renderCapabilityBadges(model)}</td>
+          <td>${formatModelCreated(model.created)}</td>
           <td>${formatPricePerMillion(pricePerMillion(pricing.prompt))}</td>
           <td>${formatPricePerMillion(pricePerMillion(pricing.completion))}</td>
           <td>${usd(Number(pricing.request || 0), 6)}</td>
           <td><button class="btn-secondary btn-model-toggle ${enabled ? 'danger' : ''}" type="button" data-model-action="${enabled ? 'remove' : 'enable'}" data-model-id="${escapeVal(model.id)}">${enabled ? '移除' : '啟用'}</button></td>
         </tr>
       `;
-    }).join('') || '<tr><td colspan="5" class="empty-cell">沒有符合條件的模型，或尚未載入費用表</td></tr>';
+    }).join('') || '<tr><td colspan="6" class="empty-cell">沒有符合條件的模型，或尚未載入費用表</td></tr>';
 
     if (pricingPageInfo) pricingPageInfo.textContent = `第 ${pricingPage} / ${totalPages} 頁，共 ${allRows.length.toLocaleString()} 個模型`;
     if (pricingPrevBtn) pricingPrevBtn.disabled = pricingPage <= 1;

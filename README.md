@@ -6,7 +6,7 @@ Open Chat Hub 是一個多模型 AI 側邊欄工作台，讓你在瀏覽器內�
 
 ## 版本
 
-**v1.34.1** (2026-06-04)
+**v1.35.0** (2026-06-04)
 
 ## 功能特色
 
@@ -147,6 +147,14 @@ npm run build:css
 - **TailwindCSS + SCSS**：樣式設計
 
 ## Changelog
+
+## [1.35.0] - 2026-06-04
+### Added
+- OpenRouter 模型費用表新增「上架日」欄位，顯示 `/api/v1/models` 的 `created` 上架時間。
+- OpenRouter 模型費用表支援依上架日排序，首次點擊預設由新到舊。
+
+### Changed
+- OpenRouter 模型快取會保留 `created` metadata；舊快取缺少上架日時會自動重新整理模型資料。
 
 ## [1.34.1] - 2026-06-04
 ### Changed

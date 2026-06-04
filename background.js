@@ -210,10 +210,11 @@ async function getOpenRouterPricingMap(apiKey) {
     const hasModalityMetadata = Object.values(cache.models).some(model =>
       Array.isArray(model.inputModalities) && Array.isArray(model.outputModalities)
     );
-    if (hasModalityMetadata) {
+    const hasCreatedMetadata = Object.values(cache.models).some(model => Number.isFinite(Number(model.created)));
+    if (hasModalityMetadata && hasCreatedMetadata) {
       return cache.models;
     }
-    console.log('[Usage] OpenRouter 模型快取缺少 modality metadata，重新整理模型資料');
+    console.log('[Usage] OpenRouter 模型快取缺少 metadata，重新整理模型資料');
   }
 
   try {
@@ -227,6 +228,7 @@ async function getOpenRouterPricingMap(apiKey) {
       models[model.id] = {
         id: model.id,
         name: model.name || model.id,
+        created: Number.isFinite(Number(model.created)) ? Number(model.created) : null,
         pricing: model.pricing || {},
         supportedParameters: model.supported_parameters || [],
         inputModalities: getInputModalities(model),
