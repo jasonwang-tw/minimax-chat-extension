@@ -1114,7 +1114,7 @@ input.cmd-trigger {
   flex: 1;
 }
 
-.provider-toggle-row {
+.form-group .provider-toggle-row {
   position: relative;
   display: flex;
   align-items: center;
@@ -1126,34 +1126,44 @@ input.cmd-trigger {
   border-radius: 10px;
   cursor: pointer;
 }
-.provider-toggle-row span:first-child {
+.form-group .provider-toggle-row > span:first-child {
   display: grid;
   gap: 4px;
   min-width: 0;
+  flex: 1 1 auto;
 }
-.provider-toggle-row strong {
+.form-group .provider-toggle-row strong {
   color: var(--text-primary);
   font-size: 13px;
   font-weight: 600;
 }
-.provider-toggle-row small {
+.form-group .provider-toggle-row small {
   color: var(--text-secondary);
   font-size: 12px;
   line-height: 1.45;
 }
-.provider-toggle-row input {
+.form-group .provider-toggle-row input {
   position: absolute;
   opacity: 0;
   pointer-events: none;
 }
 
+.provider-toggle-control {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex: 0 0 auto;
+  margin-left: auto;
+  min-width: 46px;
+}
+
 .provider-toggle-visual {
   position: relative;
-  width: 42px;
-  height: 24px;
-  flex: 0 0 42px;
+  width: 46px;
+  height: 25px;
+  flex: 0 0 46px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.14);
+  background: rgba(113, 113, 122, 0.42);
   transition: background 0.15s ease;
 }
 .provider-toggle-visual::after {
@@ -1168,12 +1178,12 @@ input.cmd-trigger {
   transition: transform 0.15s ease;
 }
 
-.provider-toggle-row input:checked + .provider-toggle-visual {
-  background: var(--primary);
+.provider-toggle-row input:checked ~ .provider-toggle-visual {
+  background: #16a34a;
 }
 
-.provider-toggle-row input:checked + .provider-toggle-visual::after {
-  transform: translateX(18px);
+.provider-toggle-row input:checked ~ .provider-toggle-visual::after {
+  transform: translateX(20px);
 }
 
 .provider-toggle-row:focus-within {
@@ -1181,6 +1191,11 @@ input.cmd-trigger {
   box-shadow: 0 0 0 3px rgba(236, 41, 112, 0.12);
 }
 
+@media (max-width: 640px) {
+  .provider-toggle-control {
+    min-width: 46px;
+  }
+}
 .sync-provider-card {
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid rgba(255, 255, 255, 0.06);

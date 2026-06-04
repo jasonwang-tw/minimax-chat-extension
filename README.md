@@ -6,7 +6,7 @@ Open Chat Hub 是一個多模型 AI 側邊欄工作台，讓你在瀏覽器內�
 
 ## 版本
 
-**v1.34.0** (2026-06-04)
+**v1.34.1** (2026-06-04)
 
 ## 功能特色
 
@@ -147,6 +147,11 @@ npm run build:css
 - **TailwindCSS + SCSS**：樣式設計
 
 ## Changelog
+
+## [1.34.1] - 2026-06-04
+### Changed
+- MiniMax 啟用開關改為純 switch 呈現，移除 True/False 文字標籤，並將控制區固定靠右。
+- MiniMax 啟用開關調整灰色/綠色狀態色與尺寸，`provider-toggle-visual` 高度改為 25px。
 
 ## [1.34.0] - 2026-06-04
 ### Added

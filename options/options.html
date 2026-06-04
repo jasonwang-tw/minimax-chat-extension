@@ -66,8 +66,10 @@
               <strong>啟用 MiniMax 作為可用模型</strong>
               <small>關閉後側邊欄預設會改用 OpenRouter 已啟用模型，且不再顯示 MiniMax。</small>
             </span>
-            <input type="checkbox" id="miniMaxEnabled">
-            <span class="provider-toggle-visual" aria-hidden="true"></span>
+            <span class="provider-toggle-control">
+              <input type="checkbox" id="miniMaxEnabled">
+              <span class="provider-toggle-visual" aria-hidden="true"></span>
+            </span>
           </label>
         </div>
         <button id="testBtn" class="btn-secondary">測試 MiniMax 連線</button>
@@ -638,7 +640,7 @@
       <section class="section" id="sec-about">
         <h2>關於</h2>
         <div class="about-info">
-          <p><strong>版本:</strong> 1.34.0</p>
+          <p><strong>版本:</strong> 1.34.1</p>
           <p><strong>預設對話模型:</strong> MiniMax-M2.7（可切換 OpenRouter 自訂模型）</p>
           <p><strong>預設圖片模型:</strong> Gemini 2.5 Flash-lite</p>
           <p>Open Chat Hub 是多模型 AI 側邊欄工作台，支援聊天、截圖、OCR、翻譯、檔案分析、知識庫與同步備份。</p>
