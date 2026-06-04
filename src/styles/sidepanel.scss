@@ -1659,6 +1659,7 @@ body {
   opacity: 0.88;
   outline: none;
   position: relative;
+  cursor: pointer;
   transition: color 0.2s, opacity 0.2s;
 }
 
@@ -1688,6 +1689,7 @@ body {
   font-size: 14px;
   line-height: 1;
   transform: translateY(-1px);
+  transition: transform 0.15s ease;
 }
 
 .char-counter-track {
@@ -1742,12 +1744,14 @@ body {
   white-space: nowrap;
 }
 
-.char-counter:hover .char-counter-details,
-.char-counter:focus .char-counter-details,
-.char-counter:focus-within .char-counter-details {
+.char-counter.expanded .char-counter-details {
   opacity: 1;
   pointer-events: auto;
   transform: translateY(0);
+}
+
+.char-counter.expanded .char-counter-arrow {
+  transform: translateY(-1px) rotate(90deg);
 }
 
 .char-counter.warn {
@@ -2082,6 +2086,15 @@ body {
   letter-spacing: 0.06em;
   opacity: 0.7;
   pointer-events: none;
+}
+
+.model-picker-empty {
+  width: 260px;
+  max-width: calc(100vw - 40px);
+  padding: 10px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 @media (max-width: 480px) {

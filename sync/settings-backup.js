@@ -1,5 +1,6 @@
 const SYNC_BACKUP_KEYS = [
   'apiKey',
+  'miniMaxEnabled',
   'geminiApiKey',
   'braveApiKey',
   'exaApiKey',
@@ -36,6 +37,7 @@ export async function collectSettingsBackupPayload() {
     exportedAt: new Date().toISOString(),
     settings: {
       apiKey: syncData.apiKey || '',
+      miniMaxEnabled: syncData.miniMaxEnabled !== false,
       geminiApiKey: syncData.geminiApiKey || '',
       braveApiKey: syncData.braveApiKey || '',
       exaApiKey: syncData.exaApiKey || '',
@@ -81,6 +83,7 @@ export async function restoreSettingsBackupPayload(payload) {
 
   const nextSyncSettings = {
     apiKey: typeof settings.apiKey === 'string' ? settings.apiKey : '',
+    miniMaxEnabled: settings.miniMaxEnabled !== false,
     geminiApiKey: typeof settings.geminiApiKey === 'string' ? settings.geminiApiKey : '',
     braveApiKey: typeof settings.braveApiKey === 'string' ? settings.braveApiKey : '',
     exaApiKey: typeof settings.exaApiKey === 'string' ? settings.exaApiKey : '',

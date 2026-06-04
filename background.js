@@ -334,7 +334,7 @@ chrome.runtime.onStartup.addListener(async () => {
 
 // 資料變動即時自動備份（debounce 5 秒，避免連續觸發）
 let _autoBackupTimer = null;
-const AUTO_BACKUP_KEYS_SYNC = new Set(['memories', 'apiKey', 'geminiApiKey', 'braveApiKey', 'exaApiKey', 'finnhubApiKey', 'alphaVantageApiKey', 'finmindToken', 'openrouterApiKey', 'customModels', 'settings', 'defaultPrompts', 'globalPrompt']);
+const AUTO_BACKUP_KEYS_SYNC = new Set(['memories', 'apiKey', 'miniMaxEnabled', 'geminiApiKey', 'braveApiKey', 'exaApiKey', 'finnhubApiKey', 'alphaVantageApiKey', 'finmindToken', 'openrouterApiKey', 'customModels', 'settings', 'defaultPrompts', 'globalPrompt']);
 const AUTO_BACKUP_KEYS_LOCAL = new Set(['vocabulary', 'knowledgeBase', 'chatSessions']);
 
 chrome.storage.onChanged.addListener((changes, area) => {

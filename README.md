@@ -6,7 +6,7 @@ Open Chat Hub 是一個多模型 AI 側邊欄工作台，讓你在瀏覽器內�
 
 ## 版本
 
-**v1.33.0** (2026-05-13)
+**v1.34.0** (2026-06-04)
 
 ## 功能特色
 
@@ -147,6 +147,14 @@ npm run build:css
 - **TailwindCSS + SCSS**：樣式設計
 
 ## Changelog
+
+## [1.34.0] - 2026-06-04
+### Added
+- Agent 設定新增 MiniMax 啟用開關；關閉時側邊欄會改以 OpenRouter 已啟用模型作為預設，且不再顯示 MiniMax。
+
+### Changed
+- Context window 使用量面板改為點擊後才展開，避免滑鼠 hover 時頻繁顯示。
+- 模型選擇器在沒有可用模型時顯示空狀態並阻止送出，避免關閉 MiniMax 後又 fallback 回 MiniMax。
 
 ## [1.33.1] - 2026-06-04
 ### Fixed

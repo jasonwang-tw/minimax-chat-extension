@@ -12,6 +12,7 @@ const MODEL_USAGE_LEDGER_KEY = 'modelUsageLedger';
 document.addEventListener('DOMContentLoaded', async () => {
   console.log('[Options] DOMContentLoaded fired');
   const apiKeyInput = document.getElementById('apiKey');
+  const miniMaxEnabledInput = document.getElementById('miniMaxEnabled');
   const toggleKeyBtn = document.getElementById('toggleKey');
   const geminiApiKeyInput = document.getElementById('geminiApiKey');
   const toggleGeminiKeyBtn = document.getElementById('toggleGeminiKey');
@@ -144,6 +145,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     try {
       await chrome.storage.sync.set({
         apiKey: apiKeyInput.value.trim(),
+        miniMaxEnabled: miniMaxEnabledInput?.checked !== false,
         geminiApiKey: geminiApiKeyInput.value.trim(),
         braveApiKey: braveApiKeyInput.value.trim(),
         exaApiKey: exaApiKeyInput.value.trim(),
@@ -407,14 +409,15 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   async function loadSettings() {
-    const { apiKey, geminiApiKey, braveApiKey, exaApiKey, finnhubApiKey, alphaVantageApiKey, finmindToken, settings, openrouterApiKey } =
+    const { apiKey, miniMaxEnabled, geminiApiKey, braveApiKey, exaApiKey, finnhubApiKey, alphaVantageApiKey, finmindToken, settings, openrouterApiKey } =
       await chrome.storage.sync.get([
-        'apiKey', 'geminiApiKey', 'braveApiKey', 'exaApiKey',
+        'apiKey', 'miniMaxEnabled', 'geminiApiKey', 'braveApiKey', 'exaApiKey',
         'finnhubApiKey', 'alphaVantageApiKey', 'finmindToken',
         'settings', 'openrouterApiKey'
       ]);
 
     apiKeyInput.value = apiKey || '';
+    if (miniMaxEnabledInput) miniMaxEnabledInput.checked = miniMaxEnabled !== false;
     geminiApiKeyInput.value = geminiApiKey || '';
     braveApiKeyInput.value = braveApiKey || '';
     exaApiKeyInput.value = exaApiKey || '';

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Open Chat Hub",
-  "version": "1.33.1",
+  "version": "1.34.0",
   "description": "多模型 AI 側邊欄工作台，支援聊天、網頁閱讀、截圖、OCR、翻譯、檔案分析、知識庫與同步備份",
   "permissions": [
     "storage",

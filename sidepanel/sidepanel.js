@@ -495,7 +495,7 @@ let currentAudioSrc = null;  // Web Audio API BufferSource
 
   // 設定變更時刷新模型清單
   chrome.storage.onChanged.addListener((changes, area) => {
-    if (area === 'sync' && (changes.openrouterApiKey || changes.customModels)) {
+    if (area === 'sync' && (changes.miniMaxEnabled || changes.openrouterApiKey || changes.customModels)) {
       safeInitModelPicker();
     }
     if (area === 'sync' && changes.agentDepth && AGENT_DEPTH_OPTIONS[changes.agentDepth.newValue]) {
@@ -505,13 +505,14 @@ let currentAudioSrc = null;  // Web Audio API BufferSource
   });
 
   async function initModelPicker() {
-    const { openrouterApiKey, customModels } =
-      await chrome.storage.sync.get(['openrouterApiKey', 'customModels']);
+    const { miniMaxEnabled, openrouterApiKey, customModels } =
+      await chrome.storage.sync.get(['miniMaxEnabled', 'openrouterApiKey', 'customModels']);
     const pricingMap = openrouterApiKey ? await getOpenRouterPricingMap(openrouterApiKey) : {};
     const sections = [];
 
-    // MiniMax 永遠顯示
-    sections.push({ title: null, items: [{ label: 'MiniMax', modelId: 'MiniMax-M2.7', contextLength: MODEL_CONTEXT_LIMITS['MiniMax-M2.7'].tokens }] });
+    if (miniMaxEnabled !== false) {
+      sections.push({ title: null, items: [{ label: 'MiniMax', modelId: 'MiniMax-M2.7', contextLength: MODEL_CONTEXT_LIMITS['MiniMax-M2.7'].tokens }] });
+    }
 
     if (openrouterApiKey) {
       const enrich = m => {
@@ -545,6 +546,9 @@ let currentAudioSrc = null;  // Web Audio API BufferSource
     if (!currentValid && allItems.length > 0) {
       currentModel = allItems[0].modelId;
       modelPickerLabel.textContent = allItems[0].label;
+    } else if (allItems.length === 0) {
+      currentModel = '';
+      modelPickerLabel.textContent = '未啟用模型';
     }
 
     if (sections.some(s => s.title && s.items.length > 1)) {
@@ -602,6 +606,12 @@ let currentAudioSrc = null;  // Web Audio API BufferSource
 
     const active = allItems.find(m => m.modelId === currentModel);
     if (active) modelPickerLabel.textContent = active.label;
+    if (allItems.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'model-picker-empty';
+      empty.textContent = '請先在設定頁啟用 OpenRouter 模型，或重新啟用 MiniMax。';
+      modelPickerDropdown.appendChild(empty);
+    }
     updateCharCounter();
     checkApiKey();
   }
@@ -632,7 +642,7 @@ let currentAudioSrc = null;  // Web Audio API BufferSource
   chrome.storage.onChanged.addListener((changes, area) => {
     // sync area：API Key、設定、長期記憶、分類（跨裝置同步的資料）
     if (area === 'sync') {
-      if (changes.geminiApiKey || changes.apiKey || changes.openrouterApiKey || changes.customModels) {
+      if (changes.geminiApiKey || changes.apiKey || changes.miniMaxEnabled || changes.openrouterApiKey || changes.customModels) {
         checkApiKey();
       }
       if (changes.settings) {
@@ -776,6 +786,33 @@ let currentAudioSrc = null;  // Web Audio API BufferSource
     else if (pct >= 80) charCounter.classList.add('danger');
     else if (pct >= 60) charCounter.classList.add('warn');
   }
+
+  function setCharCounterExpanded(expanded) {
+    charCounter.classList.toggle('expanded', expanded);
+    charCounter.setAttribute('aria-expanded', String(expanded));
+  }
+
+  charCounter.addEventListener('click', (e) => {
+    e.stopPropagation();
+    setCharCounterExpanded(!charCounter.classList.contains('expanded'));
+  });
+
+  charCounter.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      setCharCounterExpanded(!charCounter.classList.contains('expanded'));
+      return;
+    }
+    if (e.key === 'Escape') {
+      setCharCounterExpanded(false);
+    }
+  });
+
+  document.addEventListener('click', (e) => {
+    if (!charCounter.contains(e.target)) {
+      setCharCounterExpanded(false);
+    }
+  });
 
   messageInput.addEventListener('input', () => {
     messageInput.style.height = 'auto';
@@ -2189,6 +2226,16 @@ let currentAudioSrc = null;  // Web Audio API BufferSource
   async function checkApiKey() {
     const { apiKey, geminiApiKey, openrouterApiKey } =
       await chrome.storage.sync.get(['apiKey', 'geminiApiKey', 'openrouterApiKey']);
+    if (!currentModel) {
+      setStatus('請先在設定頁啟用 OpenRouter 模型，或重新啟用 MiniMax', true);
+      messageInput.disabled = true;
+      sendBtn.disabled = true;
+      screenshotBtn.disabled = true;
+      uploadBtn.disabled = true;
+      regionScreenshotBtn.disabled = true;
+      ocrBtn.disabled = true;
+      return;
+    }
     const usingMiniMax = currentModel === 'MiniMax-M2.7';
     const hasActiveChatKey = usingMiniMax ? !!apiKey : !!openrouterApiKey;
     const canDirectImageInput = await currentModelSupportsOpenRouterImages(openrouterApiKey);
@@ -2743,6 +2790,11 @@ let currentAudioSrc = null;  // Web Audio API BufferSource
       if (pageContext) clearPageContext();
       updateSendButton();
       updateQueueIndicator();
+      return;
+    }
+
+    if (!currentModel) {
+      setStatus('請先在設定頁啟用 OpenRouter 模型，或重新啟用 MiniMax', true, 4000);
       return;
     }
 
