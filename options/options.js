@@ -13,6 +13,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   console.log('[Options] DOMContentLoaded fired');
   const apiKeyInput = document.getElementById('apiKey');
   const miniMaxEnabledInput = document.getElementById('miniMaxEnabled');
+  const fusionEnabledInput = document.getElementById('fusionEnabled');
   const toggleKeyBtn = document.getElementById('toggleKey');
   const geminiApiKeyInput = document.getElementById('geminiApiKey');
   const toggleGeminiKeyBtn = document.getElementById('toggleGeminiKey');
@@ -146,6 +147,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       await chrome.storage.sync.set({
         apiKey: apiKeyInput.value.trim(),
         miniMaxEnabled: miniMaxEnabledInput?.checked !== false,
+        fusionEnabled: fusionEnabledInput?.checked !== false,
         geminiApiKey: geminiApiKeyInput.value.trim(),
         braveApiKey: braveApiKeyInput.value.trim(),
         exaApiKey: exaApiKeyInput.value.trim(),
@@ -412,15 +414,16 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   async function loadSettings() {
-    const { apiKey, miniMaxEnabled, geminiApiKey, braveApiKey, exaApiKey, finnhubApiKey, alphaVantageApiKey, finmindToken, settings, openrouterApiKey } =
+    const { apiKey, miniMaxEnabled, fusionEnabled, geminiApiKey, braveApiKey, exaApiKey, finnhubApiKey, alphaVantageApiKey, finmindToken, settings, openrouterApiKey } =
       await chrome.storage.sync.get([
-        'apiKey', 'miniMaxEnabled', 'geminiApiKey', 'braveApiKey', 'exaApiKey',
+        'apiKey', 'miniMaxEnabled', 'fusionEnabled', 'geminiApiKey', 'braveApiKey', 'exaApiKey',
         'finnhubApiKey', 'alphaVantageApiKey', 'finmindToken',
         'settings', 'openrouterApiKey'
       ]);
 
     apiKeyInput.value = apiKey || '';
     if (miniMaxEnabledInput) miniMaxEnabledInput.checked = miniMaxEnabled !== false;
+    if (fusionEnabledInput) fusionEnabledInput.checked = fusionEnabled !== false;
     geminiApiKeyInput.value = geminiApiKey || '';
     braveApiKeyInput.value = braveApiKey || '';
     exaApiKeyInput.value = exaApiKey || '';
@@ -828,7 +831,61 @@ document.addEventListener('DOMContentLoaded', async () => {
     promptChatInput.value = defaultPrompts?.chat || '';
     promptImageAnalysisInput.value = defaultPrompts?.imageAnalysis || '';
     promptOcrInput.value = defaultPrompts?.ocr || '';
+    renderSystemPromptUsage();
   }
+
+  const SYSTEM_PROMPT_COMPRESS_RATIO = 0.3;
+  const SYSTEM_PROMPT_MIN_CHARS = 3000;
+  const APPROX_CHARS_PER_TOKEN = 2;
+  const DEFAULT_CONTEXT_TOKENS = 20000;
+
+  async function renderSystemPromptUsage() {
+    const el = document.getElementById('systemPromptUsageBreakdown');
+    if (!el) return;
+    const { memories = [] } = await chrome.storage.sync.get(['memories']);
+
+    const globalLen = (globalPromptInput?.value || '').length;
+    const chatLen = (promptChatInput?.value || '').length;
+    const memoriesText = Array.isArray(memories)
+      ? memories.map(m => {
+          if (typeof m === 'string') return m;
+          return [m?.title, m?.summary, Array.isArray(m?.tags) ? m.tags.join(',') : ''].filter(Boolean).join(' ');
+        }).join('\n')
+      : '';
+    const memoryLen = memoriesText.length;
+
+    const budgetChars = DEFAULT_CONTEXT_TOKENS * APPROX_CHARS_PER_TOKEN;
+    const threshold = Math.max(SYSTEM_PROMPT_MIN_CHARS, Math.floor(budgetChars * SYSTEM_PROMPT_COMPRESS_RATIO));
+    const totalLen = globalLen + chatLen + memoryLen;
+    const ratio = budgetChars > 0 ? Math.min(100, Math.round((totalLen / budgetChars) * 100)) : 0;
+    const willCompress = totalLen > threshold;
+
+    let cacheCount = 0;
+    try {
+      const cacheStore = await chrome.storage.local.get(['systemPromptCompressCache']);
+      const cache = cacheStore?.systemPromptCompressCache || {};
+      cacheCount = Object.keys(cache).length;
+    } catch {}
+
+    const row = (label, len) => `<div style="display:flex; justify-content:space-between"><span>${label}</span><span>${len.toLocaleString()} 字</span></div>`;
+    const statusColor = willCompress ? '#e07b4a' : '#62a667';
+    const statusText = willCompress
+      ? `總計 ${totalLen.toLocaleString()} 字 / 預估 budget ${budgetChars.toLocaleString()} 字（約 ${ratio}%）— <strong style="color:${statusColor}">超過壓縮門檻 ${threshold.toLocaleString()} 字，下一次對話會自動壓縮</strong>`
+      : `總計 ${totalLen.toLocaleString()} 字 / 預估 budget ${budgetChars.toLocaleString()} 字（約 ${ratio}%）— <strong style="color:${statusColor}">未達壓縮門檻 ${threshold.toLocaleString()} 字</strong>`;
+
+    el.innerHTML = `
+      ${row('全域系統提示詞 (globalPrompt)', globalLen)}
+      ${row('一般聊天提示詞 (defaultPrompts.chat)', chatLen)}
+      ${row('長期記憶內容（title + summary + tags 合計）', memoryLen)}
+      <div style="margin-top:8px; padding-top:8px; border-top:1px solid rgba(255,255,255,0.08)">${statusText}</div>
+      <div style="margin-top:6px; opacity:0.7">壓縮 cache 條目：${cacheCount}</div>
+    `;
+  }
+
+  ['globalPrompt', 'promptChat'].forEach(id => {
+    const inp = document.getElementById(id);
+    if (inp) inp.addEventListener('input', () => renderSystemPromptUsage());
+  });
 
   async function loadCustomCommands() {
     const { customCommands: localStored } = await chrome.storage.local.get(['customCommands']);

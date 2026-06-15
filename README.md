@@ -6,7 +6,7 @@ Open Chat Hub 是一個多模型 AI 側邊欄工作台，讓你在瀏覽器內�
 
 ## 版本
 
-**v1.35.0** (2026-06-04)
+**v1.40.1** (2026-06-15)
 
 ## 功能特色
 
@@ -147,6 +147,85 @@ npm run build:css
 - **TailwindCSS + SCSS**：樣式設計
 
 ## Changelog
+
+## [1.40.1] - 2026-06-15
+### Changed
+- Picker-group 右側「Fusion / 比較」兩顆 toggle 按鈕**合併為單一 mode dropdown**（`模式選擇`），按鈕 label 顯示當前模式（`默認` / `Fusion 💰` / `比較 N/3`），節省側邊欄底部水平空間。
+- Dropdown 內含三個 radio 選項；選擇「比較」時模型多選清單**在同一個 dropdown 內嵌**展開，不再需要二次 popover。
+- 修正前一版思考按鈕與模型按鈕高度不一致的問題（`.picker-zone-normal` 改回 `align-items: stretch`）。
+
+## [1.40.0] - 2026-06-15
+### Changed
+- 重新設計 picker-group：把「標準 / Fusion / 比較」三顆視覺等同的按鈕，重新組織為**三種互斥模式**（一般 / Fusion / 比較）
+  - **一般模式**（預設）：思考深度 + Model picker 可用
+  - **Fusion 模式**：點 Fusion toggle 進入；思考 + Model picker 禁用變灰，hover tooltip「Fusion 模式啟用中，model / agent depth 不生效」；按鈕 active 時加 💰 提示
+  - **比較模式**：思考 + Model picker 禁用變灰；比較 toggle 顯示「比較 N/3」
+- Picker-group 內部切成左右 zone：左側為一般模式控制（思考、Model），右側為特殊模式 toggle（Fusion、比較），中間以 divider 分隔
+- 模式互斥：點 Fusion / 比較 toggle 會自動切換模式並清掉另一邊的狀態
+- `currentMode` 為 in-memory state，sidepanel 重開後重置為一般模式（避免忘了 Fusion 還開著而誤觸發付費）
+
+### Removed
+- Model picker dropdown 內的 Fusion 條目（v1.36.0 加入）。Fusion 改由 picker-group 右側獨立 toggle 進入。
+
+### Notes
+- 設定頁的 `fusionEnabled` switch 不變，關閉後 Fusion toggle 按鈕完全隱藏。
+- Fusion 模式強制 `skipTools: true` 且 agent iterations = 0，回到單模型純文字流程。
+
+## [1.39.1] - 2026-06-15
+### Added
+- 設定頁 OpenRouter 區塊新增「顯示 Fusion 模型選項」開關（`fusionEnabled`，預設啟用）。關閉後側邊欄模型選擇器不再列出 `openrouter/fusion`，避免誤選付費 router。
+- 修正側邊欄「比較」按鈕 dropdown 因缺少 `position: relative` 飄到上方的位置問題。
+
+### Notes
+- `fusionEnabled` 已納入雲端備份範圍。
+- 若關閉 Fusion 且沒有任何自訂 OpenRouter 模型，OpenRouter section 整段不顯示。
+
+## [1.39.0] - 2026-06-15
+### Added
+- 多模型並排比較（MVP / 純文字）：
+  - 輸入列新增「比較」按鈕，點開後可勾選 2–3 個模型（MiniMax + 已啟用的 OpenRouter 自訂模型）
+  - 送出後並行 spawn 多個 chat-stream port，每個模型獨立顯示一張卡片（卡片內含模型名、串流狀態、耗時、token 用量或錯誤訊息）
+  - 比較卡片強制 `skipTools: true`，純文字模式，不觸發 Agent tools、圖片、PDF、檔案分析
+  - 比較結果僅顯示於畫面，不會寫入 session 對話歷史，避免污染後續上下文
+  - 比較模式偵測有圖片 / 翻譯 / 頁面 context 時自動退回單模型 chat
+
+### Notes
+- 「比較」按鈕在已選 ≥2 個模型時會以玫紅 active 樣式顯示，並標出 `比較 N`
+- 「清除選取」可一鍵歸零，回到單模型模式
+
+## [1.38.0] - 2026-06-15
+### Added
+- AI 設定與記憶工具：Agent loop 可呼叫三個受控工具
+  - `get_setting(key)`：讀取白名單設定（globalPrompt、defaultPrompts.chat、settings.language、settings.model、settings.agentDepth、settings.planMode、autoMemoryEnabled）
+  - `set_setting(key, value)`：以相同白名單寫入，含型別與 enum 驗證
+  - `save_memory(title, summary, tags)`：寫入長期記憶（最多 30 條），同標題自動去重
+- 操作歷程面板新增三個工具的圖示與中文標籤（讀取設定 / 更新設定 / 寫入長期記憶）
+
+### Security
+- 白名單外的 key 一律拒絕；同時以正則阻擋 `apiKey` / `token` / `secret` / `password` / `clientId` / `refreshToken` / `syncAuth` / `credential` 等敏感欄位，即便透過巢狀路徑也不可讀寫
+- 寫入值會經過 maxLength 與 enum 驗證，避免 AI 寫入過大或無效內容
+
+## [1.37.0] - 2026-06-15
+### Added
+- System Prompt 自動壓縮：當 `memoryContext + globalPrompt + defaultPrompt + 模式 prompt` 合計超過 context budget 30% 時，背景以 MiniMax / OpenRouter 壓縮為精簡版（保留指令本意，刪除冗詞），結果快取 14 天，下次相同內容直接複用。
+- 壓縮通知：觸發 system prompt 壓縮時，側邊欄狀態列顯示「System prompt 已自動壓縮（原字數 → 壓縮字數）」。
+- 設定頁「提示詞」區塊新增 `System Prompt 用量估算` 卡片：顯示 globalPrompt / chat prompt / 長期記憶各自字數、總計佔 budget 比例與是否觸發壓縮，並列出目前壓縮 cache 條目數。
+
+### Notes
+- 壓縮以原文字數的 85% 為下限，若壓縮結果未顯著縮短則沿用原文。
+- Cache 採 hash 對映，最多保留 20 條最近條目；過期條目自動清理。
+- 不影響 OpenRouter Image / PDF 路徑，這兩條維持原 system prompt 組合方式。
+
+## [1.36.0] - 2026-06-15
+### Added
+- 模型選擇器新增 OpenRouter Fusion 內建選項（`openrouter/fusion`），在 OpenRouter section 釘選於首位，priceText 為「多模型審查，成本較高」，contextLength 採 `DEFAULT_CONTEXT_TOKENS` 作 fallback。Fusion 不寫入 `customModels`。
+- OpenRouter 一般 chat path 新增免費優先 fallback：自動將其他已啟用的免費 OpenRouter 模型（`:free` 後綴或 input/output 價格皆為 0）加入 `models` 陣列，最多 5 個。Fusion、MiniMax、付費模型一律不進入 fallback list。
+- OpenRouter 錯誤分類強化：偵測 HTTP 429 / rate limit / temporarily unavailable / insufficient credits 並輸出繁體中文文案，保留原始 modelId、fallback 列表與原始訊息供除錯。
+- 設定頁 OpenRouter 區塊新增 Fusion 成本與免費 fallback 行為說明。
+
+### Notes
+- Fallback 僅作用於 OpenRouter 一般 chat path；image / PDF / agent tool loop 路徑維持原行為，不受影響。
+- v1 不會自動切換至付費模型；全部免費 fallback 都失敗時，會明確顯示「免費模型皆暫不可用」的提示。
 
 ## [1.35.0] - 2026-06-04
 ### Added

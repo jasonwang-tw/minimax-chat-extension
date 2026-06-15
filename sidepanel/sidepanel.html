@@ -277,21 +277,31 @@
             <input type="file" id="imageInput" accept="image/*,.pdf,.txt,.md,.csv,.json,.js,.ts,.py,.html,.css,.xml,.yaml,.yml,.sh,.sql,.jsx,.tsx" multiple hidden>
           </div>
           <div class="input-right-group">
-            <!-- Agent 深度 + 模型選擇 -->
+            <!-- Picker group：左側為一般模式控制（思考 + Model），右側為特殊模式 toggle（Fusion / 比較） -->
             <div class="picker-group">
-              <div class="agent-depth-picker" id="agentDepthWrapper">
-                <button id="agentDepthBtn" class="btn-agent-depth" type="button" title="Agent 搜尋深度">
-                  <span id="agentDepthLabel">標準</span>
-                  <svg class="agent-depth-chevron" xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
-                </button>
-                <div id="agentDepthDropdown" class="agent-depth-dropdown hidden"></div>
+              <div class="picker-zone-normal" id="pickerZoneNormal">
+                <div class="agent-depth-picker" id="agentDepthWrapper">
+                  <button id="agentDepthBtn" class="btn-agent-depth" type="button" title="Agent 搜尋深度">
+                    <span id="agentDepthLabel">標準</span>
+                    <svg class="agent-depth-chevron" xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+                  </button>
+                  <div id="agentDepthDropdown" class="agent-depth-dropdown hidden"></div>
+                </div>
+                <div class="model-picker" id="modelPickerWrapper">
+                  <button id="modelPickerBtn" class="btn-model-picker" type="button">
+                    <span id="modelPickerLabel">MiniMax</span>
+                    <svg class="model-picker-chevron" xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+                  </button>
+                  <div id="modelPickerDropdown" class="model-picker-dropdown hidden"></div>
+                </div>
               </div>
-              <div class="model-picker" id="modelPickerWrapper">
-                <button id="modelPickerBtn" class="btn-model-picker" type="button">
-                  <span id="modelPickerLabel">MiniMax</span>
+              <div class="picker-divider" aria-hidden="true"></div>
+              <div class="mode-picker" id="modePickerWrapper">
+                <button id="modePickerBtn" class="btn-model-picker" type="button" title="切換對話模式（默認 / Fusion / 比較）">
+                  <span id="modePickerLabel">默認</span>
                   <svg class="model-picker-chevron" xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
                 </button>
-                <div id="modelPickerDropdown" class="model-picker-dropdown hidden"></div>
+                <div id="modePickerDropdown" class="model-picker-dropdown hidden"></div>
               </div>
             </div>
             <button id="sendBtn" class="btn-send" disabled>

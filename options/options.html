@@ -221,6 +221,29 @@
             <button id="addCustomModelBtn" class="btn-secondary btn-add-mode" style="margin-top:8px">+ 新增模型</button>
           </div>
 
+          <div class="form-group">
+            <label class="provider-toggle-row" for="fusionEnabled">
+              <span>
+                <strong>顯示 Fusion 模型選項</strong>
+                <small>關閉後側邊欄模型選擇器不再顯示 <code>openrouter/fusion</code>，避免誤選付費 router。</small>
+              </span>
+              <span class="provider-toggle-control">
+                <input type="checkbox" id="fusionEnabled">
+                <span class="provider-toggle-visual" aria-hidden="true"></span>
+              </span>
+            </label>
+          </div>
+
+          <div class="form-group info-card">
+            <label>Fusion 與免費模型 fallback</label>
+            <ul class="hint" style="margin:6px 0 0 18px; line-height:1.7">
+              <li><strong>Fusion</strong>（<code>openrouter/fusion</code>）：適合研究、比對、審查、高風險決策。Fusion 會同時呼叫多個分析模型與一個 judge 模型，<strong>單次成本明顯高於一般 completion</strong>，請依需求使用。Fusion v1 主要用於普通 chat 與研究審查，不保證 Agent tool calling。</li>
+              <li><strong>免費優先 fallback</strong>：若使用的是「已啟用的免費 OpenRouter 模型」（modelId 含 <code>:free</code> 或 metadata 標示 input/output 價格為 0），系統會自動將其他已啟用的免費模型加入 fallback，避免單一模型 429 或暫時不可用就讓對話失敗。</li>
+              <li><strong>v1 不會自動切換到付費模型</strong>：fallback 僅在已啟用的免費模型中挑選，Fusion 與付費模型都不會進入 fallback list。</li>
+              <li>免費模型的速率限制較嚴，全部 fallback 都用盡時會顯示明確錯誤，請稍後再試或啟用其他免費模型。</li>
+            </ul>
+          </div>
+
           <button id="testOpenrouterBtn" class="btn-secondary">測試 OpenRouter 連線</button>
         </div>
 
@@ -387,6 +410,13 @@
             placeholder="Gemini OCR 時使用的提示詞。"></textarea>
         </div>
         <button id="savePromptsBtn" class="btn-primary">儲存提示詞</button>
+
+        <div class="divider"></div>
+        <div class="form-group" id="systemPromptUsage">
+          <label>System Prompt 用量估算</label>
+          <p class="hint" style="margin:6px 0 10px">超過 context budget 30% 時，背景會在送出前以 MiniMax 壓縮 system prompt（保留指令本意，刪除冗詞），結果會快取 14 天，下次相同內容直接複用。</p>
+          <div id="systemPromptUsageBreakdown" class="info-card" style="font-size:13px; line-height:1.8">載入中…</div>
+        </div>
       </section>
 
       <section class="section" id="sec-commands">

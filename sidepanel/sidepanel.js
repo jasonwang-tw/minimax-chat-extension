@@ -9,8 +9,12 @@ let _agentIter = 0;
 let _agentSearchLog = [];  // 方案 B：搜尋歷程記錄 [{ tool, query, count, error }]
 let _agentNotices = [];    // Agent fallback / tool error notices for the current reply
 let pendingRegionMode = null; // 區域截圖完成後要套用的 mode（null = 'region'）
-let currentModel = 'MiniMax-M2.7';  // 目前選擇的模型
+let currentModel = 'MiniMax-M2.7';  // 目前選擇的模型（normal 模式用）
 let currentAgentDepth = 'standard'; // Agent 搜尋深度
+let currentMode = 'normal';         // 'normal' | 'fusion' | 'compare' — picker-group 模式
+let compareModels = [];             // 比較模式選中的 model id 清單（最多 3 個）
+const COMPARE_MAX_MODELS = 3;
+const FUSION_MODEL_ID = 'openrouter/fusion';
 let historySearchQuery = '';  // 歷史紀錄搜尋關鍵字
 let memories = [];            // 全域長期記憶條目
 let memoryCategoryFilter = '';     // 長期記憶分類篩選
@@ -304,6 +308,10 @@ let currentAudioSrc = null;  // Web Audio API BufferSource
   const modelPickerBtn = document.getElementById('modelPickerBtn');
   const modelPickerLabel = document.getElementById('modelPickerLabel');
   const modelPickerDropdown = document.getElementById('modelPickerDropdown');
+  const modePickerBtn = document.getElementById('modePickerBtn');
+  const modePickerLabel = document.getElementById('modePickerLabel');
+  const modePickerDropdown = document.getElementById('modePickerDropdown');
+  const pickerZoneNormal = document.getElementById('pickerZoneNormal');
   const agentDepthBtn = document.getElementById('agentDepthBtn');
   const agentDepthLabel = document.getElementById('agentDepthLabel');
   const agentDepthDropdown = document.getElementById('agentDepthDropdown');
@@ -371,7 +379,8 @@ let currentAudioSrc = null;  // Web Audio API BufferSource
   }
 
   function getCurrentContextCharBudget() {
-    return getModelContextInfo().tokens * APPROX_CHARS_PER_TOKEN;
+    const modelId = currentMode === 'fusion' ? FUSION_MODEL_ID : currentModel;
+    return getModelContextInfo(modelId).tokens * APPROX_CHARS_PER_TOKEN;
   }
 
   function getOutputModalities(model) {
@@ -470,9 +479,186 @@ let currentAudioSrc = null;  // Web Audio API BufferSource
 
   await initAgentDepthPicker();
   await safeInitModelPicker();
+  await initComparePicker();
+
+  async function getAvailableModelChoices() {
+    const { miniMaxEnabled, openrouterApiKey, customModels } =
+      await chrome.storage.sync.get(['miniMaxEnabled', 'openrouterApiKey', 'customModels']);
+    const choices = [];
+    if (miniMaxEnabled !== false) choices.push({ modelId: 'MiniMax-M2.7', label: 'MiniMax' });
+    if (openrouterApiKey) {
+      (Array.isArray(customModels) ? customModels : [])
+        .filter(m => m?.modelId)
+        .forEach(m => choices.push({ modelId: m.modelId, label: m.label || m.modelId }));
+    }
+    return choices;
+  }
+
+  async function initComparePicker() {
+    if (!modePickerBtn) return;
+    await refreshPickerGroupUI();
+    modePickerBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const isOpen = !modePickerDropdown.classList.contains('hidden');
+      if (!isOpen) await renderModePickerDropdown();
+      modePickerDropdown.classList.toggle('hidden', isOpen);
+      modePickerBtn.classList.toggle('open', !isOpen);
+    });
+  }
+
+  async function setMode(nextMode) {
+    if (!['normal', 'fusion', 'compare'].includes(nextMode)) return;
+    currentMode = nextMode;
+    if (nextMode !== 'compare') compareModels = [];
+    // 關閉非 mode picker 的 dropdown
+    agentDepthDropdown?.classList.add('hidden');
+    agentDepthBtn?.classList.remove('open');
+    modelPickerDropdown?.classList.add('hidden');
+    modelPickerBtn?.classList.remove('open');
+    await refreshPickerGroupUI();
+    updateCharCounter();
+    checkApiKey();
+  }
+
+  async function refreshPickerGroupUI() {
+    // Fusion 隱藏條件：fusionEnabled === false 或無 OpenRouter API Key
+    const { fusionEnabled, openrouterApiKey } = await chrome.storage.sync.get(['fusionEnabled', 'openrouterApiKey']);
+    const showFusion = (fusionEnabled !== false) && !!openrouterApiKey;
+    if (!showFusion && currentMode === 'fusion') currentMode = 'normal';
+
+    // Normal zone disabled state
+    if (pickerZoneNormal) {
+      if (currentMode === 'normal') {
+        pickerZoneNormal.removeAttribute('data-disabled');
+        pickerZoneNormal.removeAttribute('title');
+      } else {
+        pickerZoneNormal.setAttribute('data-disabled', 'true');
+        pickerZoneNormal.setAttribute(
+          'title',
+          currentMode === 'fusion'
+            ? 'Fusion 模式啟用中，思考深度與模型選擇不生效'
+            : '比較模式啟用中，思考深度與模型選擇不生效'
+        );
+      }
+    }
+
+    renderModePickerLabel();
+  }
+
+  function renderModePickerLabel() {
+    if (!modePickerLabel || !modePickerBtn) return;
+    if (currentMode === 'fusion') {
+      modePickerLabel.textContent = 'Fusion 💰';
+    } else if (currentMode === 'compare') {
+      modePickerLabel.textContent = compareModels.length >= 2
+        ? `比較 ${compareModels.length}`
+        : `比較 ${compareModels.length}/3`;
+    } else {
+      modePickerLabel.textContent = '默認';
+    }
+    modePickerBtn.classList.toggle('active', currentMode !== 'normal');
+  }
+
+  async function renderModePickerDropdown() {
+    if (!modePickerDropdown) return;
+    const { fusionEnabled, openrouterApiKey } = await chrome.storage.sync.get(['fusionEnabled', 'openrouterApiKey']);
+    const showFusion = (fusionEnabled !== false) && !!openrouterApiKey;
+    modePickerDropdown.innerHTML = '';
+
+    const header = document.createElement('div');
+    header.className = 'model-picker-section-title';
+    header.textContent = '對話模式';
+    modePickerDropdown.appendChild(header);
+
+    const modes = [
+      { id: 'normal', label: '默認', desc: '思考深度 + 模型選擇可用' },
+      ...(showFusion ? [{ id: 'fusion', label: 'Fusion 💰', desc: '多模型審查 + judge 整合（付費 router）' }] : []),
+      { id: 'compare', label: '比較', desc: '純文字並排比較 2–3 個模型' }
+    ];
+
+    modes.forEach(m => {
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.className = `model-picker-item${currentMode === m.id ? ' active' : ''}`;
+      const dot = currentMode === m.id ? '● ' : '○ ';
+      item.innerHTML = `
+        <span class="model-picker-item-label">${dot}${escSp(m.label)}</span>
+        <span class="model-picker-item-sub">${escSp(m.desc)}</span>
+      `;
+      item.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        if (m.id === currentMode) return;
+        await setMode(m.id);
+        if (m.id === 'compare') {
+          await renderModePickerDropdown();
+        } else {
+          modePickerDropdown.classList.add('hidden');
+          modePickerBtn.classList.remove('open');
+        }
+      });
+      modePickerDropdown.appendChild(item);
+    });
+
+    // 比較模式：在同一 dropdown 內嵌 model 多選
+    if (currentMode === 'compare') {
+      const subTitle = document.createElement('div');
+      subTitle.className = 'model-picker-section-title';
+      subTitle.style.marginTop = '6px';
+      subTitle.textContent = `選擇模型（最多 ${COMPARE_MAX_MODELS}，已選 ${compareModels.length}）`;
+      modePickerDropdown.appendChild(subTitle);
+
+      const choices = await getAvailableModelChoices();
+      if (choices.length < 2) {
+        const empty = document.createElement('div');
+        empty.className = 'model-picker-empty';
+        empty.textContent = '至少需 2 個可用模型。請先啟用 MiniMax 或新增 OpenRouter 自訂模型。';
+        modePickerDropdown.appendChild(empty);
+      } else {
+        choices.forEach(choice => {
+          const checked = compareModels.includes(choice.modelId);
+          const item = document.createElement('button');
+          item.type = 'button';
+          item.className = `model-picker-item${checked ? ' active' : ''}`;
+          item.innerHTML = `
+            <span class="model-picker-item-label">${checked ? '☑ ' : '☐ '}${escSp(choice.label)}</span>
+            <span class="model-picker-item-sub">${escSp(choice.modelId)}</span>
+          `;
+          item.addEventListener('click', (e) => {
+            e.stopPropagation();
+            toggleCompareModel(choice.modelId);
+            renderModePickerDropdown();
+            renderModePickerLabel();
+          });
+          modePickerDropdown.appendChild(item);
+        });
+
+        const footer = document.createElement('div');
+        footer.className = 'model-picker-sort';
+        footer.innerHTML = `
+          <button type="button" data-action="clear">清除選取</button>
+          <span style="opacity:0.7">已選 ${compareModels.length} / ${COMPARE_MAX_MODELS}</span>
+        `;
+        footer.querySelector('[data-action="clear"]').addEventListener('click', async (e) => {
+          e.stopPropagation();
+          compareModels = [];
+          await setMode('normal');
+          modePickerDropdown.classList.add('hidden');
+          modePickerBtn.classList.remove('open');
+        });
+        modePickerDropdown.appendChild(footer);
+      }
+    }
+  }
+
+  function toggleCompareModel(modelId) {
+    const idx = compareModels.indexOf(modelId);
+    if (idx >= 0) compareModels.splice(idx, 1);
+    else if (compareModels.length < COMPARE_MAX_MODELS) compareModels.push(modelId);
+  }
 
   agentDepthBtn?.addEventListener('click', (e) => {
     e.stopPropagation();
+    if (currentMode !== 'normal') return;  // 非 normal 模式時禁用
     const isOpen = !agentDepthDropdown.classList.contains('hidden');
     agentDepthDropdown.classList.toggle('hidden', isOpen);
     agentDepthBtn.classList.toggle('open', !isOpen);
@@ -480,6 +666,7 @@ let currentAudioSrc = null;  // Web Audio API BufferSource
 
   modelPickerBtn?.addEventListener('click', async (e) => {
     e.stopPropagation();
+    if (currentMode !== 'normal') return;  // 非 normal 模式時禁用
     const isOpen = !modelPickerDropdown.classList.contains('hidden');
     if (!isOpen) await safeInitModelPicker();  // 開啟時重新讀取最新模型清單
     modelPickerDropdown.classList.toggle('hidden', isOpen);
@@ -491,12 +678,15 @@ let currentAudioSrc = null;  // Web Audio API BufferSource
     agentDepthBtn?.classList.remove('open');
     modelPickerDropdown?.classList.add('hidden');
     modelPickerBtn?.classList.remove('open');
+    modePickerDropdown?.classList.add('hidden');
+    modePickerBtn?.classList.remove('open');
   });
 
   // 設定變更時刷新模型清單
   chrome.storage.onChanged.addListener((changes, area) => {
-    if (area === 'sync' && (changes.miniMaxEnabled || changes.openrouterApiKey || changes.customModels)) {
+    if (area === 'sync' && (changes.miniMaxEnabled || changes.openrouterApiKey || changes.customModels || changes.fusionEnabled)) {
       safeInitModelPicker();
+      refreshPickerGroupUI();
     }
     if (area === 'sync' && changes.agentDepth && AGENT_DEPTH_OPTIONS[changes.agentDepth.newValue]) {
       currentAgentDepth = changes.agentDepth.newValue;
@@ -505,8 +695,8 @@ let currentAudioSrc = null;  // Web Audio API BufferSource
   });
 
   async function initModelPicker() {
-    const { miniMaxEnabled, openrouterApiKey, customModels } =
-      await chrome.storage.sync.get(['miniMaxEnabled', 'openrouterApiKey', 'customModels']);
+    const { miniMaxEnabled, openrouterApiKey, customModels, fusionEnabled } =
+      await chrome.storage.sync.get(['miniMaxEnabled', 'openrouterApiKey', 'customModels', 'fusionEnabled']);
     const pricingMap = openrouterApiKey ? await getOpenRouterPricingMap(openrouterApiKey) : {};
     const sections = [];
 
@@ -540,8 +730,14 @@ let currentAudioSrc = null;  // Web Audio API BufferSource
     modelContextById = { ...MODEL_CONTEXT_LIMITS };
     allItems.forEach(m => {
       const tokens = normalizeContextTokens(m.contextLength);
-      if (m.modelId && tokens) modelContextById[m.modelId] = { tokens, source: m.modelId === 'MiniMax-M2.7' ? 'MiniMax 預設' : 'OpenRouter metadata' };
+      if (!m.modelId || !tokens) return;
+      const source = m.modelId === 'MiniMax-M2.7' ? 'MiniMax 預設' : 'OpenRouter metadata';
+      modelContextById[m.modelId] = { tokens, source };
     });
+    // Fusion 沒在 model picker，但若 currentMode === 'fusion' 仍需 context 估算
+    if (!modelContextById[FUSION_MODEL_ID]) {
+      modelContextById[FUSION_MODEL_ID] = { tokens: DEFAULT_CONTEXT_TOKENS, source: 'Fusion 預設' };
+    }
     const currentValid = allItems.some(m => m.modelId === currentModel);
     if (!currentValid && allItems.length > 0) {
       currentModel = allItems[0].modelId;
@@ -2918,6 +3114,21 @@ let currentAudioSrc = null;  // Web Audio API BufferSource
     const augmentedMessage = textMessage;
     const skipTools = programmaticMessage ? false : !!(snapshotImages.length || translateEnabled || hadPageContext);
 
+    // 多模型並排比較模式（純文字，不存歷史）
+    if (currentMode === 'compare' && compareModels.length >= 2 && !snapshotImages.length && !translateEnabled && !hadPageContext && !programmaticMessage) {
+      typingIndicator.classList.add('hidden');
+      await saveCurrentSession();
+      await loadHistory();
+      await handleCompareSend({
+        augmentedMessage,
+        historyForApi,
+        translateConfig,
+        memoryContext,
+        replyLang
+      });
+      return;
+    }
+
     // 建立即時串流訊息 div
     _agentSearchLog = [];
     _agentNotices = [];
@@ -2964,18 +3175,21 @@ let currentAudioSrc = null;  // Web Audio API BufferSource
       planModeForSend = false;
     }
 
+    const sendModel = currentMode === 'fusion' ? FUSION_MODEL_ID : currentModel;
+    const sendAgentIterations = currentMode === 'fusion' ? 0 : getCurrentAgentDepthConfig().iterations;
+    const sendSkipTools = currentMode === 'fusion' ? true : skipTools;
     const requestData = {
       message: augmentedMessage,
       history: historyForApi,
       images: snapshotImages,
       translateConfig,
-      model: currentModel,
+      model: sendModel,
       contextCharBudget: getCurrentContextCharBudget(),
-      maxAgentIterations: getCurrentAgentDepthConfig().iterations,
+      maxAgentIterations: sendAgentIterations,
       systemPrompt,
       memoryContext,
       sessionId: currentSession?.id,
-      skipTools,
+      skipTools: sendSkipTools,
       planMode: planModeForSend,
       spaceInstructions: currentSession?.spaceId ? (spaces.find(s => s.id === currentSession.spaceId)?.instructions || '') : ''
     };
@@ -2998,6 +3212,12 @@ let currentAudioSrc = null;  // Web Audio API BufferSource
       }
       if (msg.type === 'compressed') {
         setStatus('歷史對話已自動壓縮，保留最近輪次', false, 3000);
+        return;
+      }
+      if (msg.type === 'system_compressed') {
+        const ratio = msg.originalLength ? Math.round((msg.compressedLength / msg.originalLength) * 100) : null;
+        const detail = ratio !== null ? `（${msg.originalLength} → ${msg.compressedLength} 字，約 ${ratio}%）` : '';
+        setStatus(`System prompt 已自動壓縮${detail}`, false, 3500);
         return;
       }
       if (msg.type === 'agent_thinking') {
@@ -3151,6 +3371,119 @@ let currentAudioSrc = null;  // Web Audio API BufferSource
     });
 
     port.postMessage({ type: 'STREAM_MESSAGE', data: requestData });
+  }
+
+  async function handleCompareSend({ augmentedMessage, historyForApi, translateConfig, memoryContext, replyLang }) {
+    setStreamingMode(true);
+    isLoading = true;
+
+    const container = document.createElement('div');
+    container.className = 'compare-container';
+
+    const notice = document.createElement('div');
+    notice.className = 'compare-notice';
+    notice.textContent = `比較模式（純文字，${compareModels.length} 個模型）— 回覆僅顯示，不會存入此對話歷史`;
+    container.appendChild(notice);
+
+    const cards = [];
+    let activeCount = compareModels.length;
+    const ports = [];
+
+    for (const modelId of compareModels) {
+      const card = document.createElement('div');
+      card.className = 'compare-card';
+
+      const header = document.createElement('div');
+      header.className = 'compare-card-header';
+      const nameSpan = document.createElement('span');
+      nameSpan.className = 'compare-card-name';
+      nameSpan.textContent = modelId;
+      const statusSpan = document.createElement('span');
+      statusSpan.className = 'compare-card-status';
+      statusSpan.textContent = '串流中…';
+      header.appendChild(nameSpan);
+      header.appendChild(statusSpan);
+      card.appendChild(header);
+
+      const body = createLiveMessageDiv();
+      body.classList.add('compare-card-body');
+      card.appendChild(body);
+
+      container.appendChild(card);
+
+      const start = Date.now();
+      let rawContent = '';
+      let finished = false;
+
+      const port = chrome.runtime.connect({ name: 'chat-stream' });
+      ports.push(port);
+
+      const finishCard = (extraStatus, isError = false) => {
+        if (finished) return;
+        finished = true;
+        const sec = ((Date.now() - start) / 1000).toFixed(1);
+        statusSpan.textContent = `${extraStatus} · ${sec}s`;
+        if (isError) statusSpan.classList.add('error');
+        activeCount--;
+        if (activeCount === 0) onAllDone();
+        try { port.disconnect(); } catch {}
+      };
+
+      port.onMessage.addListener((msg) => {
+        if (msg.type === 'chunk') {
+          rawContent = msg.full;
+          updateLiveMessageContent(body, rawContent);
+          scrollToBottom();
+        } else if (msg.type === 'done') {
+          const reply = (msg.reply && String(msg.reply).trim()) || rawContent || '（無內容）';
+          finalizeLiveMessage(body, rawContent || reply, reply, replyLang, null);
+          const usage = msg.usage && Number(msg.usage.totalTokens || 0) > 0
+            ? `${msg.usage.totalTokens} tokens`
+            : '完成';
+          finishCard(usage, false);
+        } else if (msg.type === 'error') {
+          updateLiveMessageContent(body, `**錯誤**：${msg.message || '未知錯誤'}`);
+          finalizeLiveMessage(body, rawContent || '', `錯誤：${msg.message || ''}`, replyLang, null);
+          finishCard('錯誤', true);
+        }
+      });
+
+      port.onDisconnect.addListener(() => {
+        if (finished) return;
+        if (!rawContent) updateLiveMessageContent(body, '**連線中斷**');
+        finalizeLiveMessage(body, rawContent || '', rawContent || '連線中斷', replyLang, null);
+        finishCard('連線中斷', true);
+      });
+
+      cards.push({ port, header, body });
+
+      const requestData = {
+        message: augmentedMessage,
+        history: historyForApi,
+        images: [],
+        translateConfig,
+        model: modelId,
+        contextCharBudget: getCurrentContextCharBudget(),
+        maxAgentIterations: 0,
+        systemPrompt: '',
+        memoryContext,
+        sessionId: currentSession?.id,
+        skipTools: true,
+        planMode: false,
+        spaceInstructions: ''
+      };
+      port.postMessage({ type: 'STREAM_MESSAGE', data: requestData });
+    }
+
+    chatMessages.appendChild(container);
+    scrollToBottom();
+
+    function onAllDone() {
+      isLoading = false;
+      currentPort = null;
+      setStreamingMode(false);
+      messageInput.focus();
+    }
   }
 
   function createLiveMessageDiv() {
@@ -3345,6 +3678,9 @@ let currentAudioSrc = null;  // Web Audio API BufferSource
   function getAgentToolLabel(tool) {
     if (tool === 'deep_search') return '深度搜尋';
     if (tool === 'web_search') return '搜尋網路';
+    if (tool === 'get_setting') return '讀取設定';
+    if (tool === 'set_setting') return '更新設定';
+    if (tool === 'save_memory') return '寫入長期記憶';
     if (tool?.startsWith('browser_')) return getBrowserToolLabel(tool);
     if (tool?.startsWith('finance_')) {
       const map = {
@@ -3372,6 +3708,7 @@ let currentAudioSrc = null;  // Web Audio API BufferSource
       else if (e.tool === 'web_search') { icon = getToolIconSvg('search'); label = '搜尋'; }
       else if (e.tool?.startsWith('browser_')) { icon = getToolIconSvg(e.tool); label = getBrowserToolLabel(e.tool); }
       else if (e.tool?.startsWith('finance_')) { icon = getToolIconSvg('finance'); label = getAgentToolLabel(e.tool); }
+      else if (e.tool === 'get_setting' || e.tool === 'set_setting' || e.tool === 'save_memory') { icon = getToolIconSvg('api'); label = getAgentToolLabel(e.tool); }
       else { icon = getToolIconSvg('api'); label = e.tool; }
       const countStr = e.error
         ? `<span class="agent-sh-count error">失敗</span>`

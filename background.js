@@ -245,6 +245,57 @@ async function getOpenRouterPricingMap(apiKey) {
   }
 }
 
+const FUSION_MODEL_ID = 'openrouter/fusion';
+const FREE_FALLBACK_MAX = 5;
+
+function isOpenRouterFreeModel(modelId, modelInfo = {}) {
+  const id = String(modelId || '');
+  if (!id) return false;
+  if (/:free$/i.test(id)) return true;
+  const pricing = modelInfo?.pricing || {};
+  const prompt = Number(pricing.prompt);
+  const completion = Number(pricing.completion);
+  if (Number.isFinite(prompt) && Number.isFinite(completion) && prompt === 0 && completion === 0) return true;
+  return false;
+}
+
+function buildOpenRouterFreeFallback(primaryModelId, customModels, pricingMap) {
+  if (!Array.isArray(customModels)) return [];
+  const result = [];
+  for (const entry of customModels) {
+    const modelId = entry?.modelId;
+    if (!modelId) continue;
+    if (modelId === primaryModelId) continue;
+    if (modelId === FUSION_MODEL_ID) continue;
+    if (modelId === MODEL_NAME) continue;
+    if (!modelId.includes('/')) continue;
+    const info = pricingMap?.[modelId] || {};
+    if (!isOpenRouterFreeModel(modelId, info)) continue;
+    if (result.includes(modelId)) continue;
+    result.push(modelId);
+    if (result.length >= FREE_FALLBACK_MAX) break;
+  }
+  return result;
+}
+
+function classifyOpenRouterError(rawMsg, statusCode) {
+  const msg = String(rawMsg || '').toLowerCase();
+  const status = Number(statusCode);
+  if (status === 402 || msg.includes('insufficient credits') || msg.includes('not enough credit')) {
+    return { kind: 'credits', friendly: 'OpenRouter 餘額不足或免費額度已用盡，請至 OpenRouter 帳戶確認後再試。' };
+  }
+  if (status === 429 || msg.includes('rate limit') || msg.includes('rate-limited') || msg.includes('too many request')) {
+    return { kind: 'rate_limit', friendly: '免費模型已達速率上限（429）。稍後再試，或在設定頁啟用其他免費模型作為 fallback。' };
+  }
+  if (msg.includes('temporarily unavailable') || msg.includes('temporarily rate-limited upstream')) {
+    return { kind: 'upstream', friendly: '免費模型上游暫時不可用。請稍後再試，或啟用其他免費模型分散風險。' };
+  }
+  if (msg.includes('context window')) {
+    return { kind: 'context', friendly: '對話內容或歷史過長，已超出模型限制。請試著縮短輸入，或點擊「+」開啟新對話。' };
+  }
+  return null;
+}
+
 async function recordOpenRouterUsage({ modelId, usage, apiKey, sessionId, source }) {
   const normalized = normalizeUsage(usage);
   if (!normalized || !modelId) return;
@@ -336,7 +387,7 @@ chrome.runtime.onStartup.addListener(async () => {
 
 // 資料變動即時自動備份（debounce 5 秒，避免連續觸發）
 let _autoBackupTimer = null;
-const AUTO_BACKUP_KEYS_SYNC = new Set(['memories', 'apiKey', 'miniMaxEnabled', 'geminiApiKey', 'braveApiKey', 'exaApiKey', 'finnhubApiKey', 'alphaVantageApiKey', 'finmindToken', 'openrouterApiKey', 'customModels', 'settings', 'defaultPrompts', 'globalPrompt']);
+const AUTO_BACKUP_KEYS_SYNC = new Set(['memories', 'apiKey', 'miniMaxEnabled', 'fusionEnabled', 'geminiApiKey', 'braveApiKey', 'exaApiKey', 'finnhubApiKey', 'alphaVantageApiKey', 'finmindToken', 'openrouterApiKey', 'customModels', 'settings', 'defaultPrompts', 'globalPrompt']);
 const AUTO_BACKUP_KEYS_LOCAL = new Set(['vocabulary', 'knowledgeBase', 'chatSessions']);
 
 chrome.storage.onChanged.addListener((changes, area) => {
@@ -1823,8 +1874,8 @@ function extractImageOutputAttachments(messageOrData, text = '') {
 }
 
 async function streamMiniMaxChat(message, history, translateConfig, model, systemPrompt, memoryContext, port, sessionId, contextCharBudget) {
-  const { apiKey, defaultPrompts, globalPrompt: storedGlobal, openrouterApiKey } =
-    await chrome.storage.sync.get(['apiKey', 'defaultPrompts', 'globalPrompt', 'openrouterApiKey']);
+  const { apiKey, defaultPrompts, globalPrompt: storedGlobal, openrouterApiKey, customModels } =
+    await chrome.storage.sync.get(['apiKey', 'defaultPrompts', 'globalPrompt', 'openrouterApiKey', 'customModels']);
 
   const requestedModel = model || MODEL_NAME;
   const useOpenRouter = !!(openrouterApiKey && requestedModel !== MODEL_NAME);
@@ -1838,12 +1889,18 @@ async function streamMiniMaxChat(message, history, translateConfig, model, syste
   else if (chatDefaultPrompt) modePrompt = chatDefaultPrompt;
   else if (systemPrompt) modePrompt = systemPrompt;
 
-  const finalSystemPrompt = [memoryContext, globalPrompt, modePrompt].filter(Boolean).join('\n\n');
+  const rawSystemPrompt = [memoryContext, globalPrompt, modePrompt].filter(Boolean).join('\n\n');
 
   const effectiveContextChars = normalizeContextCharBudget(contextCharBudget);
+  const compressKey = useOpenRouter ? openrouterApiKey : apiKey;
+  const sysCompressResult = await compressSystemPromptIfNeeded(rawSystemPrompt, compressKey, useModel, effectiveContextChars);
+  const finalSystemPrompt = sysCompressResult.text;
+  if (sysCompressResult.compressed) {
+    console.log(`[SysPromptCompress] ${rawSystemPrompt.length} → ${finalSystemPrompt.length} 字${sysCompressResult.cached ? '（命中 cache）' : ''}`);
+    port.postMessage({ type: 'system_compressed', originalLength: sysCompressResult.originalLength, compressedLength: sysCompressResult.compressedLength });
+  }
   const fixedChars = (finalSystemPrompt?.length || 0) + message.length;
   const historyBudget = Math.max(0, effectiveContextChars - fixedChars);
-  const compressKey = useOpenRouter ? openrouterApiKey : apiKey;
   const { history: compressedHistory, summary } = await compressHistoryIfNeeded(sessionId, history || [], compressKey, useModel, historyBudget);
 
   if (summary) port.postMessage({ type: 'compressed' });
@@ -1863,6 +1920,16 @@ async function streamMiniMaxChat(message, history, translateConfig, model, syste
     ? await getOpenRouterImageRequestConfig({ modelId: useModel, message, apiKey: openrouterApiKey })
     : null;
 
+  let freeFallbackModels = [];
+  if (useOpenRouter && !imageRequestConfig && useModel !== FUSION_MODEL_ID) {
+    try {
+      const pricingMap = await getOpenRouterPricingMap(openrouterApiKey);
+      freeFallbackModels = buildOpenRouterFreeFallback(useModel, customModels, pricingMap);
+    } catch (err) {
+      console.warn('[Stream] 建立免費 fallback 失敗:', err?.message || err);
+    }
+  }
+
   const requestBody = {
     model: useModel,
     messages,
@@ -1871,8 +1938,12 @@ async function streamMiniMaxChat(message, history, translateConfig, model, syste
       modalities: imageRequestConfig.modalities,
       ...(imageRequestConfig.image_config ? { image_config: imageRequestConfig.image_config } : {})
     } : {}),
+    ...(freeFallbackModels.length > 0 ? { models: [useModel, ...freeFallbackModels] } : {}),
     ...(useOpenRouter ? { stream_options: { include_usage: true } } : {})
   };
+  if (freeFallbackModels.length > 0) {
+    console.log(`[Stream] OpenRouter free fallback list: ${freeFallbackModels.join(', ')}`);
+  }
   console.log(`[Stream] 送出請求 model=${useModel} msgs=${messages.length} histChars=${messages.reduce((s, m) => s + (typeof m.content === 'string' ? m.content.length : 0), 0)}`);
 
   const response = await fetch(chatUrl, {
@@ -1885,6 +1956,15 @@ async function streamMiniMaxChat(message, history, translateConfig, model, syste
     const errorData = await response.json().catch(() => ({}));
     const rawMsg = extractApiErrorMessage(errorData, response.status);
     console.error(`[Stream] HTTP 錯誤 ${response.status}:`, rawMsg);
+    if (useOpenRouter) {
+      const classified = classifyOpenRouterError(rawMsg, response.status);
+      if (classified) {
+        const fallbackInfo = freeFallbackModels.length > 0
+          ? `（已嘗試 fallback：${freeFallbackModels.join(', ')}）`
+          : '（目前沒有其他啟用的免費模型可作為 fallback）';
+        throw new Error(`${classified.friendly}\n模型：${useModel} ${fallbackInfo}\n原始訊息：${rawMsg}`);
+      }
+    }
     if (rawMsg.toLowerCase().includes('context window')) {
       throw new Error('對話內容或歷史過長，已超出模型限制。請試著縮短輸入，或點擊「+」開啟新對話。');
     }
@@ -2139,6 +2219,174 @@ const AGENT_TOOLS_BROWSER = [
   }
 ];
 
+// 受控設定白名單（AI 可讀 / 可寫的 key 與型別）
+const AI_SETTING_WHITELIST = {
+  'globalPrompt':            { area: 'sync',  type: 'string',  maxLength: 4000 },
+  'defaultPrompts.chat':     { area: 'sync',  type: 'string',  maxLength: 4000 },
+  'settings.language':       { area: 'sync',  type: 'string',  enum: ['zh-TW', 'zh-CN', 'en', 'ja', 'ko'] },
+  'settings.model':          { area: 'sync',  type: 'string',  maxLength: 120 },
+  'settings.agentDepth':     { area: 'sync',  type: 'string',  enum: ['fast', 'standard', 'deep', 'research'] },
+  'settings.planMode':       { area: 'sync',  type: 'string',  enum: ['off', 'auto', 'always'] },
+  'autoMemoryEnabled':       { area: 'sync',  type: 'boolean' }
+};
+// 永遠拒絕的敏感欄位（即使透過巢狀路徑也擋）
+const AI_SETTING_FORBIDDEN_PATTERNS = [/apikey/i, /api_key/i, /token/i, /secret/i, /password/i, /authcode/i, /clientid/i, /clientsecret/i, /refresh/i, /credential/i, /syncauth/i];
+
+function isForbiddenSettingKey(key) {
+  const k = String(key || '');
+  return AI_SETTING_FORBIDDEN_PATTERNS.some(p => p.test(k));
+}
+
+function getNestedValue(obj, path) {
+  if (!obj || !path) return undefined;
+  return path.split('.').reduce((acc, seg) => (acc && typeof acc === 'object' ? acc[seg] : undefined), obj);
+}
+
+function setNestedValue(obj, path, value) {
+  const segs = path.split('.');
+  let cursor = obj;
+  for (let i = 0; i < segs.length - 1; i++) {
+    if (typeof cursor[segs[i]] !== 'object' || cursor[segs[i]] === null) cursor[segs[i]] = {};
+    cursor = cursor[segs[i]];
+  }
+  cursor[segs[segs.length - 1]] = value;
+  return obj;
+}
+
+function validateSettingValue(spec, value) {
+  if (spec.type === 'boolean') {
+    if (typeof value === 'boolean') return { ok: true, value };
+    if (value === 'true') return { ok: true, value: true };
+    if (value === 'false') return { ok: true, value: false };
+    return { ok: false, error: '必須為 boolean' };
+  }
+  if (spec.type === 'string') {
+    if (typeof value !== 'string') return { ok: false, error: '必須為 string' };
+    if (spec.maxLength && value.length > spec.maxLength) return { ok: false, error: `字數超過上限 ${spec.maxLength}` };
+    if (spec.enum && !spec.enum.includes(value)) return { ok: false, error: `必須為下列之一：${spec.enum.join(' / ')}` };
+    return { ok: true, value };
+  }
+  if (spec.type === 'number') {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return { ok: false, error: '必須為 number' };
+    return { ok: true, value: n };
+  }
+  return { ok: false, error: '不支援的型別' };
+}
+
+const AGENT_TOOLS_SETTINGS = [
+  {
+    type: 'function',
+    function: {
+      name: 'get_setting',
+      description: '讀取使用者目前的非敏感設定值（限白名單 key）。可用 key：globalPrompt、defaultPrompts.chat、settings.language、settings.model、settings.agentDepth、settings.planMode、autoMemoryEnabled。API Key / Token / Secret / OAuth 認證資訊一律無法讀取。',
+      parameters: {
+        type: 'object',
+        properties: {
+          key: { type: 'string', description: '白名單中的設定 key' }
+        },
+        required: ['key']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'set_setting',
+      description: '修改使用者的非敏感設定值（限白名單 key 與允許值）。修改前請向使用者確認意圖。可用 key 與 get_setting 相同。',
+      parameters: {
+        type: 'object',
+        properties: {
+          key: { type: 'string', description: '白名單中的設定 key' },
+          value: { description: '要寫入的值（型別需符合白名單規格）' }
+        },
+        required: ['key', 'value']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'save_memory',
+      description: '把使用者明確表達的長期偏好或事實存入長期記憶。請僅在使用者明確表示「記住 / 以後請」等情境時使用，避免把短期對話內容塞入記憶。',
+      parameters: {
+        type: 'object',
+        properties: {
+          title: { type: 'string', description: '記憶標題，20 字以內' },
+          summary: { type: 'string', description: '記憶摘要，120 字以內' },
+          tags: { type: 'array', items: { type: 'string' }, description: '最多 5 個分類標籤' }
+        },
+        required: ['title', 'summary']
+      }
+    }
+  }
+];
+
+async function executeSettingTool(name, args) {
+  if (name === 'get_setting') {
+    const key = String(args?.key || '').trim();
+    if (!key) return { error: '缺少 key' };
+    if (isForbiddenSettingKey(key)) return { error: '此 key 屬於敏感欄位，禁止讀取' };
+    const spec = AI_SETTING_WHITELIST[key];
+    if (!spec) return { error: `不在白名單：${key}` };
+    const [rootKey, ...rest] = key.split('.');
+    const store = await chrome.storage[spec.area].get([rootKey]);
+    const rootValue = store?.[rootKey];
+    const value = rest.length === 0 ? rootValue : getNestedValue({ [rootKey]: rootValue }, key);
+    return { key, value: value ?? null, type: spec.type };
+  }
+
+  if (name === 'set_setting') {
+    const key = String(args?.key || '').trim();
+    if (!key) return { error: '缺少 key' };
+    if (isForbiddenSettingKey(key)) return { error: '此 key 屬於敏感欄位，禁止寫入' };
+    const spec = AI_SETTING_WHITELIST[key];
+    if (!spec) return { error: `不在白名單：${key}` };
+    const validation = validateSettingValue(spec, args?.value);
+    if (!validation.ok) return { error: `值驗證失敗：${validation.error}` };
+    const [rootKey, ...rest] = key.split('.');
+    if (rest.length === 0) {
+      await chrome.storage[spec.area].set({ [rootKey]: validation.value });
+    } else {
+      const stored = await chrome.storage[spec.area].get([rootKey]);
+      const next = stored?.[rootKey] && typeof stored[rootKey] === 'object' ? { ...stored[rootKey] } : {};
+      setNestedValue(next, rest.join('.'), validation.value);
+      await chrome.storage[spec.area].set({ [rootKey]: next });
+    }
+    return { ok: true, key, value: validation.value, message: `已更新 ${key}` };
+  }
+
+  if (name === 'save_memory') {
+    const title = String(args?.title || '').trim();
+    const summary = String(args?.summary || '').trim();
+    const tags = Array.isArray(args?.tags) ? args.tags.map(t => String(t).trim()).filter(Boolean).slice(0, 5) : [];
+    if (!title || !summary) return { error: '需要 title 與 summary' };
+    if (title.length > 40) return { error: 'title 字數過長（上限 40）' };
+    if (summary.length > 400) return { error: 'summary 字數過長（上限 400）' };
+
+    const { memories = [] } = await chrome.storage.sync.get(['memories']);
+    const list = Array.isArray(memories) ? [...memories] : [];
+
+    const duplicate = list.find(m => typeof m === 'object' && m?.title === title);
+    if (duplicate) return { ok: true, deduped: true, message: `已存在相同標題的記憶：${title}` };
+
+    const entry = {
+      id: `mem_ai_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      title,
+      summary,
+      tags,
+      source: 'ai',
+      createdAt: Date.now()
+    };
+    list.unshift(entry);
+    const trimmed = list.slice(0, 30);
+    await chrome.storage.sync.set({ memories: trimmed });
+    return { ok: true, id: entry.id, message: `已新增長期記憶：${title}` };
+  }
+
+  return { error: `未知設定工具：${name}` };
+}
+
 const AGENT_TOOLS_FINANCE = [
   {
     type: 'function',
@@ -2293,6 +2541,8 @@ async function getActivePageTab() {
 
 // ── tool_start 顯示文字 ───────────────────────────────────────
 function toolDisplayQuery(name, args) {
+  if (name === 'get_setting' || name === 'set_setting') return String(args?.key || '');
+  if (name === 'save_memory') return String(args?.title || '').slice(0, 40);
   if (args.input) return args.input;
   if (args.symbol) return [args.market, args.symbol].filter(Boolean).join(' ');
   if (args.query) return args.query;
@@ -3391,6 +3641,9 @@ async function handleToolCall(name, args, sessionId) {
   if (name.startsWith('browser_')) {
     return await executeBrowserTool(name, args, sessionId);
   }
+  if (name === 'get_setting' || name === 'set_setting' || name === 'save_memory') {
+    return await executeSettingTool(name, args);
+  }
   if (name.startsWith('finance_')) {
     return await executeFinanceTool(name, args);
   }
@@ -4099,7 +4352,7 @@ async function streamAgentChat(message, history, translateConfig, model, systemP
   const apiToolRegistry = await loadApiToolRegistryForAgent();
   const enabledRegistryTools = apiToolRegistry.filter(t => t.enabled);
   const registryTools = enabledRegistryTools.map(buildRegistryTool);
-  const tools = [...AGENT_TOOLS_BROWSER, ...AGENT_TOOLS_FINANCE, ...registryTools];
+  const tools = [...AGENT_TOOLS_BROWSER, ...AGENT_TOOLS_SETTINGS, ...AGENT_TOOLS_FINANCE, ...registryTools];
   if (braveApiKey || exaApiKey) tools.push(AGENT_TOOLS_SEARCH[0]); // web_search
   if (exaApiKey) tools.push(AGENT_TOOLS_SEARCH[1]);                 // deep_search
 
@@ -4137,8 +4390,14 @@ async function streamAgentChat(message, history, translateConfig, model, systemP
   const toolAuthContext = '可用 API 工具已由擴充功能代管 OAuth 或本機憑證。需要存取 Notion、Gmail、Google Calendar、GA4、WordPress 等已連接服務時，請直接呼叫可用工具，不要要求使用者提供 API Token、環境變數或密鑰。Notion 的 Copy Link / 分享連結只提供頁面 URL，不會授權 API integration；如果 Notion 工具回傳 object_not_found 或 404，請明確要求使用者在該頁面右上角「...」→ Connections / Connect to → 選擇 Open Chat Hub，尤其是頁面移動到新位置之後。不要把「直接分享連結」當成 API 存取權限的解法。若工具回傳尚未授權或權限不足，請要求使用者到設定頁重新授權或調整 connection capabilities。沒有實際呼叫工具前，不得宣稱正在等待 API、正在寫入、已建立、已更新、已完成或即將提供連結。對 Notion/database/寫入類大型任務，必須分段完成：先建立 schema 或父頁，再分批寫入資料列/blocks；每段成功後繼續下一段，不要把大量內容留到最後一次整理，也不要用簡略摘要取代實際寫入。Notion page_id 與 database_id 不可混用：使用者提供的頁面連結通常是 page_id，只能用於 notion_get_page、notion_get_block_children，或作為 notion_create_database 的 parent.page_id；只有 notion_create_database 回傳的 database id 才能用於 notion_query_database 或作為資料列 parent.database_id。';
 
   const financeContext = messageLooksLikeFinanceResearch(message) ? FINANCE_RESEARCH_CONTEXT : '';
-  const finalSystemPrompt = [dateContext, toolAuthContext, financeContext, memoryContext, globalPrompt, modePrompt].filter(Boolean).join('\n\n');
+  const rawSystemPrompt = [dateContext, toolAuthContext, financeContext, memoryContext, globalPrompt, modePrompt].filter(Boolean).join('\n\n');
   const effectiveContextChars = normalizeContextCharBudget(contextCharBudget);
+  const sysCompressResult = await compressSystemPromptIfNeeded(rawSystemPrompt, agentKey, useModel, effectiveContextChars);
+  const finalSystemPrompt = sysCompressResult.text;
+  if (sysCompressResult.compressed) {
+    console.log(`[SysPromptCompress] agent ${rawSystemPrompt.length} → ${finalSystemPrompt.length} 字${sysCompressResult.cached ? '（命中 cache）' : ''}`);
+    port.postMessage({ type: 'system_compressed', originalLength: sysCompressResult.originalLength, compressedLength: sysCompressResult.compressedLength });
+  }
   const fixedChars = (finalSystemPrompt?.length || 0) + message.length;
   const historyBudget = Math.max(0, effectiveContextChars - fixedChars);
   const { history: compressedHistory, summary } = await compressHistoryIfNeeded(sessionId, history || [], agentKey, useModel, historyBudget);
@@ -5086,6 +5345,78 @@ async function handleMiniMaxChat(message, history, translateConfig, model, syste
   }
 
   return { reply: assistantMessage.trim() };
+}
+
+// System Prompt 壓縮：當 system prompt 佔 context budget 超過比例時，壓縮為精簡版本
+const SYSTEM_PROMPT_COMPRESS_RATIO = 0.3;          // 超過 30% budget 觸發壓縮
+const SYSTEM_PROMPT_MIN_CHARS = 3000;              // 低於此值不壓縮（壓縮 overhead 不划算）
+const SYSTEM_PROMPT_CACHE_KEY = 'systemPromptCompressCache';
+const SYSTEM_PROMPT_CACHE_TTL_MS = 14 * 24 * 60 * 60 * 1000;
+const SYSTEM_PROMPT_CACHE_MAX = 20;
+
+function hashTextForCache(text) {
+  let h = 5381;
+  for (let i = 0; i < text.length; i++) {
+    h = ((h << 5) + h + text.charCodeAt(i)) | 0;
+  }
+  return `${text.length}_${(h >>> 0).toString(36)}`;
+}
+
+async function compressSystemPromptIfNeeded(text, apiKey, model, budgetChars) {
+  if (!text || !apiKey || !model) return { text, compressed: false, reason: 'noop' };
+  const threshold = Math.max(SYSTEM_PROMPT_MIN_CHARS, Math.floor((budgetChars || MAX_CONTEXT_CHARS) * SYSTEM_PROMPT_COMPRESS_RATIO));
+  if (text.length <= threshold) return { text, compressed: false, reason: 'under_threshold' };
+
+  const cacheKey = hashTextForCache(text);
+  const now = Date.now();
+  let cache = {};
+  try {
+    const stored = await chrome.storage.local.get([SYSTEM_PROMPT_CACHE_KEY]);
+    cache = stored[SYSTEM_PROMPT_CACHE_KEY] || {};
+    const hit = cache[cacheKey];
+    if (hit?.summary && now - (hit.createdAt || 0) < SYSTEM_PROMPT_CACHE_TTL_MS) {
+      return { text: hit.summary, compressed: true, cached: true, originalLength: text.length, compressedLength: hit.summary.length };
+    }
+  } catch {}
+
+  try {
+    const useOpenRouter = !(model === MODEL_NAME);
+    const url = useOpenRouter ? OPENROUTER_API_URL : MINIMAX_API_URL;
+    const extraHeaders = useOpenRouter
+      ? { 'HTTP-Referer': 'chrome-extension://open-chat-hub', 'X-Title': 'Open Chat Hub' }
+      : {};
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json', ...extraHeaders },
+      body: JSON.stringify({
+        model,
+        messages: [{
+          role: 'user',
+          content: `請將以下 system prompt 壓縮為精簡繁體中文（800字以內），保留所有關鍵指令、規則、限制、工具使用約束與重要設定，刪除冗詞與重複內容。輸出僅含壓縮後的 system prompt 本文，不要加入「以下是壓縮版本」之類的開場語：\n\n${text}`
+        }]
+      })
+    });
+    if (!res.ok) throw new Error(`compress_system_failed_${res.status}`);
+    const data = await res.json();
+    const summary = (data.choices?.[0]?.message?.content || '').trim();
+    if (!summary) throw new Error('compress_system_empty');
+    if (summary.length >= text.length * 0.85) {
+      return { text, compressed: false, reason: 'no_gain', originalLength: text.length, compressedLength: summary.length };
+    }
+
+    const cleaned = {};
+    for (const [k, v] of Object.entries(cache)) {
+      if (now - (v?.createdAt || 0) < SYSTEM_PROMPT_CACHE_TTL_MS) cleaned[k] = v;
+    }
+    cleaned[cacheKey] = { summary, createdAt: now, originalLength: text.length };
+    const entries = Object.entries(cleaned).sort((a, b) => (b[1].createdAt || 0) - (a[1].createdAt || 0)).slice(0, SYSTEM_PROMPT_CACHE_MAX);
+    await chrome.storage.local.set({ [SYSTEM_PROMPT_CACHE_KEY]: Object.fromEntries(entries) });
+
+    return { text: summary, compressed: true, cached: false, originalLength: text.length, compressedLength: summary.length };
+  } catch (err) {
+    console.warn('[SysPromptCompress] 失敗，沿用原始 system prompt:', err?.message || err);
+    return { text, compressed: false, reason: 'error', error: err?.message || String(err) };
+  }
 }
 
 // 自動壓縮歷史：超出 budget 時呼叫 MiniMax 生成摘要，複用 sessionSummaries
