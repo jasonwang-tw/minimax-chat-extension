@@ -190,6 +190,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   const marketRefreshBtn = document.getElementById('marketRefreshBtn');
   const marketFreshness = document.getElementById('marketFreshness');
   const marketWarnings = document.getElementById('marketWarnings');
+  const marketSearchInput = document.getElementById('marketSearchInput');
+  const marketSearchBtn = document.getElementById('marketSearchBtn');
+  const marketSearchResults = document.getElementById('marketSearchResults');
+  const marketHeatmapUnit = document.getElementById('marketHeatmapUnit');
+  const marketSectorTitle = document.getElementById('marketSectorTitle');
+  const marketStockSort = document.getElementById('marketStockSort');
   const marketHeatmap = document.getElementById('marketHeatmap');
   const marketGroups = document.getElementById('marketGroups');
   const marketNews = document.getElementById('marketNews');
@@ -284,7 +290,11 @@ let currentAudioSrc = null;  // Web Audio API BufferSource
   const lessonAudioUrls = new Map();
   let activeMarket = 'US';
   let marketDashboard = null;
+  let marketRenderedSectors = [];
   let selectedMarketStock = null;
+  let selectedMarketSector = null;
+  let selectedMarketDetail = null;
+  let marketStockSortKey = 'capitalFlow';
 
   // Region screenshot state
   let regionStartX = 0, regionStartY = 0;
@@ -1296,24 +1306,55 @@ let currentAudioSrc = null;  // Web Audio API BufferSource
   openMarketBtn.addEventListener('click', () => { closeAllPanels(); openMarketPanel(); });
   marketPanelClose.addEventListener('click', closeMarketPanel);
   marketRefreshBtn.addEventListener('click', () => loadMarketDashboard(true));
+  marketSearchBtn?.addEventListener('click', () => searchMarketSymbol());
+  marketSearchInput?.addEventListener('keydown', e => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      searchMarketSymbol();
+    }
+  });
+  marketStockSort?.addEventListener('change', () => {
+    marketStockSortKey = marketStockSort.value || 'capitalFlow';
+    renderSelectedMarketSector();
+  });
   document.querySelectorAll('.market-tab').forEach(btn => {
     btn.addEventListener('click', () => {
       activeMarket = btn.dataset.market || 'US';
       marketDashboard = null;
       selectedMarketStock = null;
+      selectedMarketSector = null;
+      selectedMarketDetail = null;
+      if (marketSearchInput) marketSearchInput.value = '';
+      if (marketSearchResults) marketSearchResults.classList.add('hidden');
       document.querySelectorAll('.market-tab').forEach(el => el.classList.toggle('active', el === btn));
       loadMarketDashboard(true);
     });
   });
   marketPanel.addEventListener('click', e => {
+    const sectorBtn = e.target.closest('[data-market-sector]');
+    if (sectorBtn) {
+      selectMarketSector(sectorBtn.dataset.marketSector || '');
+      return;
+    }
     const stockBtn = e.target.closest('[data-market-symbol]');
     if (stockBtn) {
       const symbol = stockBtn.dataset.marketSymbol;
-      const stock = (marketDashboard?.groups || []).flatMap(g => g.stocks || []).find(s => s.symbol === symbol);
+      const stock = findMarketStock(symbol) || {
+        symbol,
+        displaySymbol: stockBtn.dataset.displaySymbol || symbol,
+        name: stockBtn.dataset.marketName || '',
+        group: stockBtn.dataset.marketGroup || '',
+        market: stockBtn.dataset.market || activeMarket
+      };
       if (stock) {
         renderMarketDetail(stock);
         loadMarketStockDetail(stock);
       }
+      return;
+    }
+    const aiBtn = e.target.closest('[data-market-ai-summary]');
+    if (aiBtn) {
+      loadMarketAiSummary(true);
       return;
     }
     const commandBtn = e.target.closest('[data-market-command]');
@@ -1342,6 +1383,8 @@ let currentAudioSrc = null;  // Web Audio API BufferSource
 
   // TOC
   function buildToc() {
+    // 比較模式：model 名稱（.compare-card-name）為 h1；card body 內部 AI 標題降一階，
+    // 讓 model 成為父節點、AI 標題為子節點，避免兩者同層
     const headings = chatMessages.querySelectorAll('h1, h2, h3, h4');
     tocList.innerHTML = '';
     if (headings.length === 0) {
@@ -1349,9 +1392,14 @@ let currentAudioSrc = null;  // Web Audio API BufferSource
       return;
     }
     headings.forEach(h => {
-      const level = parseInt(h.tagName[1], 10);
+      const rawLevel = parseInt(h.tagName[1], 10);
+      const isCompareName = h.classList.contains('compare-card-name');
+      const insideCompareBody = !isCompareName && h.closest('.compare-card-body');
+      // compare-card-body 內的標題視覺上應位於 model 名稱之下，level +1（上限 4）
+      const level = isCompareName ? 1 : (insideCompareBody ? Math.min(rawLevel + 1, 4) : rawLevel);
       const btn = document.createElement('button');
       btn.className = `toc-item toc-h${level}`;
+      if (isCompareName) btn.classList.add('toc-compare-model');
       btn.textContent = h.textContent;
       btn.addEventListener('click', () => {
         const offset = h.getBoundingClientRect().top
@@ -2800,6 +2848,11 @@ let currentAudioSrc = null;  // Web Audio API BufferSource
         chatMessages.appendChild(div);
         return;
       }
+      // 比較模式歷程
+      if (msg.role === 'compare' && Array.isArray(msg.entries) && msg.entries.length > 0) {
+        renderSavedCompareMessage(msg.entries);
+        return;
+      }
       // 歷史訊息不知道當時語言設定，用內容自動偵測
       const ttsLang = detectLang(msg.content);
       if (msg.role === 'assistant' && msg.searchLog?.length > 0) {
@@ -3100,11 +3153,13 @@ let currentAudioSrc = null;  // Web Audio API BufferSource
       targetLang: targetLangSelect.value
     } : null;
 
-    const historyForApi = currentSession.messages.slice(0, -1).map(m => ({
-      role: m.role,
-      content: m.content,
-      images: m.images || (m.image ? [m.image] : null)
-    }));
+    const historyForApi = currentSession.messages.slice(0, -1)
+      .filter(m => m.role === 'user' || m.role === 'assistant')
+      .map(m => ({
+        role: m.role,
+        content: m.content,
+        images: m.images || (m.image ? [m.image] : null)
+      }));
 
     const systemPrompt = '';
     const memoryContext = buildMemoryBlock();
@@ -3373,40 +3428,95 @@ let currentAudioSrc = null;  // Web Audio API BufferSource
     port.postMessage({ type: 'STREAM_MESSAGE', data: requestData });
   }
 
-  async function handleCompareSend({ augmentedMessage, historyForApi, translateConfig, memoryContext, replyLang }) {
-    setStreamingMode(true);
-    isLoading = true;
-
+  // 建立比較模式容器 DOM（header + notice），不含個別 card
+  function buildCompareContainer(modelCount) {
     const container = document.createElement('div');
     container.className = 'compare-container';
 
     const notice = document.createElement('div');
     notice.className = 'compare-notice';
-    notice.textContent = `比較模式（純文字，${compareModels.length} 個模型）— 回覆僅顯示，不會存入此對話歷史`;
+    notice.textContent = `比較模式（${modelCount} 個模型）`;
     container.appendChild(notice);
+    return container;
+  }
 
+  // 建立單一比較 card 的 DOM 結構（header 含 model 名稱、status；body 用於顯示回覆）
+  function buildCompareCard(modelId) {
+    const card = document.createElement('div');
+    card.className = 'compare-card';
+
+    const header = document.createElement('div');
+    header.className = 'compare-card-header';
+    const nameEl = document.createElement('h1');
+    nameEl.className = 'compare-card-name';
+    nameEl.textContent = modelId;
+    const statusSpan = document.createElement('span');
+    statusSpan.className = 'compare-card-status';
+    header.appendChild(nameEl);
+    header.appendChild(statusSpan);
+    card.appendChild(header);
+
+    return { card, statusSpan };
+  }
+
+  // 從已儲存的 entries 重建比較訊息（用於 loadSession）
+  function renderSavedCompareMessage(entries) {
+    const container = buildCompareContainer(entries.length);
+    for (const entry of entries) {
+      const { card, statusSpan } = buildCompareCard(entry.modelId);
+      statusSpan.textContent = entry.statusText || '';
+      if (entry.isError) statusSpan.classList.add('error');
+
+      // notices / 搜尋紀錄需放在 reply 之上
+      if (Array.isArray(entry.notices) && entry.notices.length > 0) {
+        card.appendChild(buildAgentNoticeEl(entry.notices));
+      }
+      if (Array.isArray(entry.searchLog) && entry.searchLog.length > 0) {
+        card.appendChild(buildSearchHistoryEl(entry.searchLog));
+      }
+
+      const body = document.createElement('div');
+      body.className = 'message message-assistant compare-card-body';
+      const reply = entry.reply || '';
+      body.innerHTML = `<div class="message-content">${renderMarkdown(reply)}</div>` +
+        buildMessageActions(reply, resolveTTSLang('assistant', null, reply), 'assistant');
+      body.querySelector('.btn-tts')?.addEventListener('click', handleTTS);
+      body.querySelector('.btn-copy')?.addEventListener('click', handleCopy);
+
+      card.appendChild(body);
+      container.appendChild(card);
+    }
+    chatMessages.appendChild(container);
+  }
+
+  async function handleCompareSend({ augmentedMessage, historyForApi, translateConfig, memoryContext, replyLang }) {
+    setStreamingMode(true);
+    isLoading = true;
+
+    const container = buildCompareContainer(compareModels.length);
     const cards = [];
     let activeCount = compareModels.length;
     const ports = [];
+    const results = compareModels.map(modelId => ({
+      modelId, reply: '', statusText: '', isError: false,
+      searchLog: [], notices: []
+    }));
 
-    for (const modelId of compareModels) {
-      const card = document.createElement('div');
-      card.className = 'compare-card';
+    // 比較模式內每張 card 各自跑 agent loop；依照當前 depth 設定，但維持 plan/translate 關閉
+    const sendIterations = getCurrentAgentDepthConfig().iterations;
 
-      const header = document.createElement('div');
-      header.className = 'compare-card-header';
-      const nameSpan = document.createElement('span');
-      nameSpan.className = 'compare-card-name';
-      nameSpan.textContent = modelId;
-      const statusSpan = document.createElement('span');
-      statusSpan.className = 'compare-card-status';
-      statusSpan.textContent = '串流中…';
-      header.appendChild(nameSpan);
-      header.appendChild(statusSpan);
-      card.appendChild(header);
+    for (let idx = 0; idx < compareModels.length; idx++) {
+      const modelId = compareModels[idx];
+      const { card, statusSpan } = buildCompareCard(modelId);
+      statusSpan.textContent = '排隊中…';
+
+      // 搜尋紀錄與通知區塊（在 reply 之上）— 等實際出現再 append
+      let noticeEl = null;
+      let searchHistoryEl = null;
 
       const body = createLiveMessageDiv();
       body.classList.add('compare-card-body');
+      body.parentNode?.removeChild(body);
       card.appendChild(body);
 
       container.appendChild(card);
@@ -3414,48 +3524,120 @@ let currentAudioSrc = null;  // Web Audio API BufferSource
       const start = Date.now();
       let rawContent = '';
       let finished = false;
+      let cardIter = 0;
 
       const port = chrome.runtime.connect({ name: 'chat-stream' });
       ports.push(port);
+
+      const setCardStatus = (text, isError = false) => {
+        statusSpan.textContent = text;
+        if (isError) statusSpan.classList.add('error');
+      };
 
       const finishCard = (extraStatus, isError = false) => {
         if (finished) return;
         finished = true;
         const sec = ((Date.now() - start) / 1000).toFixed(1);
-        statusSpan.textContent = `${extraStatus} · ${sec}s`;
-        if (isError) statusSpan.classList.add('error');
+        const statusText = `${extraStatus} · ${sec}s`;
+        setCardStatus(statusText, isError);
+        results[idx].statusText = statusText;
+        results[idx].isError = isError;
+        // 完成時，最終的搜尋紀錄渲染到 card（取代 streaming 中的暫存）
+        if (results[idx].searchLog.length > 0) {
+          const finalSearchEl = buildSearchHistoryEl(results[idx].searchLog);
+          if (searchHistoryEl) {
+            searchHistoryEl.replaceWith(finalSearchEl);
+          } else {
+            card.insertBefore(finalSearchEl, body);
+          }
+        }
+        if (results[idx].notices.length > 0 && !noticeEl) {
+          const el = buildAgentNoticeEl(results[idx].notices);
+          card.insertBefore(el, searchHistoryEl || body);
+        }
         activeCount--;
         if (activeCount === 0) onAllDone();
         try { port.disconnect(); } catch {}
       };
 
       port.onMessage.addListener((msg) => {
+        if (msg.type === 'status') {
+          if (!rawContent) setCardStatus(msg.text || '處理中…');
+          return;
+        }
+        if (msg.type === 'agent_notice') {
+          const notice = {
+            text: msg.text || '',
+            level: msg.level === 'warning' || msg.level === 'error' ? msg.level : 'info'
+          };
+          if (notice.text) {
+            results[idx].notices.push(notice);
+            if (!noticeEl) {
+              noticeEl = buildAgentNoticeEl(results[idx].notices);
+              card.insertBefore(noticeEl, searchHistoryEl || body);
+            } else {
+              const fresh = buildAgentNoticeEl(results[idx].notices);
+              noticeEl.replaceWith(fresh);
+              noticeEl = fresh;
+            }
+          }
+          return;
+        }
+        if (msg.type === 'agent_thinking') {
+          cardIter = msg.iter;
+          setCardStatus(msg.maxIter ? `第 ${msg.iter}/${msg.maxIter} 輪，思考中…` : `第 ${msg.iter} 輪，思考中…`);
+          return;
+        }
+        if (msg.type === 'tool_start') {
+          const label = getAgentToolLabel(msg.tool);
+          setCardStatus(`第 ${cardIter} 輪 · ${label}：${msg.query || ''}`);
+          results[idx].searchLog.push({ tool: msg.tool, query: msg.query, count: null });
+          return;
+        }
+        if (msg.type === 'tool_done') {
+          if (results[idx].searchLog.length > 0) {
+            results[idx].searchLog[results[idx].searchLog.length - 1].count = msg.count;
+            results[idx].searchLog[results[idx].searchLog.length - 1].error = msg.error || null;
+          }
+          setCardStatus(msg.error ? `第 ${cardIter} 輪，工具失敗，補救中…` : `第 ${cardIter} 輪，分析結果中…`);
+          return;
+        }
         if (msg.type === 'chunk') {
           rawContent = msg.full;
           updateLiveMessageContent(body, rawContent);
           scrollToBottom();
-        } else if (msg.type === 'done') {
+          return;
+        }
+        if (msg.type === 'done') {
           const reply = (msg.reply && String(msg.reply).trim()) || rawContent || '（無內容）';
+          results[idx].reply = reply;
           finalizeLiveMessage(body, rawContent || reply, reply, replyLang, null);
           const usage = msg.usage && Number(msg.usage.totalTokens || 0) > 0
             ? `${msg.usage.totalTokens} tokens`
             : '完成';
           finishCard(usage, false);
-        } else if (msg.type === 'error') {
+          return;
+        }
+        if (msg.type === 'error') {
+          const errText = `錯誤：${msg.message || '未知錯誤'}`;
+          results[idx].reply = errText;
           updateLiveMessageContent(body, `**錯誤**：${msg.message || '未知錯誤'}`);
-          finalizeLiveMessage(body, rawContent || '', `錯誤：${msg.message || ''}`, replyLang, null);
+          finalizeLiveMessage(body, rawContent || '', errText, replyLang, null);
           finishCard('錯誤', true);
+          return;
         }
       });
 
       port.onDisconnect.addListener(() => {
         if (finished) return;
+        const partial = rawContent || '連線中斷';
+        results[idx].reply = partial;
         if (!rawContent) updateLiveMessageContent(body, '**連線中斷**');
-        finalizeLiveMessage(body, rawContent || '', rawContent || '連線中斷', replyLang, null);
+        finalizeLiveMessage(body, rawContent || '', partial, replyLang, null);
         finishCard('連線中斷', true);
       });
 
-      cards.push({ port, header, body });
+      cards.push({ port, body });
 
       const requestData = {
         message: augmentedMessage,
@@ -3464,11 +3646,14 @@ let currentAudioSrc = null;  // Web Audio API BufferSource
         translateConfig,
         model: modelId,
         contextCharBudget: getCurrentContextCharBudget(),
-        maxAgentIterations: 0,
+        // 比較模式：每個 model 各自跑 agent loop，依當前 depth 設定
+        maxAgentIterations: sendIterations,
         systemPrompt: '',
         memoryContext,
-        sessionId: currentSession?.id,
-        skipTools: true,
+        // 共用 sessionId 會讓 cache 跨 model；附加 modelId 避免互相借結果
+        sessionId: currentSession?.id ? `${currentSession.id}__cmp__${modelId}` : undefined,
+        skipTools: false,
+        // plan 模式在 compare 內維持關閉，避免每個 card 都跳出計畫批准
         planMode: false,
         spaceInstructions: ''
       };
@@ -3478,10 +3663,20 @@ let currentAudioSrc = null;  // Web Audio API BufferSource
     chatMessages.appendChild(container);
     scrollToBottom();
 
-    function onAllDone() {
+    async function onAllDone() {
       isLoading = false;
       currentPort = null;
       setStreamingMode(false);
+      // 將比較結果存入 session（loadSession 會用 renderSavedCompareMessage 重建）
+      if (currentSession) {
+        currentSession.messages.push({
+          role: 'compare',
+          content: '比較模式',
+          entries: results.map(r => ({ ...r, searchLog: [...r.searchLog], notices: [...r.notices] }))
+        });
+        await saveCurrentSession();
+        await loadHistory();
+      }
       messageInput.focus();
     }
   }
@@ -7115,6 +7310,53 @@ ${transcript}`;
   }
 
   // ── Markdown 渲染 ─────────────────────────────────────────
+  // LaTeX 命令對應 Unicode 字元（無完整 MathJax 渲染，先補上最常出現的符號）
+  const LATEX_SYMBOL_MAP = {
+    rightarrow: '→', leftarrow: '←', uparrow: '↑', downarrow: '↓',
+    leftrightarrow: '↔', updownarrow: '↕',
+    Rightarrow: '⇒', Leftarrow: '⇐', Leftrightarrow: '⇔',
+    longrightarrow: '⟶', longleftarrow: '⟵', longleftrightarrow: '⟷',
+    Longrightarrow: '⟹', Longleftarrow: '⟸', Longleftrightarrow: '⟺',
+    mapsto: '↦', to: '→', gets: '←',
+    pm: '±', mp: '∓', times: '×', div: '÷', cdot: '·', ast: '∗', star: '⋆',
+    le: '≤', leq: '≤', ge: '≥', geq: '≥', neq: '≠', ne: '≠',
+    approx: '≈', equiv: '≡', sim: '∼', simeq: '≃', cong: '≅', propto: '∝',
+    infty: '∞', forall: '∀', exists: '∃', nexists: '∄',
+    emptyset: '∅', varnothing: '∅',
+    in: '∈', notin: '∉', ni: '∋',
+    subset: '⊂', supset: '⊃', subseteq: '⊆', supseteq: '⊇',
+    cup: '∪', cap: '∩', setminus: '∖',
+    land: '∧', lor: '∨', lnot: '¬', neg: '¬',
+    alpha: 'α', beta: 'β', gamma: 'γ', delta: 'δ', epsilon: 'ε', varepsilon: 'ε',
+    zeta: 'ζ', eta: 'η', theta: 'θ', vartheta: 'ϑ', iota: 'ι', kappa: 'κ',
+    lambda: 'λ', mu: 'μ', nu: 'ν', xi: 'ξ', omicron: 'ο', pi: 'π', varpi: 'ϖ',
+    rho: 'ρ', varrho: 'ϱ', sigma: 'σ', varsigma: 'ς', tau: 'τ', upsilon: 'υ',
+    phi: 'φ', varphi: 'ϕ', chi: 'χ', psi: 'ψ', omega: 'ω',
+    Gamma: 'Γ', Delta: 'Δ', Theta: 'Θ', Lambda: 'Λ', Xi: 'Ξ', Pi: 'Π',
+    Sigma: 'Σ', Upsilon: 'Υ', Phi: 'Φ', Psi: 'Ψ', Omega: 'Ω',
+    ldots: '…', cdots: '⋯', vdots: '⋮', ddots: '⋱', dots: '…',
+    sum: '∑', prod: '∏', coprod: '∐', int: '∫', iint: '∬', oint: '∮',
+    sqrt: '√', partial: '∂', nabla: '∇',
+    circ: '°', degree: '°', prime: '′',
+    langle: '⟨', rangle: '⟩',
+    hbar: 'ℏ', ell: 'ℓ', Re: 'ℜ', Im: 'ℑ', aleph: 'ℵ',
+    perp: '⊥', parallel: '∥', angle: '∠',
+    therefore: '∴', because: '∵',
+    quad: ' ', qquad: '  '
+  };
+
+  function replaceLatexSymbols(text) {
+    // 1) $\cmd$ 或 $\cmd{...}$ 形式（LLM 最常輸出）
+    text = text.replace(/\$\\([a-zA-Z]+)(?:\{[^}]*\})?\$/g, (m, cmd) =>
+      Object.prototype.hasOwnProperty.call(LATEX_SYMBOL_MAP, cmd) ? LATEX_SYMBOL_MAP[cmd] : m
+    );
+    // 2) 裸 \cmd 形式（限定 map 中存在的命令，避免誤替換 Windows 路徑等）
+    text = text.replace(/\\([a-zA-Z]+)/g, (m, cmd) =>
+      Object.prototype.hasOwnProperty.call(LATEX_SYMBOL_MAP, cmd) ? LATEX_SYMBOL_MAP[cmd] : m
+    );
+    return text;
+  }
+
   function renderMarkdown(raw) {
     const blocks = [], inlines = [];
 
@@ -7132,6 +7374,9 @@ ${transcript}`;
       inlines.push(`<code>${escapeHtml(code)}</code>`);
       return `\x02I${i}\x03`;
     });
+
+    // 2.1 LaTeX 符號轉 Unicode（必須在程式碼抽出後、HTML escape 前）
+    text = replaceLatexSymbols(text);
 
     // 2.5. 抽出連結（HTML escape 前處理，避免 & 被轉成 &amp; 破壞 URL）
     // Markdown 連結：[text](url)
@@ -7358,11 +7603,128 @@ ${transcript}`;
     return n.toFixed(digits);
   }
 
+  function formatCapitalFlow(value, market = activeMarket) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return '-';
+    const abs = Math.abs(n);
+    const sign = n > 0 ? '+' : n < 0 ? '-' : '';
+    const unit = market === 'TW' ? '億' : 'M';
+    const scaled = market === 'TW' ? abs / 100000000 : abs / 1000000;
+    return `${sign}${scaled.toFixed(scaled >= 100 ? 0 : 2)} ${unit}`;
+  }
+
+  function getMarketSectors() {
+    return marketRenderedSectors.length ? marketRenderedSectors : (marketDashboard?.sectors || marketDashboard?.groups || []);
+  }
+
+  function findMarketSector(name) {
+    return getMarketSectors().find(sector => sector.name === name) || null;
+  }
+
+  function findMarketStock(symbol) {
+    return getMarketSectors().flatMap(sector => sector.stocks || []).find(stock => stock.symbol === symbol) || null;
+  }
+
+  function sortMarketStocks(stocks = []) {
+    const key = marketStockSortKey || 'capitalFlow';
+    return [...stocks].sort((a, b) => {
+      if (key === 'name') return String(a.name || a.symbol || '').localeCompare(String(b.name || b.symbol || ''), 'zh-Hant');
+      const av = key === 'volume' ? Number(a.turnover || a.volume || 0) : Number(a[key] || 0);
+      const bv = key === 'volume' ? Number(b.turnover || b.volume || 0) : Number(b[key] || 0);
+      return bv - av;
+    });
+  }
+
   function marketChangeClass(value) {
     const n = Number(value || 0);
     if (n > 0.05) return 'up';
     if (n < -0.05) return 'down';
     return 'flat';
+  }
+
+  function buildTreemapRects(items, width, height) {
+    const normalized = items
+      .map(item => ({
+        item,
+        value: Math.max(Math.abs(Number(item.capitalFlow || 0)), Math.abs(Number(item.totalTurnover || 0)) * 0.001, Math.abs(Number(item.totalVolume || 0)) * 0.000001, 1)
+      }))
+      .sort((a, b) => b.value - a.value);
+    const rects = [];
+    const split = (nodes, x, y, w, h) => {
+      if (!nodes.length || w <= 0 || h <= 0) return;
+      if (nodes.length === 1) {
+        rects.push({ item: nodes[0].item, x, y, w, h });
+        return;
+      }
+      const total = nodes.reduce((sum, node) => sum + node.value, 0);
+      let acc = 0;
+      let splitIndex = 1;
+      for (let i = 0; i < nodes.length - 1; i += 1) {
+        const next = acc + nodes[i].value;
+        if (next >= total / 2) {
+          splitIndex = Math.abs((total / 2) - acc) < Math.abs((total / 2) - next) ? Math.max(1, i) : i + 1;
+          break;
+        }
+        acc = next;
+        splitIndex = i + 1;
+      }
+      splitIndex = Math.max(1, Math.min(nodes.length - 1, splitIndex));
+      const first = nodes.slice(0, splitIndex);
+      const second = nodes.slice(splitIndex);
+      const firstTotal = first.reduce((sum, node) => sum + node.value, 0);
+      const ratio = total ? firstTotal / total : 0.5;
+      if (w >= h) {
+        const firstW = Math.max(1, w * ratio);
+        split(first, x, y, firstW, h);
+        split(second, x + firstW, y, w - firstW, h);
+      } else {
+        const firstH = Math.max(1, h * ratio);
+        split(first, x, y, w, firstH);
+        split(second, x, y + firstH, w, h - firstH);
+      }
+    };
+    split(normalized, 0, 0, width, height);
+    return rects;
+  }
+
+  function getHeatmapValue(group) {
+    return Math.max(
+      Math.abs(Number(group.capitalFlow || 0)),
+      Math.abs(Number(group.totalTurnover || 0)) * 0.001,
+      Math.abs(Number(group.totalVolume || 0)) * 0.000001,
+      1
+    );
+  }
+
+  function mergeMarketHeatmapTail(groups, market) {
+    if (!groups.length) return [];
+    const width = Math.max(marketHeatmap.clientWidth || 0, 320);
+    const maxTiles = width < 420 ? 6 : width < 640 ? 9 : 12;
+    const sorted = [...groups].sort((a, b) => getHeatmapValue(b) - getHeatmapValue(a));
+    if (sorted.length <= maxTiles) return sorted;
+    const visible = sorted.slice(0, Math.max(1, maxTiles - 1));
+    const tail = sorted.slice(Math.max(1, maxTiles - 1));
+    const tailStocks = tail.flatMap(group => group.stocks || []);
+    const validStocks = tailStocks.filter(stock => !stock.error && Number.isFinite(Number(stock.price)));
+    const capitalFlow = tail.reduce((sum, group) => sum + Number(group.capitalFlow || 0), 0);
+    const totalVolume = tail.reduce((sum, group) => sum + Number(group.totalVolume || 0), 0);
+    const totalTurnover = tail.reduce((sum, group) => sum + Number(group.totalTurnover || 0), 0);
+    const avgChange = validStocks.length
+      ? validStocks.reduce((sum, stock) => sum + Number(stock.percentChange || 0), 0) / validStocks.length
+      : 0;
+    const upRatio = validStocks.length
+      ? validStocks.filter(stock => Number(stock.percentChange || 0) > 0).length / validStocks.length
+      : 0;
+    visible.push({
+      name: market === 'TW' ? '其他產業' : 'Other Sectors',
+      capitalFlow,
+      avgChange,
+      upRatio,
+      totalVolume,
+      totalTurnover,
+      stocks: tailStocks
+    });
+    return visible;
   }
 
   async function loadMarketDashboard(force = false) {
@@ -7376,6 +7738,13 @@ ${transcript}`;
     marketGroups.innerHTML = '';
     marketNews.innerHTML = '';
     marketDetail.innerHTML = '尚未選取個股。';
+    selectedMarketSector = null;
+    selectedMarketDetail = null;
+    marketRenderedSectors = [];
+    if (marketSearchResults) {
+      marketSearchResults.innerHTML = '';
+      marketSearchResults.classList.add('hidden');
+    }
     marketWarnings.innerHTML = '';
     marketWarnings.classList.add('hidden');
     try {
@@ -7406,14 +7775,21 @@ ${transcript}`;
       marketWarnings.innerHTML = '';
       marketWarnings.classList.add('hidden');
     }
-    renderMarketHeatmap(data.groups || [], data);
-    renderMarketGroups(data.groups || []);
+    if (marketHeatmapUnit) marketHeatmapUnit.textContent = data.market === 'TW' ? '單位：台幣' : '單位：美元';
+    const sectors = data.sectors || data.groups || [];
+    renderMarketHeatmap(sectors, data);
+    const renderedSectors = getMarketSectors();
+    if (!selectedMarketSector && renderedSectors.length) {
+      selectedMarketSector = renderedSectors.find(sector => (sector.stocks || []).some(stock => !stock.error))?.name || renderedSectors[0].name;
+    }
+    renderSelectedMarketSector();
     renderMarketNews(data.news || []);
   }
 
   function renderMarketHeatmap(groups, dashboard = {}) {
     const shouldHideForApiIssue = dashboard.hasApiError && (dashboard.market === 'TW' || Number(dashboard.validQuoteCount || 0) === 0);
     if (!groups.length || Number(dashboard.validQuoteCount || 0) === 0 || shouldHideForApiIssue) {
+      marketRenderedSectors = [];
       const isTw = dashboard.market === 'TW';
       marketHeatmap.innerHTML = `
         <div class="market-empty">
@@ -7430,43 +7806,71 @@ ${transcript}`;
     const validGroups = groups
       .map(group => ({ ...group, stocks: (group.stocks || []).filter(stock => !stock.error && Number.isFinite(Number(stock.price))) }))
       .filter(group => group.stocks.length > 0);
-    const maxAbs = Math.max(...validGroups.flatMap(g => (g.stocks || []).map(s => Math.abs(Number(s.percentChange || 0)))), 1);
-    marketHeatmap.innerHTML = validGroups.map(group => `
-      <div class="market-heatmap-group">
-        <div class="market-heatmap-group-title">${escapeHtml(group.name)} <span>${formatMarketNumber(group.avgChange)}%</span></div>
-        <div class="market-heatmap-tiles">
-          ${(group.stocks || []).map(stock => {
-            const change = Number(stock.percentChange || 0);
-            const intensity = Math.min(1, Math.abs(change) / maxAbs);
-            const alpha = 0.18 + intensity * 0.5;
-            const color = change >= 0 ? `rgba(16,185,129,${alpha})` : `rgba(239,68,68,${alpha})`;
-            const weight = Math.min(2.4, Math.max(1, Math.log10(Math.max(Number(stock.volume || 0), 10)) / 5));
-            return `<button class="market-tile ${marketChangeClass(change)}" data-market-symbol="${escapeAttr(stock.symbol)}" style="background:${color};flex:${weight}">
-              <strong>${escapeHtml(stock.displaySymbol || stock.symbol)}</strong>
-              <span>${escapeHtml(stock.name || '')}</span>
-              <em>${formatMarketNumber(change)}%</em>
-            </button>`;
-          }).join('')}
-        </div>
-      </div>
+    const width = Math.max(marketHeatmap.clientWidth || 0, 320);
+    const height = Math.max(marketHeatmap.clientHeight || 0, 260);
+    const heatmapGroups = mergeMarketHeatmapTail(validGroups, dashboard.market);
+    marketRenderedSectors = heatmapGroups;
+    const maxAbs = Math.max(...heatmapGroups.map(g => Math.abs(Number(g.capitalFlow || 0))), 1);
+    const gap = 8;
+    const rects = buildTreemapRects(heatmapGroups, width, height);
+    marketHeatmap.innerHTML = rects.map(({ item: group, x, y, w, h }) => `
+      ${(() => {
+        const flow = Number(group.capitalFlow || 0);
+        const intensity = Math.min(1, Math.abs(flow) / maxAbs);
+        const alpha = 0.22 + intensity * 0.58;
+        const color = flow >= 0 ? `rgba(153,27,27,${alpha})` : `rgba(6,78,59,${alpha})`;
+        const active = selectedMarketSector === group.name ? ' active' : '';
+        const left = Math.round(x + gap / 2);
+        const top = Math.round(y + gap / 2);
+        const tileW = Math.max(1, Math.round(w - gap));
+        const tileH = Math.max(1, Math.round(h - gap));
+        if (tileW < 44 || tileH < 36) return '';
+        const compactClass = tileW < 120 || tileH < 82 ? ' compact' : '';
+        const tinyClass = tileW < 82 || tileH < 58 ? ' tiny' : '';
+        return `<button class="market-tile market-sector-tile ${marketChangeClass(flow)}${active}${compactClass}${tinyClass}" data-market-sector="${escapeAttr(group.name)}" style="background:${color};left:${left}px;top:${top}px;width:${tileW}px;height:${tileH}px">
+          <strong>${escapeHtml(group.name)}</strong>
+          <span>${formatCapitalFlow(flow, dashboard.market)}</span>
+          <em>${formatMarketNumber(group.avgChange)}% · ${Math.round(Number(group.upRatio || 0) * 100)}%</em>
+        </button>`;
+      })()}
     `).join('');
   }
 
-  function renderMarketGroups(groups) {
+  function renderSelectedMarketSector() {
+    const groups = getMarketSectors();
     if (marketDashboard?.hasApiError && marketDashboard?.market === 'TW') {
       marketGroups.innerHTML = '<div class="market-empty">台股 API 回傳錯誤，暫時隱藏族群資料。請設定 FinMind token 後重新整理，或稍後再試。</div>';
       return;
     }
     const validGroups = groups.filter(group => (group.stocks || []).some(stock => !stock.error && Number.isFinite(Number(stock.price))));
-    marketGroups.innerHTML = validGroups.length ? validGroups.map(group => `
-      <div class="market-group-row">
+    if (!validGroups.length) {
+      marketGroups.innerHTML = '<div class="market-empty">尚無可用產業資料。請先設定金融 API key 或稍後重試。</div>';
+      if (marketSectorTitle) marketSectorTitle.textContent = '產業列表';
+      return;
+    }
+    const sector = findMarketSector(selectedMarketSector) || validGroups[0];
+    selectedMarketSector = sector.name;
+    const stocks = sortMarketStocks((sector.stocks || []).filter(stock => !stock.error && Number.isFinite(Number(stock.price))));
+    if (marketSectorTitle) marketSectorTitle.textContent = `${sector.name} (${stocks.length})`;
+    marketGroups.innerHTML = stocks.length ? stocks.map((stock, index) => `
+      <button class="market-stock-row" type="button" data-market-symbol="${escapeAttr(stock.symbol)}">
         <div>
-          <strong>${escapeHtml(group.name)}</strong>
-          <span>上漲比例 ${Math.round(Number(group.upRatio || 0) * 100)}%</span>
+          <strong>${escapeHtml(stock.name || stock.displaySymbol || stock.symbol)}</strong>
+          <span>${escapeHtml(stock.displaySymbol || stock.symbol)} · #${index + 1} · ${formatCapitalFlow(stock.capitalFlow, stock.market || activeMarket)}</span>
         </div>
-        <span class="market-change ${marketChangeClass(group.avgChange)}">${formatMarketNumber(group.avgChange)}%</span>
-      </div>
-    `).join('') : '<div class="market-empty">尚無可用族群資料。請先設定金融 API key 或稍後重試。</div>';
+        <span class="market-change ${marketChangeClass(stock.percentChange)}">${formatMarketNumber(stock.percentChange)}%</span>
+      </button>
+    `).join('') : '<div class="market-empty">此產業目前沒有可用個股報價。</div>';
+  }
+
+  function selectMarketSector(name) {
+    selectedMarketSector = name;
+    selectedMarketStock = null;
+    selectedMarketDetail = null;
+    renderMarketHeatmap(getMarketSectors(), marketDashboard || {});
+    renderSelectedMarketSector();
+    marketDetailHint.textContent = name || '點擊產業或個股';
+    marketDetail.innerHTML = '<div class="market-detail-empty">請從產業列表選取個股。</div>';
   }
 
   function renderMarketNews(newsGroups) {
@@ -7549,8 +7953,59 @@ ${transcript}`;
     ` : '';
   }
 
+  function renderMarketSectorContext(stock, detail = null) {
+    const sector = findMarketSector(stock.group || detail?.sectorContext?.name || selectedMarketSector);
+    const context = detail?.sectorContext || {};
+    const name = sector?.name || context.name || stock.group || '未分類';
+    const peers = sector?.stocks || context.peers || [];
+    const rank = peers.findIndex(item => item.symbol === stock.symbol) + 1;
+    return `
+      <div class="market-sector-context">
+        <div><span>產業</span><strong>${escapeHtml(name)}</strong></div>
+        <div><span>同產業排名</span><strong>${rank > 0 ? `#${rank}` : '-'}</strong></div>
+        <div><span>產業平均漲跌</span><strong class="market-change ${marketChangeClass(sector?.avgChange)}">${sector ? `${formatMarketNumber(sector.avgChange)}%` : '-'}</strong></div>
+        <div><span>產業資金流</span><strong>${sector ? formatCapitalFlow(sector.capitalFlow, stock.market || activeMarket) : '-'}</strong></div>
+      </div>
+    `;
+  }
+
+  function renderMarketDetailNews(detail = null) {
+    const news = detail?.news?.news || [];
+    if (!news.length) return '<div class="market-detail-news market-empty">尚無結構化新聞；可使用「新聞」按鈕觸發搜尋 fallback。</div>';
+    return `
+      <div class="market-detail-news">
+        ${news.slice(0, 5).map(item => `
+          <a class="market-detail-news-item" href="${escapeAttr(item.url || '#')}" target="_blank" rel="noopener">
+            <strong>${escapeHtml(item.headline || item.summary || '未命名消息')}</strong>
+            <span>${escapeHtml(item.source || '')}${item.datetime ? ` · ${formatMarketTime(item.datetime)}` : ''}</span>
+          </a>
+        `).join('')}
+      </div>
+    `;
+  }
+
+  function renderMarketAiSummary(text = '', state = 'idle') {
+    const content = state === 'loading'
+      ? '<div class="market-loading">AI 重點整理中...</div>'
+      : state === 'error'
+        ? `<div class="market-empty">${escapeHtml(text || 'AI 重點整理失敗。')}</div>`
+        : text
+          ? `<div class="market-ai-summary-body">${renderMarkdown(text)}</div>`
+          : '<div class="market-empty">尚未產生 AI 重點整理。</div>';
+    return `
+      <div class="market-ai-summary">
+        <div class="market-ai-summary-head">
+          <strong>AI 重點整理</strong>
+          <button class="btn-secondary-sm" type="button" data-market-ai-summary="refresh">重新整理</button>
+        </div>
+        ${content}
+      </div>
+    `;
+  }
+
   function renderMarketDetail(stock, detail = null) {
     selectedMarketStock = stock;
+    selectedMarketDetail = detail;
     marketDetailHint.textContent = stock.displaySymbol || stock.symbol;
     const change = Number(stock.percentChange || 0);
     const price = detail?.quote?.quote?.current ?? stock.price;
@@ -7567,7 +8022,15 @@ ${transcript}`;
         </div>
         <div class="market-detail-price">${formatMarketNumber(price)} <span>${escapeHtml(freshness.label || '最新可用')} ${freshness.timestamp ? `· ${formatMarketTime(freshness.timestamp)}` : ''}</span></div>
         ${renderSparkline(points, change)}
+        ${renderMarketSectorContext(stock, detail)}
         ${renderMarketDetailStats(stock, detail)}
+        <div class="market-detail-subsection">
+          <h5>相關新聞</h5>
+          ${renderMarketDetailNews(detail)}
+        </div>
+        <div id="marketAiSummarySlot">
+          ${renderMarketAiSummary('', detail ? 'loading' : 'idle')}
+        </div>
         <div class="market-detail-actions">
           <button class="btn-primary-sm" type="button" data-market-command="finance" data-symbol="${escapeAttr(stock.symbol)}">深入分析</button>
           <button class="btn-secondary-sm" type="button" data-market-command="news" data-symbol="${escapeAttr(stock.symbol)}">新聞</button>
@@ -7585,10 +8048,97 @@ ${transcript}`;
         data: { symbol: stock.symbol, market: stock.market || activeMarket, companyName: stock.name }
       });
       if (!res?.success) throw new Error(res?.error || '個股資料載入失敗');
-      renderMarketDetail(stock, res.data);
+      const quote = res.data?.quote?.quote || {};
+      const profile = res.data?.profile?.profile || {};
+      const enrichedStock = {
+        ...stock,
+        market: res.data?.market || stock.market || activeMarket,
+        displaySymbol: res.data?.displaySymbol || stock.displaySymbol || stock.symbol,
+        name: stock.name || profile.name || '',
+        group: stock.group || res.data?.sectorContext?.name || profile.industryCategory || profile.industry || profile.sector || '',
+        price: quote.current ?? stock.price,
+        change: quote.change ?? stock.change,
+        percentChange: quote.percentChange ?? stock.percentChange,
+        volume: quote.volume ?? stock.volume,
+        turnover: quote.turnover ?? stock.turnover
+      };
+      renderMarketDetail(enrichedStock, res.data);
+      loadMarketAiSummary(false);
     } catch (err) {
       marketDetailHint.textContent = '個股資料不足';
       setStatus(`個股資料載入失敗：${err.message}`, true, 2600);
+    }
+  }
+
+  async function searchMarketSymbol() {
+    const query = marketSearchInput?.value?.trim() || '';
+    if (!query) {
+      marketSearchResults?.classList.add('hidden');
+      return;
+    }
+    if (!marketSearchResults) return;
+    marketSearchResults.classList.remove('hidden');
+    marketSearchResults.innerHTML = '<div class="market-loading">搜尋個股中...</div>';
+    try {
+      const res = await chrome.runtime.sendMessage({
+        type: 'GET_FINANCE_SYMBOL_SEARCH',
+        data: { query, market: activeMarket }
+      });
+      if (!res?.success) throw new Error(res?.error || '搜尋失敗');
+      const results = res.data?.results || [];
+      marketSearchResults.innerHTML = results.length ? `
+        <div class="market-search-results-head">
+          <strong>${escapeHtml(activeMarket === 'TW' ? '台股搜尋' : '美股搜尋')}</strong>
+          <span>${escapeHtml(query)} · ${results.length} 筆</span>
+        </div>
+        <div class="market-search-result-list">
+          ${results.map(item => `
+            <button class="market-search-result" type="button"
+              data-market-symbol="${escapeAttr(item.symbol)}"
+              data-display-symbol="${escapeAttr(item.displaySymbol || item.symbol)}"
+              data-market-name="${escapeAttr(item.name || '')}"
+              data-market-group="${escapeAttr(item.group || '')}"
+              data-market="${escapeAttr(item.market || activeMarket)}">
+              <strong>${escapeHtml(item.displaySymbol || item.symbol)}</strong>
+              <span>${escapeHtml(item.name || '')}</span>
+              <em>${escapeHtml(item.group || item.source || '')}</em>
+            </button>
+          `).join('')}
+        </div>
+      ` : `<div class="market-empty">找不到「${escapeHtml(query)}」。請改用股票代碼或公司名稱。</div>`;
+    } catch (err) {
+      marketSearchResults.innerHTML = `<div class="market-empty">搜尋失敗：${escapeHtml(err.message)}</div>`;
+    }
+  }
+
+  async function loadMarketAiSummary(force = false) {
+    if (!selectedMarketStock || !selectedMarketDetail) return;
+    const slot = document.getElementById('marketAiSummarySlot');
+    if (!slot) return;
+    if (!force && selectedMarketDetail.aiSummary?.text) {
+      slot.innerHTML = renderMarketAiSummary(selectedMarketDetail.aiSummary.text, 'ready');
+      return;
+    }
+    slot.innerHTML = renderMarketAiSummary('', 'loading');
+    const requestedSymbol = selectedMarketStock.symbol;
+    try {
+      const sector = findMarketSector(selectedMarketStock.group || selectedMarketDetail?.sectorContext?.name || selectedMarketSector);
+      const res = await chrome.runtime.sendMessage({
+        type: 'GET_FINANCE_AI_SUMMARY',
+        data: {
+          stock: selectedMarketStock,
+          detail: selectedMarketDetail,
+          sectorContext: sector || selectedMarketDetail.sectorContext || {},
+          model: currentModel
+        }
+      });
+      if (!res?.success) throw new Error(res?.error || 'AI 重點整理失敗');
+      if (selectedMarketStock?.symbol !== requestedSymbol) return;
+      selectedMarketDetail.aiSummary = res.data;
+      slot.innerHTML = renderMarketAiSummary(res.data?.text || '', 'ready');
+    } catch (err) {
+      if (selectedMarketStock?.symbol !== requestedSymbol) return;
+      slot.innerHTML = renderMarketAiSummary(`${err.message} 可改用「深入分析」按鈕。`, 'error');
     }
   }
 

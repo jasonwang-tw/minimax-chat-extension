@@ -1151,6 +1151,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message.type === 'GET_FINANCE_SYMBOL_SEARCH') {
+    financeSearchSymbols(message.data || {})
+      .then(data => sendResponse({ success: true, data }))
+      .catch(err => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  if (message.type === 'GET_FINANCE_AI_SUMMARY') {
+    generateFinanceAiSummary(message.data || {})
+      .then(data => sendResponse({ success: true, data }))
+      .catch(err => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
   if (message.type === 'LESSON_RECORDING_START') {
     startLessonOffscreenRecording()
       .then(data => sendResponse({ success: true, data }))
@@ -2802,30 +2816,12 @@ async function resumeLessonOffscreenRecording() {
 }
 
 const FINANCE_DASHBOARD_UNIVERSE = {
-  US: [
-    { symbol: 'NVDA', name: 'NVIDIA', group: 'AI / Semiconductors' },
-    { symbol: 'AAPL', name: 'Apple', group: 'Mega-cap Tech' },
-    { symbol: 'MSFT', name: 'Microsoft', group: 'Mega-cap Tech' },
-    { symbol: 'AMZN', name: 'Amazon', group: 'Consumer Internet' },
-    { symbol: 'META', name: 'Meta', group: 'Consumer Internet' },
-    { symbol: 'GOOGL', name: 'Alphabet', group: 'Consumer Internet' },
-    { symbol: 'TSLA', name: 'Tesla', group: 'EV / Auto' },
-    { symbol: 'AMD', name: 'AMD', group: 'AI / Semiconductors' },
-    { symbol: 'JPM', name: 'JPMorgan Chase', group: 'Financials' },
-    { symbol: 'XOM', name: 'Exxon Mobil', group: 'Energy' }
-  ],
-  TW: [
-    { symbol: '2330', name: '台積電', group: '半導體' },
-    { symbol: '2454', name: '聯發科', group: '半導體' },
-    { symbol: '2303', name: '聯電', group: '半導體' },
-    { symbol: '2317', name: '鴻海', group: 'AI 伺服器 / 電子代工' },
-    { symbol: '2382', name: '廣達', group: 'AI 伺服器 / 電子代工' },
-    { symbol: '2308', name: '台達電', group: '電源 / 工業' },
-    { symbol: '2412', name: '中華電', group: '電信' },
-    { symbol: '2881', name: '富邦金', group: '金融' },
-    { symbol: '2882', name: '國泰金', group: '金融' },
-    { symbol: '2603', name: '長榮', group: '航運' }
-  ]
+  US: [],
+  TW: []
+};
+const financeDashboardSectorContextCache = {
+  US: new Map(),
+  TW: new Map()
 };
 
 function formatDateOnly(date) {
@@ -2888,6 +2884,13 @@ async function financeFetchJson(url, timeoutMs = 20000, options = {}) {
   return data;
 }
 
+async function financeFetchText(url, timeoutMs = 20000, options = {}) {
+  const response = await fetchWithTimeout(url, { method: 'GET', ...options }, timeoutMs);
+  const text = await response.text();
+  if (!response.ok) return { error: `HTTP ${response.status}`, status: response.status, text };
+  return text;
+}
+
 function buildUrl(base, params) {
   const url = new URL(base);
   Object.entries(params || {}).forEach(([key, value]) => {
@@ -2900,10 +2903,10 @@ function buildFinMindUrl(params, token) {
   return buildUrl(FINMIND_API_URL, { ...params, ...(token ? { token } : {}) });
 }
 
-async function financeFetchFinMindJson(params, token) {
+async function financeFetchFinMindJson(params, token, timeoutMs = 20000) {
   const url = buildFinMindUrl(params, token);
   const options = token ? { headers: { Authorization: `Bearer ${token}` } } : {};
-  return await financeFetchJson(url, 20000, options);
+  return await financeFetchJson(url, timeoutMs, options);
 }
 
 function extractFinMindData(payload) {
@@ -2911,6 +2914,19 @@ function extractFinMindData(payload) {
   if (payload?.status && Number(payload.status) >= 400) return { error: payload.msg || `FinMind HTTP ${payload.status}` };
   if (payload?.status === 402 || payload?.status === 429) return { error: payload.msg || 'FinMind rate limit or permission issue.' };
   return Array.isArray(payload?.data) ? payload.data : [];
+}
+
+async function mapWithConcurrency(items, limit, mapper) {
+  const results = new Array(items.length);
+  let nextIndex = 0;
+  const workers = Array.from({ length: Math.min(Math.max(Number(limit) || 1, 1), items.length) }, async () => {
+    while (nextIndex < items.length) {
+      const currentIndex = nextIndex++;
+      results[currentIndex] = await mapper(items[currentIndex], currentIndex);
+    }
+  });
+  await Promise.all(workers);
+  return results;
 }
 
 async function financeResolveSymbol(args) {
@@ -3413,50 +3429,289 @@ function getQuotePercentChange(quoteResult = {}) {
   return 0;
 }
 
-function buildFinanceDashboardGroups(items = []) {
-  const byGroup = new Map();
-  items.forEach(item => {
-    const key = item.group || 'Other';
-    if (!byGroup.has(key)) byGroup.set(key, []);
-    byGroup.get(key).push(item);
-  });
-  return [...byGroup.entries()].map(([name, stocks]) => {
-    const valid = stocks.filter(s => !s.error);
-    const avgChange = valid.length ? compactNumber(valid.reduce((sum, s) => sum + Number(s.percentChange || 0), 0) / valid.length) : 0;
-    const upCount = valid.filter(s => Number(s.percentChange || 0) > 0).length;
-    const totalVolume = valid.reduce((sum, s) => sum + (Number(s.volume) || 0), 0);
-    return {
-      name,
-      avgChange,
-      upRatio: valid.length ? compactNumber(upCount / valid.length) : 0,
-      totalVolume: compactNumber(totalVolume),
-      stocks: stocks.sort((a, b) => Math.abs(Number(b.percentChange || 0)) - Math.abs(Number(a.percentChange || 0)))
-    };
-  }).sort((a, b) => Math.abs(Number(b.avgChange || 0)) - Math.abs(Number(a.avgChange || 0)));
+function calculateCapitalFlowProxy(item = {}, market = 'US') {
+  const percentChange = Number(item.percentChange || 0);
+  if (!Number.isFinite(percentChange)) return 0;
+  if (market === 'TW') {
+    const turnover = Number(item.turnover);
+    if (Number.isFinite(turnover) && turnover > 0) return compactNumber(turnover * percentChange / 100);
+  }
+  const price = Number(item.price);
+  const volume = Number(item.volume);
+  if (Number.isFinite(price) && Number.isFinite(volume) && price > 0 && volume > 0) {
+    return compactNumber(price * volume * percentChange / 100);
+  }
+  const marketCap = Number(item.marketCap);
+  if (Number.isFinite(marketCap) && marketCap > 0) return compactNumber(marketCap * percentChange / 100);
+  if (Number.isFinite(volume) && volume > 0) return compactNumber(volume * percentChange / 100);
+  return 0;
 }
 
-async function getFinanceDashboard({ market = 'US' } = {}) {
-  const normalizedMarket = String(market || 'US').toUpperCase() === 'TW' ? 'TW' : 'US';
-  const universe = FINANCE_DASHBOARD_UNIVERSE[normalizedMarket] || FINANCE_DASHBOARD_UNIVERSE.US;
-  const keys = await financeGetKeys();
-  const warnings = [];
-
-  if (normalizedMarket === 'US' && !keys.finnhubApiKey && !keys.alphaVantageApiKey) {
-    warnings.push('美股 dashboard 需要 Finnhub 或 Alpha Vantage API Key；目前只會顯示設定提示與空資料。');
+function parseCsvLine(line = '') {
+  const values = [];
+  let current = '';
+  let quoted = false;
+  for (let i = 0; i < line.length; i += 1) {
+    const char = line[i];
+    const next = line[i + 1];
+    if (char === '"' && quoted && next === '"') {
+      current += '"';
+      i += 1;
+    } else if (char === '"') {
+      quoted = !quoted;
+    } else if (char === ',' && !quoted) {
+      values.push(current);
+      current = '';
+    } else {
+      current += char;
+    }
   }
-  if (normalizedMarket === 'TW' && !keys.finmindToken) {
-    warnings.push('台股資料使用 FinMind 最新可用日資料；未設定 token 時可能受到較嚴格的流量限制。');
+  values.push(current);
+  return values.map(value => value.trim());
+}
+
+function parseCsvRows(text = '') {
+  const lines = String(text || '').split(/\r?\n/).filter(line => line.trim());
+  if (!lines.length) return [];
+  const headers = parseCsvLine(lines[0]).map(header => header.trim());
+  return lines.slice(1).map(line => {
+    const values = parseCsvLine(line);
+    return headers.reduce((row, header, index) => {
+      row[header] = values[index] || '';
+      return row;
+    }, {});
+  });
+}
+
+function normalizeUsSymbolInfo(row = {}, source = '') {
+  const symbol = String(row.symbol || row.Symbol || '').trim().toUpperCase();
+  if (!symbol || /[./^=\s]/.test(symbol)) return null;
+  if (symbol.length > 5) return null;
+  const name = String(row.name || row.description || row.displaySymbol || row.Name || symbol).trim();
+  const exchange = String(row.exchange || row.Exchange || row.mic || '').trim();
+  const assetType = String(row.assetType || row.type || '').trim();
+  const status = String(row.status || '').trim();
+  const searchableText = `${symbol} ${name} ${assetType}`.toLowerCase();
+  if (status && status.toLowerCase() !== 'active') return null;
+  if (assetType && !/(stock|common|equity|adr)/i.test(assetType)) return null;
+  if (/(warrant|unit|right|preferred|depositary share|note|bond|etf|fund|trust)/i.test(searchableText)) return null;
+  return {
+    symbol,
+    name,
+    group: formatUsExchangeGroup(exchange),
+    exchange,
+    market: 'US',
+    source
+  };
+}
+
+function formatUsExchangeGroup(exchange = '') {
+  const raw = String(exchange || '').trim();
+  const upper = raw.toUpperCase();
+  if (upper.includes('NASDAQ')) return 'NASDAQ';
+  if (upper.includes('NEW YORK STOCK EXCHANGE') || upper === 'NYSE') return 'NYSE';
+  if (upper.includes('NYSE ARCA')) return 'NYSE Arca';
+  if (upper.includes('NYSE AMERICAN') || upper.includes('AMEX')) return 'NYSE American';
+  if (upper.includes('OTC')) return 'OTC';
+  return raw || 'Other Exchanges';
+}
+
+function getUsExchangePriority(exchange = '') {
+  const group = formatUsExchangeGroup(exchange);
+  if (group === 'NASDAQ') return 1;
+  if (group === 'NYSE') return 2;
+  if (group === 'NYSE Arca') return 3;
+  if (group === 'NYSE American') return 4;
+  if (group === 'OTC') return 8;
+  return 9;
+}
+
+function pickSpreadItems(items = [], limit = items.length) {
+  if (items.length <= limit) return [...items];
+  if (limit <= 1) return items.slice(0, 1);
+  const picked = [];
+  const used = new Set();
+  const step = (items.length - 1) / (limit - 1);
+  for (let i = 0; i < limit; i += 1) {
+    let index = Math.round(i * step);
+    while (used.has(index) && index < items.length - 1) index += 1;
+    while (used.has(index) && index > 0) index -= 1;
+    if (!used.has(index)) {
+      used.add(index);
+      picked.push(items[index]);
+    }
+  }
+  return picked;
+}
+
+function selectUsDashboardUniverse(rows = [], maxTotal = 300, maxPerExchange = 140) {
+  const bySymbol = new Map();
+  rows.forEach(item => {
+    const stock = normalizeUsSymbolInfo(item, item.source || '');
+    if (stock && !bySymbol.has(stock.symbol)) bySymbol.set(stock.symbol, stock);
+  });
+  const byExchange = new Map();
+  [...bySymbol.values()].forEach(stock => {
+    const exchange = stock.exchange || 'Other';
+    if (!byExchange.has(exchange)) byExchange.set(exchange, []);
+    byExchange.get(exchange).push(stock);
+  });
+  const exchanges = [...byExchange.entries()]
+    .map(([exchange, stocks]) => [exchange, stocks.sort((a, b) => a.symbol.localeCompare(b.symbol))])
+    .sort((a, b) => getUsExchangePriority(a[0]) - getUsExchangePriority(b[0]) || b[1].length - a[1].length);
+  const exchangeSamples = exchanges.map(([exchange, stocks]) => [
+    exchange,
+    pickSpreadItems(stocks, Math.min(maxPerExchange, stocks.length))
+  ]);
+  const selected = [];
+  for (let round = 0; selected.length < maxTotal; round += 1) {
+    let added = false;
+    for (const [, stocks] of exchangeSamples) {
+      if (selected.length >= maxTotal) break;
+      if (round >= stocks.length) continue;
+      selected.push(stocks[round]);
+      added = true;
+    }
+    if (!added) break;
+  }
+  return selected;
+}
+
+async function buildUsDashboardUniverse(keys, warnings) {
+  if (keys.alphaVantageApiKey) {
+    const text = await financeFetchText(buildUrl(ALPHA_VANTAGE_API_URL, {
+      function: 'LISTING_STATUS',
+      apikey: keys.alphaVantageApiKey
+    }), 30000);
+    if (typeof text === 'string') {
+      const rows = parseCsvRows(text);
+      const universe = selectUsDashboardUniverse(rows.map(row => ({ ...row, source: 'Alpha Vantage LISTING_STATUS' })));
+      if (universe.length) {
+        warnings.push(`美股已由 Alpha Vantage LISTING_STATUS 動態選取 ${universe.length} 檔上市股票。`);
+        return universe;
+      }
+    } else if (text?.error) {
+      warnings.push(`Alpha Vantage LISTING_STATUS unavailable: ${text.error}`);
+    }
   }
 
-  const quoteResults = await Promise.all(universe.map(async stock => {
-    const quote = await financeGetQuote({ symbol: stock.symbol, market: normalizedMarket });
+  if (keys.finnhubApiKey) {
+    const data = await financeFetchJson(buildUrl(`${FINNHUB_API_URL}/stock/symbol`, {
+      exchange: 'US',
+      token: keys.finnhubApiKey
+    }), 30000);
+    if (Array.isArray(data)) {
+      const universe = selectUsDashboardUniverse(data.map(row => ({ ...row, source: 'Finnhub stock/symbol' })));
+      if (universe.length) {
+        warnings.push(`美股已由 Finnhub stock/symbol 動態選取 ${universe.length} 檔上市股票。`);
+        return universe;
+      }
+    } else if (data?.error) {
+      warnings.push(`Finnhub stock/symbol unavailable: ${data.error}`);
+    }
+  }
+
+  return [];
+}
+
+async function buildUsDashboardQuoteResults(keys, warnings) {
+  const universe = await buildUsDashboardUniverse(keys, warnings);
+  if (!universe.length) return [];
+  const quoteResults = await mapWithConcurrency(universe, 4, async stock => {
+    const quote = await financeGetQuote({ symbol: stock.symbol, market: 'US' });
+    if (quote.error || !Number.isFinite(Number(quote.quote?.current))) return null;
+    return { stock, quote };
+  });
+  const validQuotes = quoteResults.filter(Boolean);
+  const results = await mapWithConcurrency(validQuotes, 3, async ({ stock, quote }) => {
+    const profile = await financeGetCompanyProfile({ symbol: stock.symbol, market: 'US' })
+      .catch(err => ({ error: err?.message || String(err) }));
+    const profileData = profile?.profile || {};
+    const profileGroup = profileData.sector || profileData.industry || '';
     const percentChange = getQuotePercentChange(quote);
-    const freshness = getFinanceFreshness(quote, normalizedMarket);
-    return {
+    const freshness = getFinanceFreshness(quote, 'US');
+    const result = {
       ...stock,
-      market: normalizedMarket,
-      displaySymbol: quote.displaySymbol || (normalizedMarket === 'TW' ? `${stock.symbol}.TW` : stock.symbol),
-      source: quote.source || '',
+      name: profileData.name || stock.name,
+      group: profileGroup || stock.group || formatUsExchangeGroup(stock.exchange),
+      groupSource: profileGroup ? 'profile' : 'exchange',
+      market: 'US',
+      displaySymbol: quote.displaySymbol || stock.symbol,
+      source: quote.source || stock.source || '',
+      error: quote.error || null,
+      price: quote.quote?.current ?? null,
+      change: quote.quote?.change ?? null,
+      percentChange,
+      open: quote.quote?.open ?? null,
+      high: quote.quote?.high ?? null,
+      low: quote.quote?.low ?? null,
+      previousClose: quote.quote?.previousClose ?? null,
+      volume: quote.quote?.volume ?? 0,
+      turnover: quote.quote?.turnover ?? null,
+      marketCap: profileData.marketCapitalization ?? null,
+      freshness
+    };
+    result.capitalFlow = calculateCapitalFlowProxy(result, 'US');
+    return result;
+  });
+  const validResults = results.filter(item => item && !item.error && Number.isFinite(Number(item.price)));
+  if (validResults.some(item => item.groupSource === 'exchange')) {
+    warnings.push('部分美股公司 profile 未回傳產業分類；已暫以交易所分組，設定 Finnhub key 或可用的 Alpha Vantage OVERVIEW 可改善產業分類。');
+  }
+  return validResults;
+}
+
+function normalizeTaiwanStockInfoRow(row = {}) {
+  const symbol = String(row.stock_id || '').trim();
+  if (!/^\d{4,6}$/.test(symbol)) return null;
+  const name = String(row.stock_name || symbol).trim();
+  const group = String(row.industry_category || row.type || '其他').trim() || '其他';
+  return { symbol, name, group };
+}
+
+function selectTaiwanDashboardUniverse(infoRows = [], maxTotal = 300, maxPerGroup = 30) {
+  const byGroup = new Map();
+  infoRows.forEach(row => {
+    const info = normalizeTaiwanStockInfoRow(row);
+    if (!info) return;
+    if (!byGroup.has(info.group)) byGroup.set(info.group, []);
+    byGroup.get(info.group).push(info);
+  });
+  const groups = [...byGroup.entries()]
+    .map(([name, stocks]) => [name, stocks.sort((a, b) => a.symbol.localeCompare(b.symbol))])
+    .sort((a, b) => b[1].length - a[1].length);
+  const selected = [];
+  for (let round = 0; selected.length < maxTotal; round += 1) {
+    let added = false;
+    for (const [, stocks] of groups) {
+      if (selected.length >= maxTotal) break;
+      if (round >= maxPerGroup || round >= stocks.length) continue;
+      selected.push(stocks[round]);
+      added = true;
+    }
+    if (!added) break;
+  }
+  return selected;
+}
+
+async function buildTaiwanInfoQuoteResults(keys, warnings) {
+  const infoPayload = await financeFetchFinMindJson({ dataset: 'TaiwanStockInfo' }, keys.finmindToken, 30000);
+  const infoRows = extractFinMindData(infoPayload);
+  if (infoRows.error || !Array.isArray(infoRows) || !infoRows.length) {
+    warnings.push(infoRows.error || 'FinMind TaiwanStockInfo unavailable.');
+    return [];
+  }
+  const universe = selectTaiwanDashboardUniverse(infoRows);
+  warnings.push(`台股產業熱力圖已由 TaiwanStockInfo 動態選取 ${universe.length} 檔跨產業股票分批查詢。`);
+  const results = await mapWithConcurrency(universe, 8, async stock => {
+    const quote = await financeGetQuote({ symbol: stock.symbol, market: 'TW' });
+    const percentChange = getQuotePercentChange(quote);
+    const freshness = getFinanceFreshness(quote, 'TW');
+    const result = {
+      ...stock,
+      market: 'TW',
+      displaySymbol: quote.displaySymbol || `${stock.symbol}.TW`,
+      source: quote.source || 'FinMind TaiwanStockInfo dynamic universe',
       error: quote.error || null,
       price: quote.quote?.current ?? null,
       change: quote.quote?.change ?? null,
@@ -3469,9 +3724,168 @@ async function getFinanceDashboard({ market = 'US' } = {}) {
       turnover: quote.quote?.turnover ?? null,
       freshness
     };
-  }));
+    result.capitalFlow = calculateCapitalFlowProxy(result, 'TW');
+    return result;
+  });
+  return results.filter(item => !item.error && Number.isFinite(Number(item.price)));
+}
+
+async function buildTaiwanDashboardQuoteResults(keys, warnings) {
+  const endDate = formatDateOnly(new Date());
+  const startDate = formatDateOnly(dateDaysAgo(10));
+  const [infoPayload, pricePayload] = await Promise.all([
+    financeFetchFinMindJson({ dataset: 'TaiwanStockInfo' }, keys.finmindToken, 30000),
+    financeFetchFinMindJson({
+      dataset: 'TaiwanStockPrice',
+      start_date: startDate,
+      end_date: endDate
+    }, keys.finmindToken, 45000)
+  ]);
+  const infoRows = extractFinMindData(infoPayload);
+  const priceRows = extractFinMindData(pricePayload);
+  if (infoRows.error || priceRows.error || !Array.isArray(infoRows) || !Array.isArray(priceRows) || !priceRows.length) {
+    warnings.push(infoRows.error || priceRows.error || 'FinMind 全市場台股資料不足，改用 TaiwanStockInfo 動態抽樣查詢。');
+    return null;
+  }
+
+  const infoBySymbol = new Map();
+  infoRows.forEach(row => {
+    const info = normalizeTaiwanStockInfoRow(row);
+    if (info && !infoBySymbol.has(info.symbol)) infoBySymbol.set(info.symbol, info);
+  });
+
+  const latestBySymbol = new Map();
+  priceRows.forEach(row => {
+    const symbol = String(row.stock_id || '').trim();
+    if (!infoBySymbol.has(symbol)) return;
+    const previous = latestBySymbol.get(symbol);
+    if (!previous || String(row.date || '').localeCompare(String(previous.date || '')) > 0) {
+      latestBySymbol.set(symbol, row);
+    }
+  });
+
+  return [...latestBySymbol.entries()].map(([symbol, latest]) => {
+    const info = infoBySymbol.get(symbol) || { symbol, name: symbol, group: '其他' };
+    const current = compactNumber(latest.close);
+    const change = compactNumber(latest.spread);
+    const previousClose = compactNumber(
+      Number.isFinite(Number(current)) && Number.isFinite(Number(change))
+        ? Number(current) - Number(change)
+        : null
+    );
+    const percentChange = compactNumber(
+      Number.isFinite(Number(current)) && Number.isFinite(Number(previousClose)) && Number(previousClose) !== 0
+        ? ((Number(current) / Number(previousClose)) - 1) * 100
+        : null
+    );
+    const result = {
+      ...info,
+      market: 'TW',
+      displaySymbol: `${symbol}.TW`,
+      source: 'FinMind TaiwanStockInfo + TaiwanStockPrice',
+      error: null,
+      price: current,
+      change,
+      percentChange,
+      open: compactNumber(latest.open),
+      high: compactNumber(latest.max),
+      low: compactNumber(latest.min),
+      previousClose,
+      volume: compactNumber(latest.Trading_Volume),
+      turnover: compactNumber(latest.Trading_money),
+      freshness: { label: '日資料', level: 'daily', timestamp: latest.date, source: 'FinMind TaiwanStockPrice' }
+    };
+    result.capitalFlow = calculateCapitalFlowProxy(result, 'TW');
+    return result;
+  }).filter(item => Number.isFinite(Number(item.price)));
+}
+
+function buildFinanceDashboardGroups(items = []) {
+  const byGroup = new Map();
+  items.forEach(item => {
+    const key = item.group || 'Other';
+    if (!byGroup.has(key)) byGroup.set(key, []);
+    byGroup.get(key).push(item);
+  });
+  return [...byGroup.entries()].map(([name, stocks]) => {
+    const valid = stocks.filter(s => !s.error);
+    const avgChange = valid.length ? compactNumber(valid.reduce((sum, s) => sum + Number(s.percentChange || 0), 0) / valid.length) : 0;
+    const upCount = valid.filter(s => Number(s.percentChange || 0) > 0).length;
+    const totalVolume = valid.reduce((sum, s) => sum + (Number(s.volume) || 0), 0);
+    const totalTurnover = valid.reduce((sum, s) => sum + (Number(s.turnover) || 0), 0);
+    const capitalFlow = valid.reduce((sum, s) => sum + (Number(s.capitalFlow) || 0), 0);
+    return {
+      name,
+      capitalFlow: compactNumber(capitalFlow),
+      avgChange,
+      upRatio: valid.length ? compactNumber(upCount / valid.length) : 0,
+      totalVolume: compactNumber(totalVolume),
+      totalTurnover: compactNumber(totalTurnover),
+      stocks: stocks.sort((a, b) => Math.abs(Number(b.percentChange || 0)) - Math.abs(Number(a.percentChange || 0)))
+    };
+  }).sort((a, b) => Math.abs(Number(b.capitalFlow || 0)) - Math.abs(Number(a.capitalFlow || 0)));
+}
+
+function updateFinanceDashboardSectorContextCache(market, groups = []) {
+  const normalizedMarket = String(market || 'US').toUpperCase() === 'TW' ? 'TW' : 'US';
+  const cache = new Map();
+  groups.forEach(group => {
+    const stocks = Array.isArray(group.stocks) ? group.stocks : [];
+    stocks.forEach((stock, index) => {
+      if (!stock?.symbol) return;
+      cache.set(stock.symbol, {
+        sector: group.name,
+        rank: index + 1,
+        avgChange: group.avgChange,
+        capitalFlow: group.capitalFlow,
+        peers: stocks
+          .filter(peer => peer.symbol !== stock.symbol)
+          .slice(0, 8)
+          .map(peer => ({ symbol: peer.symbol, name: peer.name, group: peer.group }))
+      });
+    });
+  });
+  financeDashboardSectorContextCache[normalizedMarket] = cache;
+}
+
+async function getFinanceDashboard({ market = 'US' } = {}) {
+  const normalizedMarket = String(market || 'US').toUpperCase() === 'TW' ? 'TW' : 'US';
+  const keys = await financeGetKeys();
+  const warnings = [];
+
+  if (normalizedMarket === 'US' && !keys.finnhubApiKey && !keys.alphaVantageApiKey) {
+    warnings.push('美股 dashboard 需要 Finnhub 或 Alpha Vantage API Key；目前只會顯示設定提示與空資料。');
+  }
+  if (normalizedMarket === 'TW' && !keys.finmindToken) {
+    warnings.push('台股資料使用 FinMind 最新可用日資料；未設定 token 時可能受到較嚴格的流量限制。');
+  }
+
+  let quoteResults = null;
+
+  if (normalizedMarket === 'TW') {
+    quoteResults = await buildTaiwanInfoQuoteResults(keys, warnings).catch(err => {
+      warnings.push(`FinMind dynamic Taiwan dashboard failed: ${err?.message || err}`);
+      return [];
+    });
+  }
+
+  if (normalizedMarket === 'US' && (!Array.isArray(quoteResults) || !quoteResults.length)) {
+    quoteResults = await buildUsDashboardQuoteResults(keys, warnings).catch(err => {
+      warnings.push(`US dynamic dashboard failed: ${err?.message || err}`);
+      return [];
+    });
+  }
+
+  quoteResults = Array.isArray(quoteResults) ? quoteResults : [];
+  if (normalizedMarket === 'US' && !quoteResults.length) {
+    warnings.push('美股動態資料目前沒有可用報價；請稍後重試或設定 Finnhub / Alpha Vantage API key。');
+  }
+  if (normalizedMarket === 'TW' && !quoteResults.length) {
+    warnings.push('台股動態資料目前沒有可用報價；請稍後重試或設定 FinMind token。');
+  }
 
   const groups = buildFinanceDashboardGroups(quoteResults);
+  updateFinanceDashboardSectorContextCache(normalizedMarket, groups);
   const validQuoteCount = quoteResults.filter(item => !item.error && Number.isFinite(Number(item.price))).length;
   const movers = quoteResults
     .filter(item => !item.error)
@@ -3508,10 +3922,27 @@ async function getFinanceDashboard({ market = 'US' } = {}) {
     hasApiError: hasQuoteApiError,
     hasQuoteApiError,
     hasNewsApiError,
+    sectors: groups,
     groups,
     movers,
     news: newsResults,
     warnings: [...new Set(warnings)].slice(0, 8)
+  };
+}
+
+function getFinanceDashboardSectorContext(symbol, market) {
+  const normalizedMarket = String(market || 'US').toUpperCase() === 'TW' ? 'TW' : 'US';
+  const cached = financeDashboardSectorContextCache[normalizedMarket]?.get(symbol);
+  if (cached) return cached;
+  const universe = FINANCE_DASHBOARD_UNIVERSE[normalizedMarket] || [];
+  const stock = universe.find(item => item.symbol === symbol);
+  if (!stock?.group) return null;
+  return {
+    name: stock.group,
+    market: normalizedMarket,
+    peers: universe
+      .filter(item => item.group === stock.group)
+      .map(item => ({ symbol: item.symbol, name: item.name, group: item.group }))
   };
 }
 
@@ -3532,8 +3963,171 @@ async function getFinanceStockDetail({ symbol, market = 'AUTO', companyName = ''
     profile,
     fundamentals,
     news,
+    sectorContext: getFinanceDashboardSectorContext(resolved.symbol, resolved.market),
     freshness: getFinanceFreshness(quote, resolved.market)
   };
+}
+
+async function financeSearchSymbols({ query = '', market = 'US', limit = 12 } = {}) {
+  const normalizedMarket = String(market || 'US').toUpperCase() === 'TW' ? 'TW' : 'US';
+  const q = String(query || '').trim();
+  if (!q) return { market: normalizedMarket, query: q, results: [] };
+  const keys = await financeGetKeys();
+  const lower = q.toLowerCase();
+  const fallbackUniverse = (FINANCE_DASHBOARD_UNIVERSE[normalizedMarket] || [])
+    .filter(item => item.symbol.toLowerCase().includes(lower) || String(item.name || '').toLowerCase().includes(lower) || String(item.group || '').toLowerCase().includes(lower))
+    .map(item => ({
+      symbol: item.symbol,
+      displaySymbol: normalizedMarket === 'TW' ? `${item.symbol}.TW` : item.symbol,
+      name: item.name,
+      group: item.group,
+      market: normalizedMarket,
+      source: 'dashboard universe'
+    }));
+
+  if (normalizedMarket === 'US' && keys.finnhubApiKey) {
+    const data = await financeFetchJson(buildUrl(`${FINNHUB_API_URL}/search`, { q, token: keys.finnhubApiKey }));
+    if (Array.isArray(data?.result)) {
+      const apiResults = data.result
+        .filter(item => item?.symbol && !String(item.symbol).includes('.'))
+        .slice(0, Number(limit) || 12)
+        .map(item => ({
+          symbol: item.symbol,
+          displaySymbol: item.symbol,
+          name: item.description || item.displaySymbol || item.symbol,
+          group: '',
+          market: 'US',
+          source: 'Finnhub symbol search'
+        }));
+      if (apiResults.length) return { market: normalizedMarket, query: q, results: apiResults };
+    }
+  }
+
+  if (normalizedMarket === 'US' && keys.alphaVantageApiKey) {
+    const text = await financeFetchText(buildUrl(ALPHA_VANTAGE_API_URL, {
+      function: 'LISTING_STATUS',
+      apikey: keys.alphaVantageApiKey
+    }), 30000);
+    if (typeof text === 'string') {
+      const rows = parseCsvRows(text);
+      const apiResults = rows
+        .map(row => normalizeUsSymbolInfo(row, 'Alpha Vantage LISTING_STATUS'))
+        .filter(Boolean)
+        .filter(item => (
+          item.symbol.toLowerCase().includes(lower)
+          || String(item.name || '').toLowerCase().includes(lower)
+          || String(item.exchange || '').toLowerCase().includes(lower)
+        ))
+        .slice(0, Number(limit) || 12)
+        .map(item => ({
+          symbol: item.symbol,
+          displaySymbol: item.symbol,
+          name: item.name,
+          group: item.group,
+          market: 'US',
+          source: item.source
+        }));
+      if (apiResults.length) return { market: normalizedMarket, query: q, results: apiResults };
+    }
+  }
+
+  if (normalizedMarket === 'TW') {
+    const payload = await financeFetchFinMindJson({ dataset: 'TaiwanStockInfo' }, keys.finmindToken);
+    const rows = extractFinMindData(payload);
+    if (Array.isArray(rows)) {
+      const apiResults = rows
+        .filter(item => {
+          const symbolText = String(item.stock_id || '');
+          const nameText = String(item.stock_name || '').toLowerCase();
+          const industryText = String(item.industry_category || '').toLowerCase();
+          return symbolText.includes(q) || nameText.includes(lower) || industryText.includes(lower);
+        })
+        .slice(0, Number(limit) || 12)
+        .map(item => ({
+          symbol: String(item.stock_id || ''),
+          displaySymbol: `${item.stock_id}.TW`,
+          name: item.stock_name || item.stock_id,
+          group: item.industry_category || '',
+          market: 'TW',
+          source: 'FinMind TaiwanStockInfo'
+        }))
+        .filter(item => item.symbol);
+      return { market: normalizedMarket, query: q, results: apiResults.length ? apiResults : fallbackUniverse };
+    }
+  }
+
+  return { market: normalizedMarket, query: q, results: fallbackUniverse };
+}
+
+function compactFinanceSummaryInput(stock = {}, detail = {}, sectorContext = {}) {
+  const quote = detail.quote?.quote || {};
+  const profile = detail.profile?.profile || {};
+  const fundamentals = detail.fundamentals?.fundamentals || {};
+  const news = (detail.news?.news || []).slice(0, 5).map(item => ({
+    headline: item.headline,
+    source: item.source,
+    datetime: item.datetime,
+    summary: item.summary
+  }));
+  return {
+    symbol: stock.displaySymbol || detail.displaySymbol || stock.symbol || detail.symbol,
+    name: stock.name || profile.name || '',
+    market: stock.market || detail.market,
+    sector: sectorContext.name || detail.sectorContext?.name || profile.industryCategory || profile.industry || profile.sector || stock.group || '',
+    price: quote.current ?? stock.price,
+    change: quote.change ?? stock.change,
+    percentChange: quote.percentChange ?? stock.percentChange,
+    volume: quote.volume ?? stock.volume,
+    turnover: quote.turnover ?? stock.turnover,
+    sectorContext,
+    fundamentals,
+    news
+  };
+}
+
+async function generateFinanceAiSummary({ stock = {}, detail = {}, sectorContext = {}, model = MODEL_NAME } = {}) {
+  const { apiKey, openrouterApiKey } = await chrome.storage.sync.get(['apiKey', 'openrouterApiKey']);
+  const requestedModel = model || MODEL_NAME;
+  const useOpenRouter = !!(openrouterApiKey && requestedModel !== MODEL_NAME);
+  const key = useOpenRouter ? openrouterApiKey : apiKey;
+  if (!key) throw new Error('請先在設定頁面輸入可用的 AI API Key');
+  const url = useOpenRouter ? OPENROUTER_API_URL : MINIMAX_API_URL;
+  const extraHeaders = useOpenRouter
+    ? { 'HTTP-Referer': 'chrome-extension://open-chat-hub', 'X-Title': 'Open Chat Hub' }
+    : {};
+  const summaryInput = compactFinanceSummaryInput(stock, detail, sectorContext);
+  const prompt = `你是金融研究助理。請根據下列 JSON，以繁體中文整理個股與產業重點。
+
+規則：
+- 只輸出 Markdown，不要輸出 JSON。
+- 不要給個人化投資建議。
+- 若資料不足，明確標示「資料不足」。
+- 固定使用五個小標：產業定位、股價與量能、基本面、新聞影響、風險提醒。
+- 每個小標 1-3 個短 bullet。
+
+資料：
+${JSON.stringify(summaryInput, null, 2)}`;
+
+  const response = await fetchWithTimeout(url, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json', ...extraHeaders },
+    body: JSON.stringify({
+      model: requestedModel,
+      messages: [{ role: 'user', content: prompt }]
+    })
+  }, 30000);
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err?.error?.message || err?.message || `AI summary failed: HTTP ${response.status}`);
+  }
+  const data = await response.json();
+  const text = (data.choices?.[0]?.message?.content || '').trim();
+  if (!text) throw new Error('AI summary returned empty content');
+  if (useOpenRouter && data.usage) {
+    recordOpenRouterUsage({ modelId: requestedModel, usage: data.usage, apiKey: openrouterApiKey, sessionId: 'finance-dashboard', source: 'finance_ai_summary' })
+      .catch(err => console.warn('[Usage] finance AI summary usage record failed:', err?.message || err));
+  }
+  return { text, model: requestedModel, generatedAt: new Date().toISOString() };
 }
 
 function messageLooksLikeFinanceResearch(message) {

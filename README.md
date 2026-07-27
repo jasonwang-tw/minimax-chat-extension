@@ -6,7 +6,7 @@ Open Chat Hub 是一個多模型 AI 側邊欄工作台，讓你在瀏覽器內�
 
 ## 版本
 
-**v1.40.1** (2026-06-15)
+**v1.41.0** (2026-06-17)
 
 ## 功能特色
 
@@ -147,6 +147,19 @@ npm run build:css
 - **TailwindCSS + SCSS**：樣式設計
 
 ## Changelog
+
+## [1.41.0] - 2026-06-17
+### Added
+- **LaTeX 符號 → Unicode**：`renderMarkdown` 新增 `LATEX_SYMBOL_MAP` 與 `replaceLatexSymbols`，把模型回覆中常見 `$\rightarrow$`、`$\downarrow$`、`$\uparrow$`、`$\to$`、`$\pm$`、`$\le$`、`$\alpha$` 等 LaTeX 命令轉成對應 Unicode 字元（→ ↓ ↑ ± ≤ α …），避免畫面出現 `$\rightarrow$` 原文。
+- **比較模式存入對話歷史**：`handleCompareSend` 全部 card 完成後，把各模型回覆寫入 `currentSession.messages`（新增 `role: 'compare'` 訊息與 `entries` 陣列），呼叫 `saveCurrentSession + loadHistory`；`loadSession` 偵測到 `role === 'compare'` 會以 `renderSavedCompareMessage` 重建比較 card 結構（含 model 名稱、status、回覆內容、agent 通知、搜尋紀錄）。
+- **比較模式 TOC 顯示 model 名稱**：`buildCompareCard` 把 model 名稱從 `<span>` 改為 `<h1 class="compare-card-name">`，自然進入 `buildToc('h1,h2,h3,h4')` 結果並以 toc-h1 顯示為最頂層；同時 `buildToc` 對 `.compare-card-body` 內部的 AI 標題自動 `+1` 階（上限 h4），讓 model 名稱成為父節點、AI 標題作為子節點，避免兩者擠在同層。
+- **比較模式支援 Tool Use / Agent Loop**：每張 compare card 各自跑 agent loop，依當前思考深度設定執行 `maxAgentIterations` 輪。`handleCompareSend` 的 per-card port listener 新增 `status` / `agent_thinking` / `tool_start` / `tool_done` / `agent_notice` 處理；card header status span 即時顯示「第 N/M 輪 · 搜尋網路：query」；完成時把每張 card 各自的 `searchLog` / `notices` 渲染為 `buildSearchHistoryEl` / `buildAgentNoticeEl`，並寫入 entry，重新載入 session 時也能重建。
+### Changed
+- 比較模式提示文字由「比較模式（純文字，N 個模型）— 回覆僅顯示，不會存入此對話歷史」改為「比較模式（N 個模型）」，因為現在已存入歷史。
+- `historyForApi` 建構時新增 `filter(m => m.role === 'user' || m.role === 'assistant')`，避免 `role: 'compare'` 被當成有效 API 角色送出。
+- `.compare-card-name` CSS 補上 `margin/padding/font-size/line-height/border` 覆寫，讓 `<h1>` 標籤視覺仍與原本 `<span>` 一致。
+- 比較模式 `sessionId` 附加 `__cmp__<modelId>` 後綴，避免多個 card 共用同一個 `agentBrowserSessions` 條目（會搶同一個瀏覽器分頁）。plan 模式在 compare 內維持關閉，避免每個 card 都跳出計畫批准。
+- `#modelPickerBtn` 改為彈性寬度：`#modelPickerLabel` 加 `overflow:hidden; text-overflow:ellipsis`，`.input-right-group` / `.picker-group` / `.picker-zone-normal` 全部補上 `min-width:0; flex:0 1 auto`，讓底部 picker 在模型名稱過長時可省略截斷，發送按鈕（`.btn-send` 維持 `flex-shrink:0`）不會被擠出輸入框。
 
 ## [1.40.1] - 2026-06-15
 ### Changed

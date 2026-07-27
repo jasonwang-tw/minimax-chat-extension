@@ -474,22 +474,34 @@
         <div class="market-toolbar">
           <button class="market-tab active" data-market="US">美股</button>
           <button class="market-tab" data-market="TW">台股</button>
+          <div class="market-search">
+            <svg class="market-search-icon" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+            <input id="marketSearchInput" class="market-search-input" type="search" placeholder="搜尋美股 / 台股">
+            <button id="marketSearchBtn" class="market-search-btn" type="button">搜尋</button>
+          </div>
           <span id="marketFreshness" class="market-freshness">尚未載入</span>
         </div>
         <div id="marketWarnings" class="market-warnings hidden"></div>
+        <div id="marketSearchResults" class="market-search-results hidden"></div>
         <div class="market-grid">
           <section class="market-section market-heatmap-section">
             <div class="market-section-header">
-              <h4>熱力圖</h4>
-              <span>顏色代表漲跌，大小代表量能 proxy</span>
+              <h4>產業資金流</h4>
+              <span id="marketHeatmapUnit">單位：美元</span>
             </div>
             <div id="marketHeatmap" class="market-heatmap"></div>
           </section>
           <div class="market-side-column">
           <section class="market-section market-groups-section">
             <div class="market-section-header">
-              <h4>熱門族群</h4>
-              <span>平均漲跌 / 上漲比例</span>
+              <h4 id="marketSectorTitle">產業列表</h4>
+              <select id="marketStockSort" class="market-sort-select" title="排序">
+                <option value="capitalFlow">資金流</option>
+                <option value="percentChange">漲跌幅</option>
+                <option value="volume">成交量/值</option>
+                <option value="price">股價</option>
+                <option value="name">名稱</option>
+              </select>
             </div>
             <div id="marketGroups" class="market-list"></div>
           </section>
