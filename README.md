@@ -17,7 +17,7 @@ Open Chat Hub 是一個多模型 AI 側邊欄工作台，讓你在瀏覽器內�
 
 ### 截圖 / 圖片 / 檔案分析
 - 全頁截圖、區域截圖與圖片上傳。
-- OCR 文字辨識與圖片內容分析。
+- OCR 文字辨識與圖片內容分析；優先使用目前選取且支援圖片輸入的 OpenRouter vision model，Gemini 為不支援時的備援。
 - 支援 PDF、圖片、文字、Markdown、CSV、JSON、程式碼等檔案輸入。
 - 文字型 PDF 優先使用 OpenRouter PDF Inputs，圖片型或掃描型 PDF 維持 Gemini 視覺分析。
 
@@ -67,7 +67,7 @@ Open Chat Hub 是一個多模型 AI 側邊欄工作台，讓你在瀏覽器內�
 
 1. 點擊擴充圖示，進入設定頁面
 2. 輸入 MiniMax API Key，或設定 OpenRouter API Key 與自訂模型
-3. 如需截圖、圖片、OCR 或掃描型 PDF 分析，輸入 Gemini API Key
+3. 如需截圖、圖片或 OCR，可選擇支援圖片輸入的 OpenRouter vision model；若目前模型不支援圖片輸入，才需輸入 Gemini API Key 作為備援。掃描型 PDF 分析仍需要 Gemini API Key。
 4. 如需 Agent 搜尋，輸入 Brave Search 或 Exa Search API Key
 5. 點擊對應的「測試連線」確認 API 可用
 6. 儲存設定後即可開始使用

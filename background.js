@@ -1367,10 +1367,9 @@ async function streamHandleMessage({ message, history, images, image, mode, tran
     const pdfFiles = visualFiles.filter(f => f.fileType === 'pdf');
     const pdfRoute = classifyPdfRoute(pdfFiles);
     const isOcrMode = visualFiles.length > 0 && visualFiles.every(file => file.mode === 'ocr');
-    const { openrouterApiKey } = await chrome.storage.sync.get(['openrouterApiKey']);
+    const { openrouterApiKey, geminiApiKey } = await chrome.storage.sync.get(['openrouterApiKey', 'geminiApiKey']);
     const useOpenRouterVision = imageFiles.length > 0
       && pdfFiles.length === 0
-      && !isOcrMode
       && await supportsOpenRouterImageInput(model || MODEL_NAME, openrouterApiKey);
     const routeDetails = describeVisualRoute(imageFiles, pdfFiles, pdfRoute, model, useOpenRouterVision, isOcrMode);
     port.postMessage({
@@ -1381,9 +1380,10 @@ async function streamHandleMessage({ message, history, images, image, mode, tran
 
     if (useOpenRouterVision) {
       try {
-        await streamOpenRouterImageChat(message, history, textFiles, imageFiles, translateConfig, model, planPrompt, memoryContext, port, sessionId, contextCharBudget);
+        await streamOpenRouterImageChat(message, history, textFiles, imageFiles, translateConfig, model, planPrompt, memoryContext, port, sessionId, contextCharBudget, isOcrMode);
         return;
       } catch (err) {
+        if (!geminiApiKey) throw err;
         port.postMessage({
           type: 'agent_notice',
           text: `OpenRouter 圖片輸入不可用，已改用 Gemini 視覺分析。模型：${model || MODEL_NAME}。錯誤：${err.message}`,
@@ -1426,8 +1426,13 @@ async function streamHandleMessage({ message, history, images, image, mode, tran
     }
     const combinedMessage = `${message || ''}${textAppend}`.trim();
 
-    const { geminiApiKey, defaultPrompts } = await chrome.storage.sync.get(['geminiApiKey', 'defaultPrompts']);
-    if (!geminiApiKey) throw new Error('請先在設定頁面輸入 Gemini API Key');
+    const { defaultPrompts } = await chrome.storage.sync.get(['defaultPrompts']);
+    if (!geminiApiKey) {
+      if (imageFiles.length > 0 && pdfFiles.length === 0) {
+        throw new Error(`目前模型「${model || MODEL_NAME}」不支援直接圖片輸入；請改用支援圖片輸入的 OpenRouter vision model，或在設定頁面輸入 Gemini API Key 作為備援。`);
+      }
+      throw new Error('請先在設定頁面輸入 Gemini API Key');
+    }
 
     const prompts = { ...DEFAULT_PROMPTS, ...(defaultPrompts || {}) };
     const isOcr = visualFiles.every(img => img.mode === 'ocr');
@@ -1593,7 +1598,9 @@ function describeVisualRoute(imageFiles, pdfFiles, pdfRoute, model, useOpenRoute
 
   if (isOcrMode) {
     const totalCount = imageCount + pdfCount;
-    return `分析方式：OCR 模式使用 Gemini 文字辨識，直接輸出辨識結果，不再交給聊天模型二次分析。視覺檔案 ${totalCount} 個。`;
+    return useOpenRouterVision
+      ? `分析方式：OCR 模式使用 OpenRouter vision model 直接辨識文字，直接輸出辨識結果。模型 ${requestedModel}，視覺檔案 ${totalCount} 個。`
+      : `分析方式：OCR 模式使用 Gemini 文字辨識，直接輸出辨識結果，不再交給聊天模型二次分析。視覺檔案 ${totalCount} 個。`;
   }
 
   if (imageCount > 0 && pdfCount > 0) {
@@ -1680,7 +1687,7 @@ async function streamOpenRouterPdfChat(message, history, textFiles, pdfFiles, tr
   }
 }
 
-async function streamOpenRouterImageChat(message, history, textFiles, imageFiles, translateConfig, model, systemPrompt, memoryContext, port, sessionId, contextCharBudget) {
+async function streamOpenRouterImageChat(message, history, textFiles, imageFiles, translateConfig, model, systemPrompt, memoryContext, port, sessionId, contextCharBudget, ocrMode = false) {
   const { defaultPrompts, globalPrompt: storedGlobal, openrouterApiKey } =
     await chrome.storage.sync.get(['defaultPrompts', 'globalPrompt', 'openrouterApiKey']);
 
@@ -1689,7 +1696,12 @@ async function streamOpenRouterImageChat(message, history, textFiles, imageFiles
     throw new Error('請先選擇支援 image input 的 OpenRouter 模型並設定 OpenRouter API Key');
   }
 
-  port.postMessage({ type: 'status', text: `使用 OpenRouter vision model 分析圖片中...（${formatFileNames(imageFiles)}）` });
+  port.postMessage({
+    type: 'status',
+    text: ocrMode
+      ? `使用 OpenRouter vision model 辨識文字中...（${formatFileNames(imageFiles)}）`
+      : `使用 OpenRouter vision model 分析圖片中...（${formatFileNames(imageFiles)}）`
+  });
 
   const globalPrompt = storedGlobal?.trim() || '';
   const chatDefaultPrompt = defaultPrompts?.chat?.trim() || '';
@@ -1697,11 +1709,23 @@ async function streamOpenRouterImageChat(message, history, textFiles, imageFiles
   if (chatDefaultPrompt && systemPrompt) modePrompt = `${chatDefaultPrompt}\n\n${systemPrompt}`;
   else if (chatDefaultPrompt) modePrompt = chatDefaultPrompt;
   else if (systemPrompt) modePrompt = systemPrompt;
-  const finalSystemPrompt = [memoryContext, globalPrompt, modePrompt].filter(Boolean).join('\n\n');
+  const finalSystemPrompt = ocrMode
+    ? buildOcrPrompt(defaultPrompts?.ocr)
+    : [memoryContext, globalPrompt, modePrompt].filter(Boolean).join('\n\n');
 
   const textAppend = buildTextFilesAppend(textFiles);
-  const userText = `${message || '請分析這張圖片。'}${textAppend}`.trim();
-  const messages = buildImageInputMessages(userText, history || [], translateConfig, finalSystemPrompt, globalPrompt, imageFiles, contextCharBudget);
+  const userText = ocrMode
+    ? '請辨識附件圖片中的文字。'
+    : `${message || '請分析這張圖片。'}${textAppend}`.trim();
+  const messages = buildImageInputMessages(
+    userText,
+    history || [],
+    ocrMode ? null : translateConfig,
+    finalSystemPrompt,
+    ocrMode ? '' : globalPrompt,
+    imageFiles,
+    contextCharBudget
+  );
 
   const response = await fetchWithTimeout(OPENROUTER_API_URL, {
     method: 'POST',

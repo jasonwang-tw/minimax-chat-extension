@@ -2504,7 +2504,7 @@ let currentAudioSrc = null;  // Web Audio API BufferSource
       regionScreenshotBtn.disabled = true;
       ocrBtn.disabled = true;
       if (currentImages.length > 0) {
-        setStatus('目前模型不支援直接圖片輸入，請先設定 Gemini API Key 才能分析圖片', true);
+        setStatus('目前模型不支援直接圖片輸入，請改用 OpenRouter vision model 或設定 Gemini API Key 作為備援', true);
       }
     } else {
       if (hasActiveChatKey) {
