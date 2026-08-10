@@ -85,16 +85,119 @@ function calculateOpenRouterCost(usage, pricing) {
   return { inputCostUsd, outputCostUsd, requestCostUsd, totalCostUsd };
 }
 
-function extractApiErrorMessage(errorData, fallbackStatus) {
-  const error = errorData?.error;
-  const nested = error?.metadata?.raw || error?.metadata?.message || error?.details || error?.cause;
-  if (typeof nested === 'string' && nested.trim()) return nested.trim();
-  if (typeof error?.message === 'string' && error.message.trim()) return error.message.trim();
-  if (typeof errorData?.base_resp?.status_msg === 'string' && errorData.base_resp.status_msg.trim()) {
-    return errorData.base_resp.status_msg.trim();
+function parseEmbeddedError(value) {
+  if (typeof value !== 'string') return value;
+  let current = value.trim();
+  for (let i = 0; i < 3; i++) {
+    if (!current || !/^[{[]/.test(current)) return current;
+    try {
+      const parsed = JSON.parse(current);
+      if (typeof parsed === 'string') {
+        current = parsed.trim();
+        continue;
+      }
+      return parsed;
+    } catch {
+      return current;
+    }
   }
-  if (typeof errorData?.message === 'string' && errorData.message.trim()) return errorData.message.trim();
+  return current;
+}
+
+function readApiErrorMessage(value, depth = 0) {
+  if (depth > 3 || value === null || value === undefined) return '';
+  const parsed = parseEmbeddedError(value);
+  if (typeof parsed === 'string') return parsed.trim();
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return '';
+
+  const error = parsed.error;
+  const candidates = [
+    error?.metadata?.raw,
+    error?.metadata?.message,
+    error?.cause,
+    error?.message,
+    typeof error === 'string' ? error : null,
+    parsed.base_resp?.status_msg,
+    parsed.message,
+    parsed.status_msg
+  ];
+  for (const candidate of candidates) {
+    const message = readApiErrorMessage(candidate, depth + 1);
+    if (message) return message;
+  }
+  return '';
+}
+
+function extractApiErrorMessage(errorData, fallbackStatus) {
+  const message = readApiErrorMessage(errorData);
+  if (message) return message;
   return fallbackStatus ? `API 錯誤: ${fallbackStatus}` : 'API 錯誤';
+}
+
+function getProviderErrorDetails(rawMsg, statusCode, retryAfter) {
+  const parsed = parseEmbeddedError(rawMsg);
+  const serialized = typeof parsed === 'string' ? parsed : JSON.stringify(parsed || '');
+  const text = [String(rawMsg || ''), serialized, String(retryAfter || '')]
+    .filter(Boolean)
+    .join('\n');
+  const statusMatch = text.match(/(?:["']?(?:code|status_code)["']?\s*:\s*["']?)(\d{3})/i);
+  const parsedStatus = Number(statusCode);
+  const status = Number.isFinite(parsedStatus) && parsedStatus > 0
+    ? parsedStatus
+    : statusMatch
+      ? Number(statusMatch[1])
+      : null;
+  const retryDelayMatch = text.match(/["']retryDelay["']\s*:\s*["'](\d+(?:\.\d+)?)s["']/i)
+    || text.match(/retry(?:\s+again)?\s+(?:in|after)\s+(\d+(?:\.\d+)?)\s*s/i);
+  const retryAfterMatch = String(retryAfter || '').trim().match(/^(\d+(?:\.\d+)?)$/);
+  const retryValue = retryDelayMatch?.[1] || retryAfterMatch?.[1];
+  const retryDelaySeconds = retryValue ? Math.max(1, Math.ceil(Number(retryValue))) : null;
+  const modelMatch = text.match(/["']model["']\s*:\s*["']([^"']+)["']/i)
+    || text.match(/\bmodel\s*:\s*([A-Za-z0-9._:/-]+)/i);
+  const quotaMatch = text.match(/["']quotaValue["']\s*:\s*["']?([\d,]+)/i)
+    || text.match(/\blimit\s*:\s*([\d,]+)/i);
+  const isGoogleQuota = /generativelanguage\.googleapis\.com|free_tier_input_token_count|quota(?:failure| exceeded)/i.test(text);
+  const isRateLimit = status === 429
+    || isGoogleQuota
+    || /resource_exhausted|rate[-_ ]?limit|rate[-_ ]?limited|too many requests?|exceeded your current quota/i.test(text);
+
+  return {
+    text,
+    status,
+    isGoogleQuota,
+    isRateLimit,
+    model: (modelMatch?.[1] || '').replace(/[.,;:]+$/, ''),
+    quotaValue: quotaMatch?.[1] || '',
+    retryDelaySeconds: Number.isFinite(retryDelaySeconds) ? retryDelaySeconds : null
+  };
+}
+
+function buildRateLimitFriendlyMessage(details, provider, modelId) {
+  const model = details.model || modelId || '目前模型';
+  const quotaText = details.quotaValue
+    ? `（配額上限 ${Number(details.quotaValue.replace(/,/g, '')).toLocaleString()} input tokens）`
+    : '';
+  const retryText = details.retryDelaySeconds
+    ? `請約 ${details.retryDelaySeconds} 秒後再試`
+    : '請稍後再試';
+
+  if (details.isGoogleQuota) {
+    return `Google 上游模型「${model}」的免費輸入 token 配額已達上限${quotaText}。${retryText}；若仍失敗，請縮短對話內容、切換其他 OpenRouter 模型，或到 Google AI Studio 查看/提升配額。`;
+  }
+  if (provider === 'gemini') {
+    return `Gemini 模型「${model}」目前受到速率限制（429）。${retryText}，也可以改用其他支援圖片輸入的 OpenRouter vision model。`;
+  }
+  return `OpenRouter 模型「${model}」目前受到速率限制（429）。${retryText}，或在設定頁啟用其他免費模型作為 fallback。`;
+}
+
+function classifyGeminiError(rawMsg, statusCode, modelId, retryAfter) {
+  const details = getProviderErrorDetails(rawMsg, statusCode, retryAfter);
+  if (!details.isRateLimit) return null;
+  return {
+    kind: 'rate_limit',
+    retryAfterSeconds: details.retryDelaySeconds,
+    friendly: buildRateLimitFriendlyMessage(details, 'gemini', modelId)
+  };
 }
 
 async function fetchWithTimeout(url, options = {}, timeoutMs = AGENT_REQUEST_TIMEOUT_MS) {
@@ -278,14 +381,18 @@ function buildOpenRouterFreeFallback(primaryModelId, customModels, pricingMap) {
   return result;
 }
 
-function classifyOpenRouterError(rawMsg, statusCode) {
-  const msg = String(rawMsg || '').toLowerCase();
-  const status = Number(statusCode);
-  if (status === 402 || msg.includes('insufficient credits') || msg.includes('not enough credit')) {
+function classifyOpenRouterError(rawMsg, statusCode, modelId, retryAfter) {
+  const details = getProviderErrorDetails(rawMsg, statusCode, retryAfter);
+  const msg = details.text.toLowerCase();
+  if (details.status === 402 || msg.includes('insufficient credits') || msg.includes('not enough credit')) {
     return { kind: 'credits', friendly: 'OpenRouter 餘額不足或免費額度已用盡，請至 OpenRouter 帳戶確認後再試。' };
   }
-  if (status === 429 || msg.includes('rate limit') || msg.includes('rate-limited') || msg.includes('too many request')) {
-    return { kind: 'rate_limit', friendly: '免費模型已達速率上限（429）。稍後再試，或在設定頁啟用其他免費模型作為 fallback。' };
+  if (details.isRateLimit) {
+    return {
+      kind: 'rate_limit',
+      retryAfterSeconds: details.retryDelaySeconds,
+      friendly: buildRateLimitFriendlyMessage(details, 'openrouter', modelId)
+    };
   }
   if (msg.includes('temporarily unavailable') || msg.includes('temporarily rate-limited upstream')) {
     return { kind: 'upstream', friendly: '免費模型上游暫時不可用。請稍後再試，或啟用其他免費模型分散風險。' };
@@ -1995,12 +2102,13 @@ async function streamMiniMaxChat(message, history, translateConfig, model, syste
     const rawMsg = extractApiErrorMessage(errorData, response.status);
     console.error(`[Stream] HTTP 錯誤 ${response.status}:`, rawMsg);
     if (useOpenRouter) {
-      const classified = classifyOpenRouterError(rawMsg, response.status);
+      const classified = classifyOpenRouterError(rawMsg, response.status, useModel, response.headers.get('Retry-After'));
       if (classified) {
         const fallbackInfo = freeFallbackModels.length > 0
           ? `（已嘗試 fallback：${freeFallbackModels.join(', ')}）`
           : '（目前沒有其他啟用的免費模型可作為 fallback）';
-        throw new Error(`${classified.friendly}\n模型：${useModel} ${fallbackInfo}\n原始訊息：${rawMsg}`);
+        const rawInfo = classified.kind === 'rate_limit' ? '' : `\n原始訊息：${String(rawMsg).slice(0, 500)}`;
+        throw new Error(`${classified.friendly}\n模型：${useModel} ${fallbackInfo}${rawInfo}`);
       }
     }
     if (rawMsg.toLowerCase().includes('context window')) {
@@ -2017,6 +2125,7 @@ async function streamMiniMaxChat(message, history, translateConfig, model, syste
   let outputAttachments = [];
   let lastFinishReason = null;
   let streamError = null;
+  let streamErrorCode = null;
 
   try {
     while (true) {
@@ -2035,9 +2144,11 @@ async function streamMiniMaxChat(message, history, translateConfig, model, syste
           // 擷取 API 層級錯誤（mid-stream error）
           if (json.error) {
             const errCode = json.error.code || json.error.status_code || '';
-            const errMsg = json.error.message || JSON.stringify(json.error);
+            const rawErrMsg = json.error.message || JSON.stringify(json.error);
+            const errMsg = extractApiErrorMessage({ error: json.error }, errCode) || rawErrMsg;
             console.error(`[Stream] API mid-stream error code=${errCode}:`, errMsg);
             streamError = errMsg;
+            streamErrorCode = errCode;
           }
           if (useOpenRouter) {
             const deltaAttachments = extractImageOutputAttachments(json, fullContent);
@@ -2078,12 +2189,22 @@ async function streamMiniMaxChat(message, history, translateConfig, model, syste
   }
 
   if (!cleaned && !fullContent && outputAttachments.length === 0) {
+    if (streamError && useOpenRouter) {
+      const classified = classifyOpenRouterError(streamError, streamErrorCode, useModel);
+      if (classified) {
+        const fallbackInfo = freeFallbackModels.length > 0
+          ? `（已嘗試 fallback：${freeFallbackModels.join(', ')}）`
+          : '（目前沒有其他啟用的免費模型可作為 fallback）';
+        throw new Error(`${classified.friendly}\n模型：${useModel} ${fallbackInfo}`);
+      }
+    }
     const reason = streamError
       ? `API 錯誤：${streamError}`
       : lastFinishReason === 'length'
         ? '對話歷史過長，模型在回覆前即達 token 上限。請點擊「+」開啟新對話。'
         : '模型回傳空內容，可能為暫時性錯誤，請稍後重試。';
-    const debugLine = `[Debug] model=${useModel} msgs=${messages.length} finish=${lastFinishReason ?? 'none'} err=${streamError ?? 'none'}`;
+    const debugError = String(streamError || 'none').replace(/\s+/g, ' ').slice(0, 400);
+    const debugLine = `[Debug] model=${useModel} msgs=${messages.length} finish=${lastFinishReason ?? 'none'} err=${debugError}`;
     console.error(`[Stream] 空回應 ${debugLine}`);
     throw new Error(`${reason}\n${debugLine}`);
   }
@@ -5787,10 +5908,15 @@ async function callGemini(geminiApiKey, images, prompt) {
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));
     console.error('Gemini 錯誤回應:', errorData);
-    if (errorData.error?.message) {
-      throw new Error(errorData.error.message);
-    }
-    throw new Error(`Gemini API 錯誤: ${response.status}`);
+    const rawMsg = extractApiErrorMessage(errorData, response.status);
+    const classified = classifyGeminiError(
+      rawMsg,
+      response.status,
+      '',
+      response.headers.get('Retry-After')
+    );
+    if (classified) throw new Error(classified.friendly);
+    throw new Error(rawMsg);
   }
 
   const data = await response.json();
